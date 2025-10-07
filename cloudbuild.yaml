@@ -2,7 +2,8 @@
 # 목적: GitHub에서 푸시될 때 Cloud Build가 이미지를 빌드하여 GCR에 올리고 Cloud Run에 배포합니다.
 # 사용법: 이 파일을 repo 루트에 저장(cloudbuild.yaml). 트리거는 "cloudbuild.yaml 사용"으로 설정.
 # 필요시 _REPO_NAME / _SERVICE / _REGION 값을 바꿔주세요.
-
+options:
+  logging: CLOUD_LOGGING_ONLY
 substitutions:
   _REPO_NAME: "quali-journal"
   _SERVICE: "quali-journal"
