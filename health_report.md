@@ -1,0 +1,1 @@
+===== SUMMARY =====\n[PASS] 1. config.json  schema\n[PASS] 2. community/official 소스\n[PASS] 3. orchestrator & run 스크립트\n[PASS] 4. tools 중복/역할\n[PASS] 5. admin/index.html  server_quali.py\n[PASS] 6. selected_* 무결성\n[PASS] 7. archive 파일명 규칙\n[PASS] 8. requirements 의존성\n[FAIL] 9. 경로/모듈 호출 체계\nReport written to 'health_report.md' (in repo or current directory).

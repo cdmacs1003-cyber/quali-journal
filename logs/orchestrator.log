@@ -1,0 +1,149 @@
+2025-10-07 13:26:10,061 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 13:26:13,196 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 13:26:31,596 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 13:26:34,703 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 13:34:44,185 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 13:58:37,878 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 15:43:41,837 [INFO] fallback logger initialized
+2025-10-07 15:43:41,839 [INFO] orchestrator start args: --collect-community
+2025-10-07 15:45:10,284 [INFO] fallback logger initialized
+2025-10-07 15:45:10,286 [INFO] orchestrator start args: --approve-ui
+2025-10-07 15:52:46,932 [INFO] fallback logger initialized
+2025-10-07 15:52:46,934 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 15:52:47,982 [INFO] fallback logger initialized
+2025-10-07 15:52:47,984 [INFO] orchestrator start args: --collect-keyword IPC-A-610
+2025-10-07 15:52:48,982 [INFO] fallback logger initialized
+2025-10-07 15:52:48,985 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 15:52:49,002 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 15:52:50,067 [INFO] fallback logger initialized
+2025-10-07 15:52:50,070 [INFO] orchestrator start args: --publish --format all
+2025-10-07 15:55:48,946 [INFO] fallback logger initialized
+2025-10-07 15:55:48,948 [INFO] orchestrator start args: --collect-community
+2025-10-07 15:57:19,196 [INFO] fallback logger initialized
+2025-10-07 15:57:19,198 [INFO] orchestrator start args: --approve-ui
+2025-10-07 15:58:32,741 [INFO] fallback logger initialized
+2025-10-07 15:58:32,743 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 15:58:45,988 [INFO] fallback logger initialized
+2025-10-07 15:58:45,990 [INFO] orchestrator start args: --collect-keyword IPC-A-610
+2025-10-07 15:58:47,067 [INFO] fallback logger initialized
+2025-10-07 15:58:47,070 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 15:58:47,084 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 15:58:58,267 [INFO] fallback logger initialized
+2025-10-07 15:58:58,269 [INFO] orchestrator start args: --publish --format all
+2025-10-07 16:01:20,342 [INFO] fallback logger initialized
+2025-10-07 16:01:20,345 [INFO] orchestrator start args: --collect-community
+2025-10-07 16:03:01,963 [INFO] fallback logger initialized
+2025-10-07 16:03:01,965 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 16:03:44,155 [INFO] fallback logger initialized
+2025-10-07 16:03:44,157 [INFO] orchestrator start args: --collect-keyword IPC-A-610
+2025-10-07 16:03:45,232 [INFO] fallback logger initialized
+2025-10-07 16:03:45,235 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 16:03:45,249 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 16:04:30,607 [INFO] fallback logger initialized
+2025-10-07 16:04:30,609 [INFO] orchestrator start args: --publish --format all
+2025-10-07 16:04:50,274 [INFO] fallback logger initialized
+2025-10-07 16:04:50,277 [INFO] orchestrator start args: --approve-ui
+2025-10-07 16:14:22,960 [INFO] fallback logger initialized
+2025-10-07 16:14:22,963 [INFO] orchestrator start args: --approve-keyword IPC-A-610 --approve-keyword-top 15
+2025-10-07 16:14:23,991 [INFO] fallback logger initialized
+2025-10-07 16:14:23,993 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 16:14:23,994 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 16:18:01,690 [INFO] fallback logger initialized
+2025-10-07 16:18:01,693 [INFO] orchestrator start args: --approve-keyword IPC-A-610 --approve-keyword-top 15
+2025-10-07 16:18:02,823 [INFO] fallback logger initialized
+2025-10-07 16:18:02,825 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 16:18:02,826 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 16:20:31,868 [INFO] fallback logger initialized
+2025-10-07 16:20:31,871 [INFO] orchestrator start args: --approve-ui
+2025-10-07 16:24:28,235 [INFO] fallback logger initialized
+2025-10-07 16:24:28,237 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 16:27:22,539 [INFO] fallback logger initialized
+2025-10-07 16:27:22,542 [INFO] orchestrator start args: --approve-ui
+2025-10-07 16:27:37,832 [INFO] fallback logger initialized
+2025-10-07 16:27:37,834 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 16:28:04,394 [INFO] fallback logger initialized
+2025-10-07 16:28:04,397 [INFO] orchestrator start args: --approve-ui
+2025-10-07 16:29:44,594 [INFO] fallback logger initialized
+2025-10-07 16:29:44,597 [INFO] orchestrator start args: --collect-community
+2025-10-07 16:30:46,263 [INFO] fallback logger initialized
+2025-10-07 16:30:46,265 [INFO] orchestrator start args: --collect-community
+2025-10-07 16:31:24,212 [INFO] fallback logger initialized
+2025-10-07 16:31:24,214 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 16:35:39,168 [INFO] fallback logger initialized
+2025-10-07 16:35:39,170 [INFO] orchestrator start args: --collect-community
+2025-10-07 16:35:43,697 [INFO] fallback logger initialized
+2025-10-07 16:35:43,700 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 16:35:44,821 [INFO] fallback logger initialized
+2025-10-07 16:35:44,824 [INFO] orchestrator start args: --collect-keyword IPC-A-610
+2025-10-07 16:35:45,866 [INFO] fallback logger initialized
+2025-10-07 16:35:45,868 [INFO] orchestrator start args: --approve-keyword IPC-A-610 --approve-keyword-top 15
+2025-10-07 16:35:46,935 [INFO] fallback logger initialized
+2025-10-07 16:35:46,937 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 16:35:46,951 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 16:35:47,971 [INFO] fallback logger initialized
+2025-10-07 16:35:47,973 [INFO] orchestrator start args: --publish --format all
+2025-10-07 16:42:21,774 [INFO] fallback logger initialized
+2025-10-07 16:42:21,776 [INFO] orchestrator start args: --collect-community
+2025-10-07 16:44:29,853 [INFO] fallback logger initialized
+2025-10-07 16:44:29,855 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 16:44:30,851 [INFO] fallback logger initialized
+2025-10-07 16:44:30,854 [INFO] orchestrator start args: --collect-keyword IPC-A-610
+2025-10-07 16:44:31,838 [INFO] fallback logger initialized
+2025-10-07 16:44:31,840 [INFO] orchestrator start args: --approve-keyword IPC-A-610 --approve-keyword-top 15
+2025-10-07 16:44:32,813 [INFO] fallback logger initialized
+2025-10-07 16:44:32,816 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 16:44:32,830 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 16:44:33,856 [INFO] fallback logger initialized
+2025-10-07 16:44:33,858 [INFO] orchestrator start args: --publish --format all
+2025-10-07 16:44:35,159 [INFO] fallback logger initialized
+2025-10-07 16:44:35,162 [INFO] orchestrator start args: --collect-community
+2025-10-07 16:44:41,936 [INFO] fallback logger initialized
+2025-10-07 16:44:41,938 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 16:44:42,918 [INFO] fallback logger initialized
+2025-10-07 16:44:42,920 [INFO] orchestrator start args: --collect-keyword IPC-A-610
+2025-10-07 16:44:43,901 [INFO] fallback logger initialized
+2025-10-07 16:44:43,904 [INFO] orchestrator start args: --approve-keyword IPC-A-610 --approve-keyword-top 15
+2025-10-07 16:44:44,889 [INFO] fallback logger initialized
+2025-10-07 16:44:44,892 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 16:44:44,905 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 16:44:45,888 [INFO] fallback logger initialized
+2025-10-07 16:44:45,891 [INFO] orchestrator start args: --publish --format all
+2025-10-07 17:11:50,912 [INFO] fallback logger initialized
+2025-10-07 17:11:50,914 [INFO] orchestrator start args: --collect-community
+2025-10-07 17:13:23,851 [INFO] fallback logger initialized
+2025-10-07 17:13:23,854 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 17:13:24,876 [INFO] fallback logger initialized
+2025-10-07 17:13:24,878 [INFO] orchestrator start args: --collect-keyword IPC-A-610
+2025-10-07 17:13:25,943 [INFO] fallback logger initialized
+2025-10-07 17:13:25,946 [INFO] orchestrator start args: --approve-keyword IPC-A-610 --approve-keyword-top 15
+2025-10-07 17:13:27,026 [INFO] fallback logger initialized
+2025-10-07 17:13:27,029 [INFO] orchestrator start args: --publish-keyword IPC-A-610
+2025-10-07 17:13:27,044 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 17:13:28,047 [INFO] fallback logger initialized
+2025-10-07 17:13:28,049 [INFO] orchestrator start args: --collect-keyword SMT
+2025-10-07 17:13:29,053 [INFO] fallback logger initialized
+2025-10-07 17:13:29,055 [INFO] orchestrator start args: --approve-keyword SMT --approve-keyword-top 15
+2025-10-07 17:13:30,060 [INFO] fallback logger initialized
+2025-10-07 17:13:30,062 [INFO] orchestrator start args: --publish-keyword SMT
+2025-10-07 17:13:30,074 [WARNING] approved 3 (<15). 발행은 계속 진행합니다.
+2025-10-07 17:13:31,051 [INFO] fallback logger initialized
+2025-10-07 17:13:31,053 [INFO] orchestrator start args: --collect-keyword J-STD-001
+2025-10-07 17:13:32,068 [INFO] fallback logger initialized
+2025-10-07 17:13:32,070 [INFO] orchestrator start args: --approve-keyword J-STD-001 --approve-keyword-top 15
+2025-10-07 17:13:33,096 [INFO] fallback logger initialized
+2025-10-07 17:13:33,098 [INFO] orchestrator start args: --publish-keyword J-STD-001
+2025-10-07 17:13:33,113 [WARNING] approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-07 17:13:34,127 [INFO] fallback logger initialized
+2025-10-07 17:13:34,129 [INFO] orchestrator start args: --publish --format all
+2025-10-07 18:09:16,303 [INFO] fallback logger initialized
+2025-10-07 18:09:16,305 [INFO] orchestrator start args: --collect-community
+2025-10-07 18:11:16,291 [INFO] fallback logger initialized
+2025-10-07 18:11:16,293 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 18:37:48,697 [INFO] fallback logger initialized
+2025-10-07 18:37:48,699 [INFO] orchestrator start args: --collect-community
+2025-10-07 18:38:22,726 [INFO] fallback logger initialized
+2025-10-07 18:38:22,727 [INFO] orchestrator start args: --collect-community
+2025-10-07 18:38:41,519 [INFO] fallback logger initialized
+2025-10-07 18:38:41,521 [INFO] orchestrator start args: --publish-community --format all
+2025-10-07 18:38:56,826 [INFO] fallback logger initialized
+2025-10-07 18:38:56,828 [INFO] orchestrator start args: --publish-community --format all

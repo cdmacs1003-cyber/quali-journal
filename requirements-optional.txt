@@ -1,0 +1,11 @@
+# QualiNews — optional dependencies
+# HTML/XML parsing alternatives & RSS helpers
+html5lib>=1.1
+feedparser>=6.0
+
+# Export/convert helpers (선택)
+weasyprint>=61.0 ; platform_system != 'Windows'  # Linux/macOS에서 HTML→PDF
+# Windows에서는 wkhtmltopdf(별도 설치 필요) 권장
+
+# Search/Index (장기 로드맵)
+elasticsearch>=8.15

@@ -1,0 +1,44 @@
+{
+  "reddit": {
+    "api": "reddit",
+    "subs": [
+      "SMT",
+      "PCB",
+      "pcbdesign",
+      "Electronics",
+      "AskEngineers",
+      "Manufacturing"
+    ],
+    "query_keywords": [
+      "IPC-A-610"
+    ],
+
+    "min_upvotes": 0,
+    "min_comments": 0,
+    "fresh_hours": 336,
+    "reddit_pages": 5
+  },
+  "forums": [
+    "https://www.eeworld.com.cn/bbs/forum-325-1.html",
+    "https://iconnect007.com/community"
+  ],
+  "filters": {
+
+    "require_keyword": false,
+
+    "min_title_len": 4,
+    "block_title_patterns": "(?i)hiring|job|promo|coupon|sale|giveaway|subscribe|newsletter",
+    "allow_domains": [
+      "iconnect007.com",
+      "ipc.org",
+      "ecss.nl",
+      "nist.gov",
+      "nasa.gov",
+      "technologyreview.com",
+      "eeworld.com.cn"
+    ]
+  },
+
+  "max_total": 300,
+  "score_threshold": 0.0
+}

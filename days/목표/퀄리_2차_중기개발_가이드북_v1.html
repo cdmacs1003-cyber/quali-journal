@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<title>퀄리저널 2차 중기 개발 가이드북 (실행판)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif; line-height:1.6; margin:32px; }
+  h1 { font-size: 24px; margin: 0 0 12px; }
+  h2 { font-size: 18px; margin: 24px 0 8px; }
+  p, li { font-size: 15px; color:#111827; }
+  .muted { color:#6b7280; font-size:13px; }
+  .box { border:1px solid #e5e7eb; border-radius:12px; padding:16px; background:#fafafa; }
+  .k { background:#111827; color:#fff; padding:6px 10px; border-radius:6px; font-size:12px; }
+  .grid { display:grid; grid-template-columns: 1fr; gap:12px; }
+  @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+  table { width:100%; border-collapse: collapse; }
+  th, td { border:1px solid #e5e7eb; padding:8px; font-size:14px; }
+  th { background:#111827; color:#fff; text-align:left; }
+  .small { font-size:12px; color:#6b7280; }
+</style>
+</head>
+<body>
+  <h1>퀄리저널 — 2차 중기 개발 가이드북 (실행판)</h1>
+  <p class="muted">기준일: 2025‑10‑06 (KST)</p>
+
+  <h2>목적</h2>
+  <ul>
+    <li>첨부된 중기 계획/패치 문서를 기준으로 현행 구현 상태를 점검합니다.</li>
+    <li>남아 있는 항목을 <span class="k">하루 실행</span> 기준으로 세분화합니다.</li>
+    <li>수용 기준(AC)과 점검 절차를 함께 제공합니다.</li>
+  </ul>
+
+  <h2>현황 스냅샷 (코드 검사 결과)</h2>
+  <div class="box">
+    <table>
+      <tr><th>항목</th><th>상태</th></tr>
+      <tr><td>/api/flow/* 동기 플로우</td><td>구현됨</td></tr>
+      <tr><td>subprocess UTF‑8 디코딩</td><td>구현됨</td></tr>
+      <tr><td>UI HAS_TASKS 폴백</td><td>구현됨</td></tr>
+      <tr><td>커뮤니티 동적 임계값</td><td>구현됨</td></tr>
+      <tr><td>/api/tasks/* (비동기 작업)</td><td>부족</td></tr>
+      <tr><td>SSE 스트림</td><td>부족</td></tr>
+      <tr><td>게이트 API (/api/config/gate_required)</td><td>부족</td></tr>
+      <tr><td>보고서·내보내기 API</td><td>부족</td></tr>
+      <tr><td>토큰 인증 / HTTPS / CORS</td><td>부족</td></tr>
+    </table>
+  </div>
+  <p class="small">참고 근거: 1006_A 공식 포함 계획(4주 로드맵) fileciteturn1file0, 중기 실행 계획(리스크·SSE 폴백) fileciteturn1file3, 주요 파일 패치 설계 fileciteturn1file4.</p>
+
+  <h2>오늘 완수 목표 (One‑Day)</h2>
+  <ol>
+    <li><b>server_quali.py</b>에 <code>/api/tasks/*</code> 구현 (TaskManager 메모리판 포함) — 작업 생성/조회/스트림/취소/최근 목록. fileciteturn1file4</li>
+    <li>SSE 스트림(<code>/api/tasks/&lbrace;job_id&rbrace;/stream</code>) + UI 폴백 유지(HAS_TASKS=true 전환). fileciteturn1file19</li>
+    <li><code>/api/config/gate_required</code> GET/PATCH로 게이트 설정을 <code>config.json</code>에 반영. fileciteturn1file0</li>
+    <li>보고서·내보내기: <code>/api/report</code>, <code>/api/export/md|csv</code> 구현, 출력은 <code>archive/reports/</code> 저장. fileciteturn1file18</li>
+    <li>간이 보안: 관리자 토큰(예: Bearer) 의존성 추가, CORS 최소화, HTTPS 준비. fileciteturn1file0</li>
+  </ol>
+
+  <h2>수용 기준 (Acceptance Criteria)</h2>
+  <ul>
+    <li>POST <code>/api/tasks/flow/daily</code> → 202/200 + <code>{'job_id': '...'}</code> 반환.</li>
+    <li>GET <code>/api/tasks/&lbrace;job_id&rbrace;</code> → <code>{'status': 'pending|running|done|error'}</code>.</li>
+    <li>GET <code>/api/tasks/&lbrace;job_id&rbrace;/stream</code> → <code>text/event-stream</code>으로 완료 시 종료. fileciteturn1file3</li>
+    <li>PATCH <code>/api/config/gate_required</code> → <code>config.json</code>에 저장되고 UI 슬라이더 반영. fileciteturn1file0</li>
+    <li>GET <code>/api/report</code>, <code>/api/export/csv</code> → 파일 경로 반환/다운로드, CSV는 UTF‑8 BOM 포함.</li>
+  </ul>
+
+  <h2>리스크 & 대응</h2>
+  <ul>
+    <li>비동기 예외 처리: try/except로 상태=error 저장 후 SSE 종료. fileciteturn1file3</li>
+    <li>재시작 시 기록 소실: 인터페이스를 분리해 향후 Redis/DB로 이관. fileciteturn1file3</li>
+    <li>SSE 미지원 브라우저: 자동 폴링 전환. fileciteturn1file3</li>
+    <li>보안: 토큰 인증·HTTPS·CORS 최소화 우선, 이후 CI 테스트·국제화·모니터링 확장. fileciteturn1file18</li>
+  </ul>
+
+  <h2>참고 문서</h2>
+  <ul>
+    <li>1006_A 공식 포함 계획 (보안/로드맵) — fileciteturn1file0</li>
+    <li>1006_A 중기 실행 계획 (Risks·SSE) — fileciteturn1file3</li>
+    <li>1006_A 주요 파일 패치 설계 — fileciteturn1file4</li>
+    <li>QualiJournal 개선 실행 계획 (2025‑10‑05) — fileciteturn1file18</li>
+    <li>키워드 기반 히스토리/편집 UI 요건 — fileciteturn0file145 fileciteturn0file146</li>
+    <li>현재 파이프라인과 QG ≥15 정책 — fileciteturn0file149 fileciteturn0file150</li>
+  </ul>
+</body>
+</html>

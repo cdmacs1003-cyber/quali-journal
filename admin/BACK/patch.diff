@@ -1,0 +1,188 @@
+--- server_quali.py
++++ server_quali.py
+@@ -243,6 +243,121 @@
+     }
+ 
+ # ---------- FastAPI ----------
++# ---------- In-memory Task Manager (lightweight) ----------
++from threading import Thread, Lock
++import secrets
++TASKS = {}
++TASKS_LOCK = Lock()
++
++def _new_task(kind:str, args:dict):
++    job_id = secrets.token_hex(8)
++    with TASKS_LOCK:
++        TASKS[job_id] = {"id": job_id, "kind": kind, "args": args, "status": "queued", "log": "", "steps": [], "t_start": _dt.datetime.utcnow().isoformat()+"Z", "t_end": None, "ok": None}
++    return job_id
++
++def _append_log(job_id:str, text:str):
++    with TASKS_LOCK:
++        if job_id in TASKS:
++            TASKS[job_id]["log"] += text
++
++def _update(job_id:str, **kv):
++    with TASKS_LOCK:
++        if job_id in TASKS:
++            TASKS[job_id].update(kv)
++
++def _run_steps(job_id:str, steps:list):
++    ok_all = True
++    for step in steps:
++        label, args = step
++        st = _dt.datetime.utcnow().isoformat()+"Z"
++        out = _run_orch(*args)
++        ed = _dt.datetime.utcnow().isoformat()+"Z"
++        rec = {"label": label, "result": out, "t_start": st, "t_end": ed}
++        with TASKS_LOCK:
++            TASKS[job_id]["steps"].append(rec)
++        if not out.get("ok", True):
++            ok_all = False
++    return ok_all
++
++def _start_task(kind:str, args:dict):
++    job_id = _new_task(kind, args)
++    def worker():
++        _update(job_id, status="running", t_start=_dt.datetime.utcnow().isoformat()+"Z")
++        try:
++            if kind == "flow/daily":
++                steps_desc = [("collect-community", ("--collect-community",)),
++                              ("approve-top20", ("--approve-top","20")),
++                              ("sync", tuple())]
++                ok = _run_steps(job_id, steps_desc)
++            elif kind == "flow/community":
++                steps_desc = [("collect-community", ("--collect-community",))]
++                ok = _run_steps(job_id, steps_desc)
++            elif kind == "flow/keyword":
++                kw = args.get("keyword") or ""
++                use_ext = bool(args.get("use_external_rss"))
++                if use_ext:
++                    steps_desc = [("collect-keyword", ("--collect-keyword", kw, "--use-external-rss")),
++                                  ("approve-keyword-top20", ("--approve-keyword-top","20","--approve-keyword",kw)),
++                                  ("sync", tuple()),
++                                  ("publish-keyword", ("--publish-keyword", kw))]
++                else:
++                    steps_desc = [("collect-keyword", ("--collect-keyword", kw)),
++                                  ("approve-keyword-top20", ("--approve-keyword-top","20","--approve-keyword",kw)),
++                                  ("sync", tuple()),
++                                  ("publish-keyword", ("--publish-keyword", kw))]
++                ok = _run_steps(job_id, steps_desc)
++            else:
++                ok = False
++            _update(job_id, status="done", ok=ok, t_end=_dt.datetime.utcnow().isoformat()+"Z")
++        except Exception as e:
++            _append_log(job_id, f"ERROR: {e}\n")
++            _update(job_id, status="error", ok=False, t_end=_dt.datetime.utcnow().isoformat()+"Z")
++    Thread(target=worker, daemon=True).start()
++    return job_id
++
++@app.get("/api/tasks/recent")
++def tasks_recent(limit:int=10):
++    with TASKS_LOCK:
++        items = list(TASKS.values())[-limit:]
++    return {"items": items}
++
++@app.get("/api/tasks/{job_id}")
++def tasks_status(job_id:str):
++    with TASKS_LOCK:
++        it = TASKS.get(job_id)
++    if not it:
++        raise HTTPException(status_code=404, detail="job not found")
++    return it
++
++@app.get("/api/tasks/{job_id}/stream")
++def tasks_stream(job_id:str):
++    # simple text/event-stream with final state snapshot
++    with TASKS_LOCK:
++        it = TASKS.get(job_id)
++    if not it:
++        raise HTTPException(status_code=404, detail="job not found")
++    data = json.dumps(it, ensure_ascii=False)
++    return Response(content=f"data: {data}\n\n", media_type="text/event-stream")
++
++@app.post("/api/tasks/flow/daily")
++def tasks_flow_daily():
++    job_id = _start_task("flow/daily", {})
++    return {"job_id": job_id}
++
++@app.post("/api/tasks/flow/community")
++def tasks_flow_comm():
++    job_id = _start_task("flow/community", {})
++    return {"job_id": job_id}
++
++class TaskFlowKwReq(BaseModel):
++    keyword: str
++    use_external_rss: bool = False
++
++@app.post("/api/tasks/flow/keyword")
++def tasks_flow_kw(req: TaskFlowKwReq):
++    job_id = _start_task("flow/keyword", {"keyword": req.keyword, "use_external_rss": req.use_external_rss})
++    return {"job_id": job_id}
++
+ app = FastAPI(title="QualiJournal Admin API")
+ app.add_middleware(
+     CORSMiddleware,
+@@ -256,6 +371,26 @@
+     editor_note: str = ""
+ 
+ class SavePayload(BaseModel):
++class GateReq(BaseModel):
++    gate_required: int
++
++@app.patch("/api/config/gate_required")
++def patch_gate(req: GateReq):
++    cfg_path = ROOT / "config.json"
++    cfg = {}
++    if cfg_path.exists():
++        try:
++            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
++        except Exception:
++            cfg = {}
++    cfg["gate_required"] = int(req.gate_required)
++    # keep features.require_editor_approval if exists
++    if "features" not in cfg:
++        cfg["features"] = {}
++    cfg["features"]["require_editor_approval"] = bool(cfg["features"].get("require_editor_approval", True))
++    cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
++    return {"ok": True, "config": cfg}
++
+     changes: List[SaveItem]
+ 
+ class PublishReq(BaseModel):
+@@ -314,6 +449,18 @@
+     sel_approved = sum(1 for a in work.get("articles", []) if a.get("approved"))
+     snap = _get_community_snapshot()
+     comm_total = len(snap.get("articles", []))
++    # load dynamic gate/approval from config.json if exists
++    cfg_path = ROOT / "config.json"
++    gate_required = 15
++    require_editor_approval = True
++    if cfg_path.exists():
++        try:
++            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
++            gate_required = int(cfg.get("gate_required") or cfg.get("features", {}).get("gate_required") or gate_required)
++            if "features" in cfg:
++                require_editor_approval = bool(cfg["features"].get("require_editor_approval", require_editor_approval))
++        except Exception:
++            pass
+     return {
+         "date": work.get("date", _dt.date.today().isoformat()),
+         "keyword": work.get("keyword", ""),
+@@ -321,13 +468,15 @@
+         "selection_approved": sel_approved,
+         "community_total": comm_total,
+         "keyword_total": sel_total,
+-        "gate_required": 15,
+-        "gate_pass": sel_approved >= 15,
++        "gate_required": gate_required,
++        "require_editor_approval": require_editor_approval,
++        "gate_pass": sel_approved >= gate_required,
+         "paths": {
+             "work": str(SEL_WORK),
+             "publish": str(SEL_PUB),
+             "community": "root_or_archive"
+         }
++    }
+     }
+ 
+ @app.post("/api/publish-keyword")

@@ -1,0 +1,7 @@
+
+Changes applied to orchestrator.py to satisfy rule #9 (경로/모듈 호출 체계):
+1) Introduced _ROOT_DIR = Path(__file__).resolve().parent and anchored all relative paths to it.
+2) Fixed the log file path to _ROOT_DIR/logs/orchestrator.log (was parent.parent).
+3) _os_rel now uses _ROOT_DIR instead of os.getcwd() to be execution-location agnostic.
+4) load_config reads _ROOT_DIR/config.json via _os_rel.
+5) publish_keyword_page now uses 'safe write' with _HHMMSS timestamp when the target file already exists.

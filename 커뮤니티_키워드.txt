@@ -1,0 +1,23 @@
+IPC-A-610
+J-STD-001
+WHMA-A-620
+ECSS
+NASA-STD
+ESA
+MIL-STD
+soldering
+lead-free
+pbfree
+ESD
+PCB
+SMD
+SMT
+rework
+reballing
+reflow
+wave solder
+AOI
+profile
+whisker
+RoHS
+dry cabinet

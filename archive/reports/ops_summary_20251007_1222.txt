@@ -1,0 +1,36 @@
+﻿=== OPS SUMMARY 20251007_1222 ===
+
+[HealthCheck]
+
+===== SUMMARY =====
+[PASS] 1. config.json ↔ schema
+[PASS] 2. community/official 소스
+[PASS] 3. orchestrator & run 스크립트
+[WARN] 4. tools 중복/역할
+[PASS] 5. admin/index.html ↔ server_quali.py
+[PASS] 6. selected_* 무결성
+[WARN] 7. archive 파일명 규칙
+[PASS] 8. requirements 의존성
+[FAIL] 9. 경로/모듈 호출 체계
+Report written to 'health_report.md' (in repo or current directory).
+
+
+[LinkCheck]
+py : C:\Users\user\AppData\Local\Programs\Python\Python313\python.exe: can't open file 'C:\\Users\\user\\Desktop\\퀄리저널\\tools\\verify_sources.py': [Errno 2] No such file or directory
+위치 C:\Users\user\Desktop\퀄리저널\tools\ops_quali.ps1:20 문자:21
++   try { $linkOut = (py .\tools\verify_sources.py) 2>&1 | Out-String }
++                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\user\A...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+
+[Integrity]
+py : C:\Users\user\AppData\Local\Programs\Python\Python313\python.exe: can't open file 'C:\\Users\\user\\Desktop\\퀄리저널\\tools\\validate_selection_integrity.py': [Errno 2] No such file or directory
+위치 C:\Users\user\Desktop\퀄리저널\tools\ops_quali.ps1:26 문자:18
++ try { $intOut = (py .\tools\validate_selection_integrity.py) 2>&1 | O ...
++                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\user\A...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+

@@ -1,0 +1,586 @@
+{
+  "$defs": {
+    "CommunityConfig": {
+      "description": "Parameters controlling community content ingestion and scoring.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether community ingestion is enabled.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "fresh_hours": {
+          "default": 336,
+          "description": "Number of hours during which a community post is considered fresh.",
+          "title": "Fresh Hours",
+          "type": "integer"
+        },
+        "min_upvotes": {
+          "default": 0,
+          "description": "Minimum number of upvotes required for a community post to qualify.",
+          "title": "Min Upvotes",
+          "type": "integer"
+        },
+        "min_comments": {
+          "default": 0,
+          "description": "Minimum number of comments required for a community post to qualify.",
+          "title": "Min Comments",
+          "type": "integer"
+        },
+        "score_threshold": {
+          "default": 0.0,
+          "description": "Minimum total score required for a community post to qualify.",
+          "title": "Score Threshold",
+          "type": "number"
+        },
+        "max_total": {
+          "default": 300,
+          "description": "Maximum number of community posts to select.",
+          "title": "Max Total",
+          "type": "integer"
+        },
+        "max_per_section": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 6,
+          "description": "Maximum number of community posts per section when grouping by category.",
+          "title": "Max Per Section"
+        },
+        "reddit_pages": {
+          "default": 5,
+          "description": "Number of pages to fetch when crawling Reddit for community posts.",
+          "title": "Reddit Pages",
+          "type": "integer"
+        },
+        "score_weights": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Weights applied to keyword hits, upvotes and views when computing the total score.",
+          "title": "Score Weights",
+          "type": "object"
+        },
+        "norms": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Normalization parameters for score components.",
+          "title": "Norms",
+          "type": "object"
+        },
+        "filters": {
+          "$ref": "#/$defs/CommunityFilters",
+          "description": "Filter definitions for community content."
+        },
+        "dynamic_threshold": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DynamicThresholdConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Dynamic threshold configuration for adaptive scoring."
+        },
+        "html_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "퀄리 커뮤니티",
+          "description": "Title used when rendering community selection pages.",
+          "title": "Html Title"
+        },
+        "exclude_ai": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Whether to exclude AI‑related topics from community ingestion.",
+          "title": "Exclude Ai"
+        },
+        "selection_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "archive/selected_community.json",
+          "description": "Override path for the community selection file if different from the default.",
+          "title": "Selection File"
+        }
+      },
+      "title": "CommunityConfig",
+      "type": "object"
+    },
+    "CommunityFilters": {
+      "description": "Optional filters applied to community article selection.",
+      "properties": {
+        "kw_min_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum number of tokens required in a keyword for a community article to qualify.",
+          "title": "Kw Min Tokens"
+        },
+        "kw_regex": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of regular expressions; an article's title must match at least one to qualify.",
+          "title": "Kw Regex"
+        },
+        "allow_domains": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whitelist of domains allowed for community posts.",
+          "title": "Allow Domains"
+        },
+        "block_title_patterns": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of regex patterns to block titles containing promotional or irrelevant content.",
+          "title": "Block Title Patterns"
+        },
+        "min_title_len": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum length of a community article title to qualify.",
+          "title": "Min Title Len"
+        },
+        "require_keyword": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether a keyword must be present in the title or body for the article to qualify.",
+          "title": "Require Keyword"
+        },
+        "synonyms_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a JSON file containing keyword synonyms used for matching community posts.",
+          "title": "Synonyms Source"
+        },
+        "use_keyword_synonyms": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether to expand keywords to include synonyms during matching.",
+          "title": "Use Keyword Synonyms"
+        }
+      },
+      "title": "CommunityFilters",
+      "type": "object"
+    },
+    "DynamicThresholdConfig": {
+      "description": "Adaptive scoring thresholds for community items.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether dynamic thresholds are used for approval scoring.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "floor": {
+          "default": 0.0,
+          "description": "Lower bound on the dynamic threshold.",
+          "title": "Floor",
+          "type": "number"
+        },
+        "ceil": {
+          "default": 5.0,
+          "description": "Upper bound on the dynamic threshold.",
+          "title": "Ceil",
+          "type": "number"
+        },
+        "percentile": {
+          "default": 50,
+          "description": "Percentile of the score distribution to consider when computing the dynamic threshold.",
+          "title": "Percentile",
+          "type": "integer"
+        },
+        "sigma_k": {
+          "default": 0.5,
+          "description": "Multiplier applied to the standard deviation when computing the threshold.",
+          "title": "Sigma K",
+          "type": "number"
+        },
+        "window_days": {
+          "default": 7,
+          "description": "Number of days worth of data to use when computing the dynamic threshold window.",
+          "title": "Window Days",
+          "type": "integer"
+        }
+      },
+      "title": "DynamicThresholdConfig",
+      "type": "object"
+    },
+    "ExternalRSSConfig": {
+      "description": "Controls ingestion of external RSS feeds in keyword workflows.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether to include external RSS sources when gathering keywords.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "max_total": {
+          "default": 50,
+          "description": "Maximum number of articles to import from external RSS.",
+          "title": "Max Total",
+          "type": "integer"
+        },
+        "gate_required": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum number of editor approvals required before external RSS sources are used.",
+          "title": "Gate Required"
+        }
+      },
+      "title": "ExternalRSSConfig",
+      "type": "object"
+    },
+    "FactcheckConfig": {
+      "description": "Configuration for fact‑checking (FC) scoring.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether fact‑checking is enabled during article scoring.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "min_score": {
+          "default": 52,
+          "description": "Minimum score required to pass fact‑checking.",
+          "title": "Min Score",
+          "type": "integer"
+        },
+        "min_evidence": {
+          "default": 2,
+          "description": "Minimum number of evidences required for fact‑checking.",
+          "title": "Min Evidence",
+          "type": "integer"
+        },
+        "strict": {
+          "default": true,
+          "description": "Whether to require both minimum score and evidence to pass.",
+          "title": "Strict",
+          "type": "boolean"
+        }
+      },
+      "title": "FactcheckConfig",
+      "type": "object"
+    },
+    "FeaturesConfig": {
+      "description": "Miscellaneous feature toggles and metadata.",
+      "properties": {
+        "require_editor_approval": {
+          "default": true,
+          "description": "Whether editor approval is required before articles can be published.",
+          "title": "Require Editor Approval",
+          "type": "boolean"
+        },
+        "trusted_domains": {
+          "description": "List of domains considered trusted when whitelisting sources.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Trusted Domains",
+          "type": "array"
+        },
+        "output_formats": {
+          "description": "List of output formats to generate during publication.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Formats",
+          "type": "array"
+        },
+        "section_order": {
+          "description": "Order in which sections appear in the published news output.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Section Order",
+          "type": "array"
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualityConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Quality criteria for article selection."
+        },
+        "factcheck": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FactcheckConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fact‑checking parameters."
+        },
+        "translate_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "gpt-4o",
+          "description": "Name of the OpenAI model to use for translations and summaries.",
+          "title": "Translate Model"
+        },
+        "landing_rules": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Domain‑specific rules controlling which article paths are preferred or denied when scraping official sources.",
+          "title": "Landing Rules"
+        }
+      },
+      "title": "FeaturesConfig",
+      "type": "object"
+    },
+    "PathsConfig": {
+      "description": "Filesystem and resource locations.",
+      "properties": {
+        "archive": {
+          "default": "archive",
+          "description": "Base directory for generated artefacts such as reports and selections.",
+          "title": "Archive",
+          "type": "string"
+        },
+        "reports": {
+          "default": "archive/reports",
+          "description": "Directory where generated reports (HTML, MD, JSON) are saved.",
+          "title": "Reports",
+          "type": "string"
+        },
+        "community_selection_file": {
+          "default": "archive/selected_community.json",
+          "description": "Default path for the community selection JSON file.",
+          "title": "Community Selection File",
+          "type": "string"
+        },
+        "community_sources_candidates": {
+          "description": "Candidate file paths for community source definitions.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Community Sources Candidates",
+          "type": "array"
+        },
+        "keywords_txt": {
+          "default": "커뮤니티_키워드.txt",
+          "description": "Path to the plain text file containing community keywords.",
+          "title": "Keywords Txt",
+          "type": "string"
+        },
+        "selection_file": {
+          "default": "selected_articles.json",
+          "description": "Default path for the official selection JSON file.",
+          "title": "Selection File",
+          "type": "string"
+        },
+        "smt_sources_file": {
+          "default": "smt_sources.json",
+          "description": "Path to the SMT (Surface Mount Technology) sources configuration file.",
+          "title": "Smt Sources File",
+          "type": "string"
+        },
+        "supply_sources_file": {
+          "default": "supply_sources.json",
+          "description": "Path to the supply chain sources configuration file.",
+          "title": "Supply Sources File",
+          "type": "string"
+        },
+        "backup": {
+          "default": "archive/backup",
+          "description": "Directory for backup copies of published materials.",
+          "title": "Backup",
+          "type": "string"
+        },
+        "log": {
+          "default": "logs/news.log",
+          "description": "Path to the rotating log file for the news collector.",
+          "title": "Log",
+          "type": "string"
+        }
+      },
+      "title": "PathsConfig",
+      "type": "object"
+    },
+    "QualityConfig": {
+      "description": "Quality criteria for article selection.",
+      "properties": {
+        "min_chars": {
+          "default": 600,
+          "description": "Minimum number of characters required for an article to qualify.",
+          "title": "Min Chars",
+          "type": "integer"
+        },
+        "min_sentences": {
+          "default": 5,
+          "description": "Minimum number of sentences required for an article to qualify.",
+          "title": "Min Sentences",
+          "type": "integer"
+        },
+        "min_links": {
+          "default": 2,
+          "description": "Minimum number of outbound links required for an article to qualify.",
+          "title": "Min Links",
+          "type": "integer"
+        },
+        "strict": {
+          "default": true,
+          "description": "Whether to enforce all quality criteria strictly.",
+          "title": "Strict",
+          "type": "boolean"
+        },
+        "max_total": {
+          "default": 6,
+          "description": "Maximum number of articles to select in total.",
+          "title": "Max Total",
+          "type": "integer"
+        },
+        "max_per_section": {
+          "default": 3,
+          "description": "Maximum number of articles to select per section when grouping by category.",
+          "title": "Max Per Section",
+          "type": "integer"
+        }
+      },
+      "title": "QualityConfig",
+      "type": "object"
+    }
+  },
+  "description": "Root configuration model encompassing all sub‑configs.",
+  "properties": {
+    "paths": {
+      "$ref": "#/$defs/PathsConfig"
+    },
+    "features": {
+      "$ref": "#/$defs/FeaturesConfig"
+    },
+    "community": {
+      "$ref": "#/$defs/CommunityConfig"
+    },
+    "external_rss": {
+      "$ref": "#/$defs/ExternalRSSConfig"
+    }
+  },
+  "title": "ConfigSchema",
+  "type": "object"
+}

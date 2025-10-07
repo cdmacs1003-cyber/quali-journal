@@ -1,0 +1,85 @@
+{
+  "community": {
+    "enabled": true,
+    "fresh_hours": 336,
+    "min_upvotes": 3,
+    "min_comments": 0,
+    "reddit_pages": 3,
+    "max_total": 120,
+    "score_threshold": 3.0,
+    "dynamic_threshold": {
+      "enabled": true,
+      "window_days": 7,
+      "percentile": 50,
+      "sigma_k": 0.5,
+      "floor": 2.5,
+      "ceil": 5.0
+    },
+    "score_weights": {
+      "keyword": 4,
+      "upvotes": 4,
+      "views": 2
+    },
+    "norms": {
+      "kw_base": 2,
+      "upvotes_max": 60,
+      "views_max": 80000
+    },
+    "filters": {
+      "require_keyword": true,
+      "kw_min_tokens": 2,
+      "kw_regex": [
+        "\\\\bIPC[\\\\s\\\\-]?A[\\\\s\\\\-]?610\\\\b"
+      ],
+      "allow_domains": [
+        "ipc.org",
+        "ecss.nl",
+        "iconnect007.com",
+        "nist.gov",
+        "eeworld.com.cn",
+        "technologyreview.com",
+        "jedec.org",
+        "ieee.org",
+        "nasa.gov"
+      ],
+      "min_title_len": 6,
+      "block_title_patterns": [
+        "(?i)hiring|job|promo|coupon|advert|sale|giveaway|subscribe|newsletter"
+      ],
+      "use_keyword_synonyms": true,
+      "synonyms_source": "keyword_synonyms.json"
+    }
+  },
+  "external_rss": {
+    "gate_required": 15,
+    "enabled": true,
+    "max_total": 50
+  },
+  "features": {
+    "require_editor_approval": true,
+    "trusted_domains": [
+      "ipc.org",
+      "ecss.nl",
+      "iconnect007.com",
+      "jedec.org",
+      "ieee.org",
+      "nist.gov",
+      "eeworld.com.cn"
+    ],
+    "gate_required": 15
+  },
+  "paths": {
+    "archive": "archive",
+    "reports": "archive/reports",
+    "selection_file": "selected_articles.json",
+    "community_selection_file": "archive/selected_community.json",
+    "community_sources_candidates": [
+      "feeds/community_sources.json",
+      "community_sources.json"
+    ],
+    "keywords_txt": "而ㅻ??덊떚_?ㅼ썙??txt",
+    "smt_sources_file": "smt_sources.json",
+    "supply_sources_file": "supply_sources.json"
+  },
+  "gate_required": 15
+}

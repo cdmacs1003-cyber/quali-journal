@@ -1,0 +1,59 @@
+# cloudbuild.yaml — QualiJournal CI → Artifact Registry → Cloud Run(Seoul)
+# - 빌드 → 푸시 → 배포(서비스 계정/환경변수 포함)
+# - substitutions 고정값: 커맨드에 --substitutions 안 넘겨도 동작
+
+substitutions:
+  _REGION: "asia-northeast3"                         # 서울
+  _PROJECT: "quali-journal-prod"
+  _REPO: "quali-repo"
+  _IMAGE: "quali-journal"
+  _TAG: "prod"
+  _SERVICE: "hello"
+  _PORT: "8080"
+  _ENV: "GCP_PROJECT=quali-journal-prod,REGION=asia-northeast3,BUCKET_NAME=quali-journal-archive-seoul"
+  _RUNTIME_SA: "quali-admin@quali-journal-prod.iam.gserviceaccount.com"
+
+# 빌드 타임아웃(옵션): 대형 이미지 대비
+timeout: "1200s"
+
+# 빌드/푸시/배포
+steps:
+  # 1) Docker Build
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "build",
+        "-t",
+        "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_IMAGE}:${_TAG}",
+        "."
+      ]
+
+  # 2) Docker Push → Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "push",
+        "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_IMAGE}:${_TAG}"
+      ]
+
+  # 3) Cloud Run Deploy (서비스계정/포트/환경변수 지정)
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      [
+        "run","deploy","${_SERVICE}",
+        "--image","${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_IMAGE}:${_TAG}",
+        "--region","${_REGION}",
+        "--platform","managed",
+        "--service-account","${_RUNTIME_SA}",
+        "--port","${_PORT}",
+        "--set-env-vars","${_ENV}"
+      ]
+
+# 빌드 결과로 남길 이미지(AR에 푸시된 것)
+images:
+  - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_IMAGE}:${_TAG}"
+
+# 로그 포맷(가독성): 기본
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="utf-8"/>
+  <title>QualiJournal — Admin (Unified)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    /* 컬러 변수: 라이트 테마 */
+    :root{
+      --bg:#ffffff;
+      --ink:#1a1d20;
+      --muted:#64748b;
+      --line:#e2e8f0;
+      --card:#ffffff;
+      --panel:#f8fafc;
+      --acc:#2563eb;
+      --ok:#24c08b;
+      --warn:#f0b600;
+      --err:#ef4444;
+    }
+    /* 다크 테마 오버라이드 */
+    [data-theme="dark"]{
+      --bg:#0b0e12;
+      --ink:#e9eef5;
+      --muted:#8ea1b2;
+      --line:#223047;
+      --card:#10161d;
+      --panel:#0f141b;
+      --acc:#1e90ff;
+      --ok:#24c08b;
+      --warn:#f0b600;
+      --err:#ff6b6b;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;background:var(--bg);color:var(--ink);
+      font:14px/1.6 ui-sans-serif,system-ui,Segoe UI,Apple SD Gothic Neo,Malgun Gothic,sans-serif;
+    }
+    header{
+      padding:16px 20px;border-bottom:1px solid var(--line);
+      display:flex;justify-content:space-between;align-items:center;
+    }
+    h1{font-size:18px;margin:0}
+    .sub{color:var(--muted);font-size:12px}
+    main{
+      padding:16px;display:grid;grid-template-columns:300px 1fr;gap:16px;
+    }
+    @media (max-width:900px){ main{grid-template-columns:1fr} }
+    .card{
+      background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;
+    }
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+    input,button{
+      padding:8px 10px;border:1px solid var(--line);
+      border-radius:8px;background:var(--panel);color:var(--ink);
+    }
+    button{cursor:pointer}
+    button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+    button.ok{background:var(--ok);border-color:var(--ok);color:#041b12}
+    #log{
+      white-space:pre-wrap;background:var(--panel);border:1px dashed var(--line);
+      padding:10px;border-radius:8px;margin-top:8px;max-height:48vh;overflow:auto;
+    }
+    .kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .kpi .box{
+      background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;
+    }
+    .pill{
+      display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
+      color:var(--muted);font-size:12px;background:var(--panel);
+    }
+    a.pill{color:var(--acc);text-decoration:none}
+    /* 모달 */
+    #jobModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999}
+    #jobCard{
+      max-width:780px;margin:60px auto;background:var(--card);
+      border:1px solid var(--line);border-radius:12px;padding:14px;
+    }
+    .steps{margin-top:10px}
+    .step{
+      border-left:4px solid var(--line);padding:8px 10px;margin:6px 0;
+      background:var(--panel);border-radius:8px;
+    }
+    .step.ok{border-color:var(--ok)}
+    .step.fail{border-color:var(--err)}
+    .step.running{border-color:var(--acc)}
+    .meta{color:var(--muted);font-size:12px}
+    canvas{width:100%;height:140px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>QualiJournal — Admin</h1>
+    <div class="sub">하루 한 키워드 · HiTL · 승인≥15 · 원클릭 발행</div>
+  </div>
+  <div class="sub">API: <span id="api">http://127.0.0.1:8010</span>
+    <button id="theme-toggle" onclick="toggleTheme()" style="margin-left:8px;">다크 모드</button>
+  </div>
+</header>
+
+<main>
+  <!-- 좌: 상태/승인 -->
+  <section class="card" aria-labelledby="sec-status">
+    <h3 id="sec-status">상태</h3>
+    <div class="row">
+      <input id="date" aria-label="날짜"/>
+      <input id="kw" aria-label="키워드" value="IPC-A-610"/>
+      <button class="primary" onclick="refresh()">새로고침</button>
+    </div>
+    <div class="row" style="align-items:center;gap:12px">
+      <label for="gateSlider">게이트</label>
+      <input type="range" id="gateSlider" min="1" max="50" value="15" oninput="gateInputChange()" style="flex-grow:1"/>
+      <span id="gateVal">15</span>
+      <button id="gateSave" onclick="saveGate()">저장</button>
+    </div>
+    <div class="kpi" role="group" aria-label="KPI">
+      <div class="box">선정본 총량: <b id="selTotal">-</b></div>
+      <div class="box">선정본 승인: <b id="selApproved">-</b></div>
+      <div class="box">커뮤니티 후보: <b id="comTotal">-</b></div>
+      <div class="box">키워드 특집: <b id="kwTotal">-</b></div>
+    </div>
+    <div class="row">
+      <span class="pill">게이트(승인 ≥ <span id="gateReq">15</span>): <b id="gatePass">-</b></span>
+      <button onclick="startApprove()">승인 UI 열기</button>
+      <a class="pill" href="http://127.0.0.1:8765" target="_blank" rel="noopener">127.0.0.1:8765</a>
+    </div>
+  </section>
+
+  <!-- 우: 운영 -->
+  <section class="card" aria-labelledby="sec-ops">
+    <h3 id="sec-ops">운영</h3>
+    <div class="row">
+      <button class="primary" onclick="runMerged()">원클릭(통합 발행)</button>
+      <button class="primary" onclick="runDaily()">원클릭(커뮤니티)</button>
+      <button onclick="runCommunity()">커뮤니티 수집</button>
+    </div>
+    <h4>키워드 특집</h4>
+    <div class="row">
+      <button class="ok" onclick="runKeyword()">수집→승인Top20→발행</button>
+    </div>
+    <div class="row">
+      <button onclick="showRecent()">최근 작업</button>
+    </div>
+    <div id="log" role="region" aria-live="polite">여기에 결과 로그가 표시됩니다.</div>
+  </section>
+</main>
+
+<!-- 진행률 모달 -->
+<div id="jobModal">
+  <div id="jobCard">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">작업 진행상황</h3>
+      <div>
+        <button id="cancelBtn" onclick="cancelJob()" style="margin-right:6px;">작업 취소</button>
+        <button onclick="closeModal()">닫기</button>
+      </div>
+    </div>
+    <div class="meta" id="jobMeta"></div>
+    <div class="steps" id="steps"></div>
+    <h4>타임라인</h4>
+    <canvas id="timeline" width="720" height="140" aria-label="타임라인 차트"></canvas>
+  </div>
+</div>
+
+<script>
+  // 기본 API 베이스
+  const API = document.getElementById('api').textContent.trim() || window.location.origin;
+  const el = id => document.getElementById(id);
+  // 비동기 작업 지원 여부 플래그. 기본값을 false로 두고, 서버가 /api/tasks 엔드포인트를
+  // 제공하는지 확인한다. 존재하지 않으면 404가 발생하므로 페이지 로딩 시 한 번만 체크해
+  // 결과를 HAS_TASKS 변수에 저장한다. 이후 run* 함수에서 true일 때만 비동기 작업 경로를 사용한다.
+  let HAS_TASKS = false;
+  async function checkTasks(){
+    try {
+      const resp = await fetch(`${API}/api/tasks/recent?limit=1`, {method: 'GET'});
+      HAS_TASKS = resp.ok;
+    } catch (e) {
+      HAS_TASKS = false;
+    }
+  }
+  // 초기화: 비동기 기능 지원 여부 확인
+  checkTasks();
+  let currentJob = null;
+  let es = null;
+
+  // 테마 토글
+  function toggleTheme(){
+    const html=document.documentElement;
+    const btn=document.getElementById('theme-toggle');
+    if(html.getAttribute('data-theme')==='dark'){
+      html.setAttribute('data-theme','light');
+      btn.textContent='다크 모드';
+    } else {
+      html.setAttribute('data-theme','dark');
+      btn.textContent='라이트 모드';
+    }
+  }
+
+  // 오늘 날짜 기본
+  (function initToday(){
+    const today=new Date().toISOString().slice(0,10);
+    const $date=el('date'); if($date && !$date.value) $date.value=today;
+  })();
+
+  async function refresh(){
+    const date=el('date').value.trim();
+    const keyword=el('kw').value.trim();
+    const q = new URLSearchParams({date, keyword}).toString();
+    try{
+      const res = await fetch(`${API}/api/status?${q}`);
+      const j = await res.json();
+      el('selTotal').textContent=j.selection_total??'-';
+      el('selApproved').textContent=j.selection_approved??'-';
+      el('comTotal').textContent=j.community_total??'-';
+      el('kwTotal').textContent=j.keyword_total??'-';
+      el('gateReq').textContent=j.gate_required??15;
+      el('gatePass').textContent=j.gate_pass?'통과':'미통과';
+      // 슬라이더와 표시값 업데이트
+      const gs = document.getElementById('gateSlider');
+      if(gs){ gs.value = j.gate_required ?? 15; }
+      const gv = document.getElementById('gateVal');
+      if(gv){ gv.textContent = j.gate_required ?? 15; }
+    }catch(e){ el('log').textContent='상태 불러오기 오류: '+e; }
+  }
+
+  // 게이트 슬라이더 입력 핸들러: 표시만 업데이트
+  function gateInputChange(){
+    const v = el('gateSlider').value;
+    el('gateVal').textContent = v;
+  }
+  // 게이트 저장: 서버에 PATCH 요청
+  async function saveGate(){
+    const val = parseInt(el('gateSlider').value);
+    try{
+      const res = await fetch(`${API}/api/config/gate_required`, {
+        method:'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({gate_required: val})
+      });
+      const data = await res.json();
+      el('gateReq').textContent = data.gate_required ?? val;
+      await refresh();
+    }catch(e){ el('log').textContent = '게이트 저장 오류: '+e; }
+  }
+
+  // 버튼 잠금/해제
+  function lockButtons(lock){
+    document.querySelectorAll('section.card button').forEach(b => b.disabled = !!lock);
+    el('cancelBtn').disabled = !lock;
+  }
+  // 모달 열고 닫기
+  function openModal(){ el('jobModal').style.display='block'; }
+  function closeModal(){ el('jobModal').style.display='none'; if(es){ es.close(); es=null; } currentJob=null; lockButtons(false); }
+
+  // 작업 취소
+  async function cancelJob(){ if(!currentJob) return; try{ await fetch(`${API}/api/tasks/${currentJob}/cancel`, {method:'POST'}); }catch(e){} }
+
+  // 스텝 렌더 + 타임라인
+  function renderSteps(st){
+    const box=el('steps'); box.innerHTML='';
+    (st.steps||[]).forEach((it,i)=>{
+      const ok=it.ok===true; const fail=it.ok===false;
+      const cls = ok?'ok':(fail?'fail':'running');
+      const icon = ok?'✅':(fail?'❌':'⏳');
+      const ms = (it.ms!=null)? ` · ${it.ms} ms` : '';
+      const div=document.createElement('div'); div.className='step '+cls;
+      div.innerHTML = `<div><span>${icon}</span> <b>${it.cmd}</b></div>`+
+                      `<div class="meta">${it.t_start||'-'} → ${it.t_end||'-'}${ms}</div>`+
+                      `${it.stdout?`<pre class="meta">${escapeHtml(it.stdout)}</pre>`:''}`+
+                      `${it.stderr?`<pre class="meta" style="color:var(--err)">${escapeHtml(it.stderr)}</pre>`:''}`;
+      box.appendChild(div);
+    });
+  }
+
+  function drawTimeline(st){
+    const cvs=el('timeline'); const ctx=cvs.getContext('2d'); ctx.clearRect(0,0,cvs.width,cvs.height);
+    const steps=st.steps||[]; if(!steps.length) return;
+    const times=steps.map(s=>({s:new Date(s.t_start||Date.now()), e:new Date(s.t_end||Date.now())}));
+    const t0=Math.min(...times.map(t=>t.s.getTime())); const t1=Math.max(...times.map(t=>t.e.getTime()));
+    const span=Math.max(1, t1-t0); const H=20; const PAD=10;
+    steps.forEach((it,i)=>{
+      const s=new Date(it.t_start||Date.now()).getTime(); const e=new Date(it.t_end||s).getTime();
+      const x=( (s - t0) / span ) * (cvs.width-2*PAD) + PAD;
+      const w=Math.max(2, ((e - s) / span) * (cvs.width-2*PAD));
+      const y=10 + i*(H+6);
+      ctx.fillStyle = it.ok===false ? getCss('--err') : (it.ok===true ? getCss('--ok') : getCss('--acc'));
+      ctx.fillRect(x,y,w,H);
+    });
+  }
+  function getCss(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function escapeHtml(s){ return (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  // 유틸: URL에서 kind 추출
+  function kindFromUrl(u){
+    if(u.endsWith('/flow/daily')) return 'daily';
+    if(u.endsWith('/flow/community')) return 'community';
+    if(u.endsWith('/flow/keyword')) return 'keyword';
+    return 'unknown';
+  }
+
+  // 시작: 작업 엔드포인트 호출, 404/예외 시 동기 폴백
+  async function startJob(url, body=null){
+    lockButtons(true);
+    openModal();
+    el('jobMeta').textContent='작업 준비 중…';
+    el('steps').innerHTML='';
+    el('log').textContent='';
+    try{
+      // 비동기 엔드포인트 시도
+      const res = await fetch(url, {
+        method:'POST',
+        headers: body ? {'Content-Type':'application/json'} : {},
+        body: body ? JSON.stringify(body) : null
+      });
+      // 성공 & job_id
+      if(res.ok){
+        let js = {};
+        try{ js = await res.json(); } catch { js = {}; }
+        if(js && js.job_id){
+          currentJob = js.job_id;
+          // SSE 스트림
+          if(window.EventSource){
+            es = new EventSource(`${API}/api/tasks/${js.job_id}/stream`);
+            es.addEventListener('status', async (ev)=>{
+              const st = JSON.parse(ev.data||'{}');
+              el('jobMeta').textContent = `작업: ${st.name} · 상태: ${st.status} · 시작: ${st.started_at||'-'} / 종료: ${st.ended_at||'-'}`;
+              renderSteps(st);
+              drawTimeline(st);
+              if(st.status==='done' || st.status==='error' || st.status==='canceled'){
+                es.close(); es=null; lockButtons(false); await refresh();
+              }
+            });
+            es.addEventListener('end', () => {});
+          } else {
+            // 폴링
+            (async function poll(){
+              const r = await fetch(`${API}/api/tasks/${js.job_id}`);
+              const st = await r.json();
+              el('jobMeta').textContent = `작업: ${st.name} · 상태: ${st.status} · 시작: ${st.started_at||'-'} / 종료: ${st.ended_at||'-'}`;
+              renderSteps(st);
+              drawTimeline(st);
+              if(st.status==='done' || st.status==='error' || st.status==='canceled'){
+                lockButtons(false); await refresh(); return;
+              }
+              setTimeout(poll, 1000);
+            })();
+          }
+          return;
+        }
+        // job_id 없으면 동기 폴백
+        await syncFallback(kindFromUrl(url), body);
+        return;
+      }
+      // 404 또는 오류 → 폴백
+      if(res.status===404 || res.status===405){
+        await syncFallback(kindFromUrl(url), body);
+      } else {
+        const txt = await res.text();
+        await syncFallback(kindFromUrl(url), body);
+        el('log').textContent = `비동기 경로 오류 ${res.status}: ${txt}`;
+      }
+    } catch(e){
+      // 네트워크 예외 → 폴백
+      await syncFallback(kindFromUrl(url), body);
+      el('log').textContent = '오류: '+e;
+    }
+    lockButtons(false);
+  }
+
+  // 동기 폴백: /api/flow/* 호출
+  async function syncFallback(kind, body=null){
+    el('jobMeta').textContent = `동기 실행(폴백) — ${kind}`;
+    el('steps').innerHTML = '';
+    let endpoint = '';
+    let fetchOpt = {method:'POST', headers:{'Content-Type':'application/json'}};
+    if(kind==='daily'){
+      endpoint = `${API}/api/flow/daily`; fetchOpt = {method:'POST'};
+    }
+    else if(kind==='community'){
+      endpoint = `${API}/api/flow/community`; fetchOpt = {method:'POST'};
+    }
+    else if(kind==='keyword'){
+      endpoint = `${API}/api/flow/keyword`; fetchOpt.body = JSON.stringify(body||{});
+    }
+    else if(kind==='merged'){
+      endpoint = `${API}/api/flow/merged`; fetchOpt = {method:'POST'};
+    }
+    else {
+      el('log').textContent = `알 수 없는 작업: ${kind}`;
+      return;
+    }
+    try{
+      const r = await fetch(endpoint, fetchOpt);
+      const j = await r.json();
+      const st = { name:`flow-${kind}`, status: j.ok ? 'done' : 'error', steps: [] };
+      (j.steps||[]).forEach(s=>{
+        st.steps.push({
+          ok: s.ok,
+          cmd: s.cmd || '(subprocess)',
+          stdout: s.stdout || '',
+          stderr: s.stderr || '',
+          t_start: '-', t_end: '-', ms: null
+        });
+      });
+      renderSteps(st);
+      drawTimeline(st);
+      el('jobMeta').textContent = `작업: ${st.name} · 상태: ${st.status}`;
+    } catch(e){ el('log').textContent = '동기 실행 실패: '+e; }
+    await refresh();
+  }
+
+  // 실행 함수들
+  async function runDaily(){
+    // HAS_TASKS가 false이면 동기 엔드포인트로 폴백한다.
+    // HAS_TASKS 가 true일 때만 비동기 경로를 사용하고, 그렇지 않으면 동기 플로우를 호출한다.
+    if (HAS_TASKS === true) {
+      await startJob(`${API}/api/tasks/flow/daily`);
+    } else {
+      await syncFallback('daily');
+    }
+  }
+  async function runCommunity(){
+    if (HAS_TASKS === true) {
+      await startJob(`${API}/api/tasks/flow/community`);
+    } else {
+      await syncFallback('community');
+    }
+  }
+  async function runKeyword(){
+    const keyword = el('kw').value.trim();
+    if (HAS_TASKS === true) {
+      await startJob(`${API}/api/tasks/flow/keyword`, {keyword, use_external_rss:true});
+    } else {
+      // 동기 플로우 호출 시 body를 넘겨 키워드 전달
+      await syncFallback('keyword', {keyword, use_external_rss:true});
+    }
+  }
+
+  // 원클릭(통합 발행) 실행: 공식→커뮤 수집→자동 승인→발행
+  async function runMerged(){
+    // HAS_TASKS가 true면 비동기 경로를, 아니면 동기 플로우를 사용
+    if (HAS_TASKS === true) {
+      await startJob(`${API}/api/tasks/flow/merged`);
+    } else {
+      await syncFallback('merged');
+    }
+  }
+
+  async function startApprove(){
+    lockButtons(true);
+    try{
+      const r = await fetch(`${API}/api/approve-ui/start`, {method:'POST'});
+      const data = await r.json();
+      el('log').textContent = JSON.stringify(data,null,2);
+      window.open('http://127.0.0.1:8765','_blank','noopener');
+    } catch(e){ el('log').textContent = '승인 UI 열기 실패: '+e; }
+    lockButtons(false);
+  }
+
+  async function showRecent(){
+    try{
+      const r = await fetch(`${API}/api/tasks/recent?limit=20`);
+      const arr = await r.json();
+      el('log').textContent = JSON.stringify(arr,null,2);
+    } catch(e){ el('log').textContent = '최근 작업 불러오기 실패: '+e; }
+  }
+</script>
+</body>
+</html>

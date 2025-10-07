@@ -1,0 +1,23 @@
+{
+  "weights": {
+    "domain": {
+      "ipc.org": 20,
+      "ecss.nl": 20,
+      "jedec.org": 18,
+      "ieee.org": 16,
+      "iec.ch": 16,
+      "iconnect007.com": 16,
+      "smt007.com": 16,
+      "pcb007.com": 16,
+      "smta.org": 12,
+      "spectrum.ieee.org": 12,
+      "technologyreview.com": 10,
+      "nist.gov": 16,
+      "eeworld.com.cn": 12,
+      "blogs.nvidia.com": 10,
+      "deepmind.com": 10,
+      "ai.googleblog.com": 10,
+      "meta.com": 10
+    }
+  }
+}

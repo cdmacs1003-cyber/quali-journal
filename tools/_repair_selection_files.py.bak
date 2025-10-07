@@ -1,0 +1,49 @@
+# tools/repair_selection_files.py
+# 목적:
+# - selected_articles.json / selected_community.json 이 list로 저장된 경우
+#   orchestrator가 기대하는 표준 구조(dict + "articles": [...])로 래핑
+# - date 필드가 없으면 오늘 날짜로 추가
+# - data/selected_keyword_articles.json은 이미 dict+articles 구조로 작업 중이므로 미변경
+
+import json, os, datetime
+
+BASE = os.getcwd()
+TARGETS = [
+    os.path.join(BASE, "selected_articles.json"),
+    os.path.join(BASE, "selected_community.json"),
+]
+
+def _wrap_if_list(path):
+    if not os.path.exists(path):
+        return False, "MISSING"
+    # BOM이 섞인 JSON도 안전하게 읽기 위해 utf-8-sig 사용
+    with open(path, "r", encoding="utf-8-sig") as f:
+        obj = json.load(f)
+
+    changed = False
+    if isinstance(obj, list):
+        obj = {"date": datetime.date.today().strftime("%Y-%m-%d"), "articles": obj}
+        changed = True
+    elif isinstance(obj, dict):
+        if "articles" not in obj or not isinstance(obj["articles"], list):
+            # articles 키가 없으면 비어있는 리스트로라도 맞춤
+            obj.setdefault("articles", [])
+            changed = True
+        obj.setdefault("date", datetime.date.today().strftime("%Y-%m-%d"))
+
+    if changed:
+        # Persist the corrected structure back to disk.  Use UTF‑8
+        # encoding without BOM to avoid JSONDecodeError due to BOMs.  We
+        # preserve non‑ASCII characters by disabling ASCII escaping and
+        # indent the output for readability.
+        with open(path, "w", encoding="utf-8") as wf:
+            json.dump(obj, wf, ensure_ascii=False, indent=2)
+    return changed, "FIXED" if changed else "OK"
+
+def main():
+    for p in TARGETS:
+        changed, status = _wrap_if_list(p)
+        print(f"{os.path.basename(p)} -> {status}")
+
+if __name__ == "__main__":
+    main()

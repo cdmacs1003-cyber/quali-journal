@@ -1,0 +1,56 @@
+{
+  "keyword": "SMT",
+  "date": "2025-10-07",
+  "sections": {
+    "news": [
+      {
+        "id": "6dbc2b658940ec1653987ac6a030a955",
+        "type": "news",
+        "title": "Foxconn Chief Procurement Officer Honored In Alcott Global's Top 30 Supply Chain Leaders of 2025",
+        "source": "iconnect007_smt_news",
+        "url": "https://iconnect007.com/article/147159/foxconn-chief-procurement-officer-honored-in-alcott-globals-top-30-supply-chain-leaders-of-2025/147156/smt",
+        "published_date": "",
+        "summary": "Article",
+        "score": 0.0,
+        "kw_hits": 1,
+        "trust_score": 1,
+        "approved": true,
+        "editor_note": "",
+        "fallback": false
+      },
+      {
+        "id": "5f8bd9408ae3c2005f37c35ae8c584e4",
+        "type": "news",
+        "title": "Taiwan PCB Industry Projects NT$915.7 Billion Output in 2025, Driven by AI Demand",
+        "source": "iconnect007_pcb007",
+        "url": "https://iconnect007.com/article/147168/taiwan-pcb-industry-projects-nt9157-billion-output-in-2025-driven-by-ai-demand/147165/pcb",
+        "published_date": "",
+        "summary": "Article",
+        "score": 0.0,
+        "kw_hits": 0,
+        "trust_score": 1,
+        "approved": true,
+        "editor_note": "",
+        "fallback": true
+      },
+      {
+        "id": "ff4119011a99b26d46d2ef75e4a67e27",
+        "type": "news",
+        "title": "Draganfly Enlisted by U.S. Army to Deliver Drones on Heels of Developing Drones for Border Security",
+        "source": "iconnect007_milaero",
+        "url": "https://iconnect007.com/article/147163/draganfly-enlisted-by-us-army-to-deliver-drones-on-heels-of-developing-drones-for-border-security/147160/milaero",
+        "published_date": "",
+        "summary": "Article",
+        "score": 0.0,
+        "kw_hits": 0,
+        "trust_score": 1,
+        "approved": true,
+        "editor_note": "",
+        "fallback": true
+      }
+    ],
+    "paper": [],
+    "standard": [],
+    "community": []
+  }
+}

@@ -1,0 +1,13 @@
+내가 어떤 이름을 써도 되는 이유 (하지만 기억 필수)
+
+이미지 주소는 이렇게 만들어져요:
+
+<리전>-docker.pkg.dev/<프로젝트ID>/<리포지토리이름>/<이미지이름>:<태그>
+
+
+예시(지금 우리가 추천한 값):
+
+asia-northeast3-docker.pkg.dev/quali-journal-prod/quali-repo/quali-journal:prod
+
+
+👉 만약 리포지토리 이름을 quali-repo 대신 q-repo로 만들었다면, 위 경로에서 quali-repo → q-repo로만 바꿔주면 됩니다.
