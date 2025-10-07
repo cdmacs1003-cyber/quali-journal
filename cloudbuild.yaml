@@ -4,6 +4,7 @@
 # 필요시 _REPO_NAME / _SERVICE / _REGION 값을 바꿔주세요.
 options:
   logging: CLOUD_LOGGING_ONLY
+
 substitutions:
   _REPO_NAME: "quali-journal"
   _SERVICE: "quali-journal"
