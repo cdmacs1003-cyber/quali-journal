@@ -1,59 +1,45 @@
-# cloudbuild.yaml — QualiJournal CI → Artifact Registry → Cloud Run(Seoul)
-# - 빌드 → 푸시 → 배포(서비스 계정/환경변수 포함)
-# - substitutions 고정값: 커맨드에 --substitutions 안 넘겨도 동작
+# cloudbuild.yaml
+# 목적: GitHub에서 푸시될 때 Cloud Build가 이미지를 빌드하여 GCR에 올리고 Cloud Run에 배포합니다.
+# 사용법: 이 파일을 repo 루트에 저장(cloudbuild.yaml). 트리거는 "cloudbuild.yaml 사용"으로 설정.
+# 필요시 _REPO_NAME / _SERVICE / _REGION 값을 바꿔주세요.
 
 substitutions:
-  _REGION: "asia-northeast3"                         # 서울
-  _PROJECT: "quali-journal-prod"
-  _REPO: "quali-repo"
-  _IMAGE: "quali-journal"
-  _TAG: "prod"
-  _SERVICE: "hello"
-  _PORT: "8080"
-  _ENV: "GCP_PROJECT=quali-journal-prod,REGION=asia-northeast3,BUCKET_NAME=quali-journal-archive-seoul"
-  _RUNTIME_SA: "quali-admin@quali-journal-prod.iam.gserviceaccount.com"
+  _REPO_NAME: "quali-journal"
+  _SERVICE: "quali-journal"
+  _REGION: "asia-northeast3"
 
-# 빌드 타임아웃(옵션): 대형 이미지 대비
-timeout: "1200s"
-
-# 빌드/푸시/배포
 steps:
-  # 1) Docker Build
+  # 1) Docker 이미지 빌드
   - name: "gcr.io/cloud-builders/docker"
     args:
-      [
-        "build",
-        "-t",
-        "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_IMAGE}:${_TAG}",
-        "."
-      ]
+      - "build"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA"
+      - "."
 
-  # 2) Docker Push → Artifact Registry
+  # 2) 빌드한 이미지를 GCR에 push
   - name: "gcr.io/cloud-builders/docker"
     args:
-      [
-        "push",
-        "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_IMAGE}:${_TAG}"
-      ]
+      - "push"
+      - "gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA"
 
-  # 3) Cloud Run Deploy (서비스계정/포트/환경변수 지정)
+  # 3) Cloud Run에 배포
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    entrypoint: gcloud
+    entrypoint: "bash"
     args:
-      [
-        "run","deploy","${_SERVICE}",
-        "--image","${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_IMAGE}:${_TAG}",
-        "--region","${_REGION}",
-        "--platform","managed",
-        "--service-account","${_RUNTIME_SA}",
-        "--port","${_PORT}",
-        "--set-env-vars","${_ENV}"
-      ]
+      - "-c"
+      - |
+        set -e
+        echo "Deploying to Cloud Run: service=${_SERVICE}, region=${_REGION}"
+        # 배포: 공개 엔드포인트로 배포하여 누구나 접근 가능하게 설정합니다(필요시 --no-allow-unauthenticated로 변경)
+        gcloud run deploy "${_SERVICE}" \
+          --image="gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA" \
+          --region="${_REGION}" \
+          --platform=managed \
+          --allow-unauthenticated \
+          --project="$PROJECT_ID"
 
-# 빌드 결과로 남길 이미지(AR에 푸시된 것)
 images:
-  - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_IMAGE}:${_TAG}"
+  - "gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA"
 
-# 로그 포맷(가독성): 기본
-options:
-  logging: CLOUD_LOGGING_ONLY
+timeout: "1200s"

@@ -1,0 +1,63 @@
+[35mHEAD:.dockerignore[m[36m:[m[32m5[m[36m:[m[1;31m.env[m
+[35mHEAD:.dockerignore[m[36m:[m[32m6[m[36m:[m.[1;31mvenv[m/
+[35mHEAD:.gitignore[m[36m:[m[32m2[m[36m:[m[1;31m.env[m
+[35mHEAD:.gitignore[m[36m:[m[32m3[m[36m:[m*[1;31m.env[m
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m131[m[36m:[m           [1;31m env[m = os[1;31m.env[miron.copy()
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m132[m[36m:[m           [1;31m env[m.setdefault("PYTHONIOENCODING", "utf-8")
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m141[m[36m:[m               [1;31m env[m[1;31m=env[m,
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m222[m[36m:[m   [1;31m env[m = os[1;31m.env[miron.copy()
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m223[m[36m:[m   [1;31m env[m.setdefault("PYTHONIOENCODING", "utf-8")
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m235[m[36m:[m       [1;31m env[m[1;31m=env[m,
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m453[m[36m:[m       [1;31m env[m = os[1;31m.env[miron.copy()
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m454[m[36m:[m       [1;31m env[m.setdefault("PYTHONIOENCODING", "utf-8")
+[35mHEAD:admin/BACK/server_quali.py[m[36m:[m[32m460[m[36m:[m            cwd=str(ROOT),[1;31m env[m[1;31m=env[m
+Binary file [35mHEAD:admin/__pycache__/server_quali.cpython-313.pyc[m matches
+[35mHEAD:admin/auth_utils.py[m[36m:[m[32m13[m[36m:[mkey should be provided via the ``QUALI_JWT_SECRET``[1;31m env[mironment variable.
+[35mHEAD:admin/auth_utils.py[m[36m:[m[32m126[m[36m:[m    The signing secret is read from the ``QUALI_JWT_SECRET``[1;31m env[mironment
+[35mHEAD:admin/auth_utils.py[m[36m:[m[32m133[m[36m:[m    secret = os.ge[1;31mtenv[m("QUALI_JWT_SECRET", "quali_default_secret")
+[35mHEAD:admin/auth_utils.py[m[36m:[m[32m179[m[36m:[m    ``QUALI_2FA_SECRET``[1;31m env[mironment variable; if not set, an exception is
+[35mHEAD:admin/auth_utils.py[m[36m:[m[32m187[m[36m:[m    totp_secret = os.ge[1;31mtenv[m("QUALI_2FA_SECRET")
+[35mHEAD:admin/server_quali.py[m[36m:[m[32m40[m[36m:[m#[1;31m env[mironment variable is set, incoming requests must provide a matching token. Otherwise
+[35mHEAD:admin/server_quali.py[m[36m:[m[32m45[m[36m:[m    expected = os[1;31m.env[miron.get("API_TOKEN")
+[35mHEAD:admin/server_quali.py[m[36m:[m[32m138[m[36m:[m   [1;31m env[m = os[1;31m.env[miron.copy()
+[35mHEAD:admin/server_quali.py[m[36m:[m[32m139[m[36m:[m   [1;31m env[m.setdefault("PYTHONIOENCODING", "utf-8")
+[35mHEAD:admin/server_quali.py[m[36m:[m[32m147[m[36m:[m       [1;31m env[m[1;31m=env[m,
+[35mHEAD:admin/server_quali.py[m[36m:[m[32m185[m[36m:[m           [1;31m env[m = os[1;31m.env[miron.copy();[1;31m env[m.setdefault("PYTHONIOENCODING", "utf-8")
+[35mHEAD:admin/server_quali.py[m[36m:[m[32m186[m[36m:[m            cp = subprocess.run([py, str(script)], cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,[1;31m env[m[1;31m=env[m)
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m101[m[36m:[mUSER_AGENT = os.ge[1;31mtenv[m("QUALI_UA", "Mozilla/5.0 (QualiNewsBot)")
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m102[m[36m:[mREQUEST_TO = int(os.ge[1;31mtenv[m("QUALI_REQ_TO", "12"))
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m123[m[36m:[m        "translate_model": os.ge[1;31mtenv[m("OPENAI_TRANSLATE_MODEL", "gpt-4o"),
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m166[m[36m:[mRUN_MODE = os.ge[1;31mtenv[m("JJIPPA_RUN_MODE", "collect")
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m171[m[36m:[m_OPENAI_MODEL = os.ge[1;31mtenv[m("OPENAI_TRANSLATE_MODEL", "gpt-4o")
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m172[m[36m:[m_OPENAI_KEY = os.ge[1;31mtenv[m("OPENAI_API_KEY", "").strip()
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m314[m[36m:[m    collect_phase = bool(globals().get("COLLECT_PHASE", os.ge[1;31mtenv[m("JJIPPA_RUN_MODE", "collect").lower() == "collect"))
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m317[m[36m:[m    if os.ge[1;31mtenv[m("QUALI_DISABLE_OPENAI", "0") == "1":
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m1450[m[36m:[m    max_workers = int(os.ge[1;31mtenv[m("QUALI_MAX_WORKERS", "4"))
+[35mHEAD:backup/engine_core.py[m[36m:[m[32m1781[m[36m:[m                "model": os.ge[1;31mtenv[m("OPENAI_TRANSLATE_MODEL", "gpt-4o"),
+[35mHEAD:cloudbuild.yaml[m[36m:[m[32m50[m[36m:[m        "--set[1;31m-env[m-vars","${_ENV}"
+[35mHEAD:engine_core.py[m[36m:[m[32m35[m[36m:[mUSER_AGENT = os.ge[1;31mtenv[m("QUALI_UA", "Mozilla/5.0 (QualiNewsBot)")
+[35mHEAD:engine_core.py[m[36m:[m[32m36[m[36m:[mREQUEST_TO = int(os.ge[1;31mtenv[m("QUALI_REQ_TO", "12"))
+[35mHEAD:engine_core.py[m[36m:[m[32m47[m[36m:[m#[1;31m env[mironment variables be used to override values (e.g. translation
+[35mHEAD:engine_core.py[m[36m:[m[32m71[m[36m:[m    # Override translate_model from[1;31m env[mironment if provided
+[35mHEAD:engine_core.py[m[36m:[m[32m72[m[36m:[m   [1;31m env[m_model = os.ge[1;31mtenv[m("OPENAI_TRANSLATE_MODEL")
+[35mHEAD:engine_core.py[m[36m:[m[32m73[m[36m:[m    if[1;31m env[m_model:
+[35mHEAD:engine_core.py[m[36m:[m[32m74[m[36m:[m        cfg.setdefault("features", {}).setdefault("translate_model",[1;31m env[m_model)
+[35mHEAD:engine_core.py[m[36m:[m[32m78[m[36m:[mRUN_MODE = os.ge[1;31mtenv[m("JJIPPA_RUN_MODE", "collect")
+[35mHEAD:engine_core.py[m[36m:[m[32m83[m[36m:[m_OPENAI_MODEL = os.ge[1;31mtenv[m("OPENAI_TRANSLATE_MODEL", "gpt-4o")
+[35mHEAD:engine_core.py[m[36m:[m[32m84[m[36m:[m_OPENAI_KEY = os.ge[1;31mtenv[m("OPENAI_API_KEY", "").strip()
+[35mHEAD:engine_core.py[m[36m:[m[32m226[m[36m:[m    collect_phase = bool(globals().get("COLLECT_PHASE", os.ge[1;31mtenv[m("JJIPPA_RUN_MODE", "collect").lower() == "collect"))
+[35mHEAD:engine_core.py[m[36m:[m[32m229[m[36m:[m    if os.ge[1;31mtenv[m("QUALI_DISABLE_OPENAI", "0") == "1":
+[35mHEAD:engine_core.py[m[36m:[m[32m1627[m[36m:[m                "model": os.ge[1;31mtenv[m("OPENAI_TRANSLATE_MODEL", "gpt-4o"),
+[35mHEAD:run_quali_today.ps1[m[36m:[m[32m13[m[36m:[m$ROOT = if ($PSScriptRoot) { $PSScriptRoot } else { Join-Path [1;31m$env[m:USERPROFILE 'Desktop\퀄리저널' }
+[35mHEAD:run_quali_today.ps1[m[36m:[m[32m18[m[36m:[m[1;31m$env[m:PYTHONUTF8      = "1"
+[35mHEAD:run_quali_today.ps1[m[36m:[m[32m19[m[36m:[m[1;31m$env[m:PYTHONIOENCODING= "utf-8"
+[35mHEAD:run_quali_today.ps1[m[36m:[m[32m20[m[36m:[m[1;31m$env[m:PYTHONPATH      = (Get-Location).Path
+[35mHEAD:run_quali_today.py[m[36m:[m[32m2[m[36m:[m#!/usr/bin[1;31m/env[m python
+[35mHEAD:run_quali_today.py[m[36m:[m[32m56[m[36m:[m   [1;31m env[m = os[1;31m.env[miron.copy()
+[35mHEAD:run_quali_today.py[m[36m:[m[32m57[m[36m:[m   [1;31m env[m.setdefault("PYTHONIOENCODING", "utf-8")
+[35mHEAD:run_quali_today.py[m[36m:[m[32m67[m[36m:[m           [1;31m env[m[1;31m=env[m,
+Binary file [35mHEAD:tools/__pycache__/_d4_utils.cpython-313.pyc[m matches
+[35mHEAD:tools/_d4_utils.py[m[36m:[m[32m79[m[36m:[m    api_key = api_key or os.ge[1;31mtenv[m("OPENAI_API_KEY") or ""
+[35mHEAD:tools/_d4_utils.py[m[36m:[m[32m82[m[36m:[m    model = model or os.ge[1;31mtenv[m("OPENAI_TRANSLATE_MODEL") or "gpt-4o-mini"
+[35mHEAD:tools/cleanup_legacy.py[m[36m:[m[32m31[m[36m:[m    "orchestrator.py", "selected_articles.json", "[1;31m.env[m",
+[35mHEAD:tools/ops_quali.ps1[m[36m:[m[32m2[m[36m:[m  [string]$Repo = "[1;31m$env[m:USERPROFILE\Desktop\퀄리저널",
