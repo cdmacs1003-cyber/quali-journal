@@ -1,10 +1,24 @@
+# QualiNews (퀄리저널) — runtime dependencies
 
-fastapi>=0.110,<1
-uvicorn[standard]>=0.24,<1
-pydantic==1.10.15
-python-multipart>=0.0.9,<0.1
+# Core HTTP & parsing
 requests>=2.31.0,<3
 beautifulsoup4>=4.12.2,<5
 lxml>=4.9.3,<6
+
+# Admin API (server_quali.py)
+fastapi>=0.110,<1
+# [standard] 옵션을 통해 h11, websockets 등 필수 의존성을 함께 설치
+uvicorn[standard]>=0.24,<1
+# Pydantic v1.x 고정 (v2는 API 변경이 커서 호환성 문제가 발생합니다)
+pydantic==1.10.15
+# multipart/form-data 처리를 위한 패키지
+python-multipart>=0.0.9,<0.1
+# 파일 I/O 비동기용 (선택)
+aiofiles>=23.2.1,<24
+
+# RSS/Reddit helpers
 feedparser>=6.0,<7
 praw>=7.7,<8
+
+# Optional fallback XML/HTML parser (선택)
+# html5lib>=1.1
