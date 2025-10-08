@@ -26,4 +26,6 @@ EXPOSE 8080
 
 # 컨테이너 실행 시 FastAPI 앱 시작
 # Cloud Run이 전달하는 PORT 환경변수를 그대로 사용(없으면 8080)
+WORKDIR /app
 CMD ["sh","-c","python -m uvicorn server_quali:app --host 0.0.0.0 --port ${PORT:-8080}"]
+
