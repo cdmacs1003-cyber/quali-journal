@@ -1,4 +1,5 @@
 
-.env
+openai_new.txt
 *.env
+*.key
 
