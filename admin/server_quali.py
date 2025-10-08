@@ -15,7 +15,7 @@ import os, sys, json, csv, io, shutil, subprocess, datetime as _dt, hashlib, asy
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from fastapi import Header
-
+from dotenv import load_dotenv; load_dotenv()
 from fastapi import FastAPI, Query, Response, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware

@@ -5,3 +5,11 @@ openai_new.txt
 
 
 .env
+
+__pycache__/
+*.pyc
+logs/
+*.log
+.env
+*.env
+
