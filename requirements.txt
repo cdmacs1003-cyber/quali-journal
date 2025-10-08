@@ -1,18 +1,7 @@
-# QualiNews (퀄리저널) — runtime dependencies
-# Core HTTP & parsing
-requests>=2.31.0,<3
-beautifulsoup4>=4.12.2,<5
-lxml>=4.9.3,<6
 
-# Web server dependencies for the admin API.  FastAPI/Uvicorn/Pydantic are
-# required to run the embedded admin server implemented in ``server_quali.py``.
 fastapi>=0.110,<1
-uvicorn>=0.24,<1
-pydantic>=1.10,<2
+uvicorn[standard]>=0.24,<1
+pydantic==1.10.15
+python-multipart>=0.0.9,<0.1
 
-# RSS/Reddit helpers used by community ingestion and keyword collection.
-feedparser>=6.0,<7
-praw>=7.7,<8
-
-# Optional fallback XML/HTML parser (선택)
-# html5lib>=1.1
+# 기타 필요 패키지(예: requests, lxml, feedparser 등)은 사용 환경에 따라 추가하세요.

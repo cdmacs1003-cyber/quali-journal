@@ -1,27 +1,31 @@
-﻿FROM python:3.11-slim
+FROM python:3.11-slim
 
+# 표준 출력 버퍼링과 pyc 파일 생성을 비활성화하고, UTF-8 인코딩과 PIP 캐시 비활성화를 설정합니다.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONIOENCODING=utf-8
+    PYTHONIOENCODING=utf-8 \
+    PIP_NO_CACHE_DIR=1
 
-# 앱 루트
+# 애플리케이션 루트 디렉터리를 설정합니다.
 WORKDIR /app
 
-# 라이브러리 먼저 설치 (캐시 효율)
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# 전체 소스를 컨테이너에 복사합니다.
+# 소스 디렉터리에는 server_quali.py와 기타 코드가 포함되어 있어야 합니다.
+COPY . /app
 
-# 소스 전체 복사 (admin, tools, data, etc.)
-COPY . /app/
+# 의존성 설치:
+#  - requirements.txt 파일이 있을 경우 그 내용을 설치하고,
+#  - 없다면 FastAPI와 Uvicorn, Pydantic v1, python‑multipart 패키지를 기본으로 설치합니다.
+RUN set -e; \
+    if [ -f requirements.txt ]; then \
+      pip install --no-cache-dir -r requirements.txt; \
+    else \
+      pip install --no-cache-dir fastapi uvicorn[standard] pydantic==1.* python-multipart; \
+    fi
 
-# Cloud Run 기본 포트
+# Cloud Run은 기본적으로 8080 포트를 사용하므로, 해당 포트를 노출합니다.
 EXPOSE 8080
 
-# FastAPI 실행 위치를 admin으로 맞춤
-WORKDIR /app/admin
-# Use a small shell wrapper to honour the PORT environment variable provided by Cloud Run. If PORT
-# is not set, default to 8080. Using ${PORT:-8080} ensures the container listens on the expected
-# port, preventing the "failed to start and listen to the port defined by the PORT environment
-# variable" error during deployment.
-CMD ["sh", "-c", "exec uvicorn server_quali:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# 컨테이너 실행 시, Cloud Run이 제공하는 PORT 환경변수를 읽어 해당 포트로 서버를 기동합니다.
+# 만약 PORT 값이 없다면 8080을 사용합니다. server_quali.py가 루트에 있다고 가정합니다.
+CMD ["sh", "-c", "python -m uvicorn server_quali:app --host 0.0.0.0 --port ${PORT:-8080}"]
