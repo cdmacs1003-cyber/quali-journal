@@ -3,5 +3,8 @@ fastapi>=0.110,<1
 uvicorn[standard]>=0.24,<1
 pydantic==1.10.15
 python-multipart>=0.0.9,<0.1
-
-# 기타 필요 패키지(예: requests, lxml, feedparser 등)은 사용 환경에 따라 추가하세요.
+requests>=2.31.0,<3
+beautifulsoup4>=4.12.2,<5
+lxml>=4.9.3,<6
+feedparser>=6.0,<7
+praw>=7.7,<8
