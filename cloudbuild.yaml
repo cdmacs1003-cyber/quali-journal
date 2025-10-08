@@ -1,36 +1,14 @@
 # cloudbuild.yaml
-# 목적: Git push 시 Docker 이미지 빌드 → 레지스트리 푸시 → Cloud Run 안전 배포
-# 보안/안정 옵션:
-#  - Cloud Build 로그는 Cloud LoggingOnly (권장)
-#  - 배포 시 서비스계정, 시크릿, 환경변수, 리소스 한도, 동시성/스케일 제한, 네트워크/Ingress 설정
-#  - 기본값은 substitutions에서 한 번에 조정
-
+# 목적: GitHub에서 푸시될 때 Cloud Build가 이미지를 빌드하여 GCR에 올리고 Cloud Run에 배포합니다.
+# 사용법: 이 파일을 repo 루트에 저장(cloudbuild.yaml). 트리거는 "cloudbuild.yaml 사용"으로 설정.
+# 필요시 _REPO_NAME / _SERVICE / _REGION 값을 바꿔주세요.
 options:
   logging: CLOUD_LOGGING_ONLY
-  # machineType: E2_HIGHCPU_8   # 빌드가 무거우면 활성화
 
 substitutions:
   _REPO_NAME: "quali-journal"
   _SERVICE: "quali-journal"
   _REGION: "asia-northeast3"
-
-  # === 운영 파라미터(필요 시 수정) ===
-  _RUN_SA: "665693030029-compute@developer.gserviceaccount.com"  # Cloud Run 실행 서비스계정
-  _APP_ENV: "prod"
-  _QUALI_DB_MODE: "prod"
-
-  # 리소스/스케일
-  _CPU: "1"                 # 1 | 2 | 4
-  _MEMORY: "1Gi"            # 예: 512Mi | 1Gi | 2Gi
-  _CONCURRENCY: "20"        # 동시 처리(기본 80). 낮추면 안정성↑, 높이면 처리량↑
-  _TIMEOUT: "300s"          # 요청 타임아웃
-  _MIN_INSTANCES: "0"       # 콜드스타트 방지 필요 시 1 이상
-  _MAX_INSTANCES: "10"      # 과도한 스케일 방지 안전망
-
-  # 네트워크/보안
-  _INGRESS: "all"           # all | internal | internal-and-cloud-load-balancing
-  _PORT: "8080"             # 앱 리스닝 포트
-  _EXEC_ENV: "gen2"         # 실행환경: gen1 | gen2
 
 steps:
   # 1) Docker 이미지 빌드
@@ -41,37 +19,26 @@ steps:
       - "gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA"
       - "."
 
-  # 2) 레지스트리 푸시
+  # 2) 빌드한 이미지를 GCR에 push
   - name: "gcr.io/cloud-builders/docker"
     args:
       - "push"
       - "gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA"
 
-  # 3) Cloud Run 배포 (보안/리소스/시크릿/환경 모두 반영)
+  # 3) Cloud Run에 배포
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "bash"
     args:
       - "-c"
       - |
-        set -euo pipefail
+        set -e
         echo "Deploying to Cloud Run: service=${_SERVICE}, region=${_REGION}"
+        # 배포: 공개 엔드포인트로 배포하여 누구나 접근 가능하게 설정합니다(필요시 --no-allow-unauthenticated로 변경)
         gcloud run deploy "${_SERVICE}" \
           --image="gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA" \
           --region="${_REGION}" \
           --platform=managed \
-          --execution-environment="${_EXEC_ENV}" \
-          --service-account="${_RUN_SA}" \
-          --cpu="${_CPU}" \
-          --memory="${_MEMORY}" \
-          --concurrency="${_CONCURRENCY}" \
-          --timeout="${_TIMEOUT}" \
-          --max-instances="${_MAX_INSTANCES}" \
-          --min-instances="${_MIN_INSTANCES}" \
-          --ingress="${_INGRESS}" \
-          --port="${_PORT}" \
-          --set-env-vars=APP_ENV=${_APP_ENV},QUALI_DB_MODE=${_QUALI_DB_MODE} \
-          --set-secrets=OPENAI_API_KEY=OPENAI_API_KEY:latest \
-          --allow-unauthenticated \
+          --no-allow-unauthenticated \
           --project="$PROJECT_ID"
 
 images:

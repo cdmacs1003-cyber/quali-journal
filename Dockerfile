@@ -1,32 +1,27 @@
-FROM python:3.11-slim
+﻿FROM python:3.11-slim
 
-# Ensure Python prints to stdout/stderr immediately and doesn't write .pyc files.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONIOENCODING=utf-8 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONIOENCODING=utf-8
 
-# Set the working directory in the container. All application code will live under /app
+# 앱 루트
 WORKDIR /app
 
-# Copy the entire application source code into the container. This includes
-# server_quali.py, main.py, templates, static files and any auxiliary modules.
-COPY . /app
+# 라이브러리 먼저 설치 (캐시 효율)
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Python dependencies. If a requirements.txt is present in the repo, use it; otherwise
-# install the minimal set of packages required to run the QualiJournal admin API. This fallback
-# avoids build failures when requirements.txt is absent but ensures FastAPI and Uvicorn are available.
-RUN set -e; \
-    if [ -f requirements.txt ]; then \
-      pip install --no-cache-dir -r requirements.txt; \
-    else \
-      pip install --no-cache-dir fastapi uvicorn[standard] pydantic python-multipart; \
-    fi
+# 소스 전체 복사 (admin, tools, data, etc.)
+COPY . /app/
 
-# Cloud Run expects the application to listen on port 8080 by default. Expose it here for clarity.
+# Cloud Run 기본 포트
 EXPOSE 8080
 
-# Start the FastAPI application using uvicorn. Use the module and app name directly; the
-# host must be 0.0.0.0 so that it is accessible from outside the container.
-# The port is set to 8080, which matches Cloud Run's default.
-CMD ["uvicorn", "server_quali:app", "--host", "0.0.0.0", "--port", "8080"]
+# FastAPI 실행 위치를 admin으로 맞춤
+WORKDIR /app/admin
+# Use a small shell wrapper to honour the PORT environment variable provided by Cloud Run. If PORT
+# is not set, default to 8080. Using ${PORT:-8080} ensures the container listens on the expected
+# port, preventing the "failed to start and listen to the port defined by the PORT environment
+# variable" error during deployment.
+CMD ["sh", "-c", "exec uvicorn server_quali:app --host 0.0.0.0 --port ${PORT:-8080}"]
