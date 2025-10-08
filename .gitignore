@@ -3,3 +3,5 @@ openai_new.txt
 *.env
 *.key
 
+
+.env
