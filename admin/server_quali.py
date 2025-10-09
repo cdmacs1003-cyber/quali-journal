@@ -27,6 +27,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+class TaskItem(BaseModel):
+    id: str           # 파일명 stem 등 문자열 ID
+    size: int         # 바이트 단위 파일 크기
+
+class TasksRecent(BaseModel):
+    items: List[TaskItem]
+
+def _task_log_dir() -> Path:
+    d = (ROOT / "logs" / "tasks")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 # ---------------------------------------------------------------------------
 # Auth (optional) — if auth_utils is missing, fall back to open access
 # ---------------------------------------------------------------------------
@@ -127,16 +138,22 @@ except Exception:
 
 # --- safe recent tasks endpoint (never 404, return empty list) ---
 
-@app.get("/api/tasks/recent")
-def tasks_recent(limit: int = Query(10, ge=1, le=50)) -> Dict[str, List[Dict[str, int]]]:
-    items: List[Dict[str, int]] = []
+@app.get("/api/tasks/recent", response_model=TasksRecent)
+def tasks_recent(limit: int = Query(10, ge=1, le=50)) -> TasksRecent:
+    """
+    최근 작업 로그 파일 목록을 반환합니다.
+    - id: 로그 파일명 stem (문자열)
+    - size: 파일 크기 (정수)
+    - 예외가 나도 500 대신 빈 배열을 반환합니다.
+    """
     try:
-        files = sorted(TASK_LOG_DIR.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for p in files[:limit]:
-            items.append({"id": p.stem, "size": p.stat().st_size})
+        d = _task_log_dir()
+        files = sorted(d.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        items = [TaskItem(id=p.stem, size=p.stat().st_size) for p in files[:limit]]
+        return TasksRecent(items=items)
     except Exception:
-        items = []
-    return {"items": items}
+        return TasksRecent(items=[])
+
 
 # ---------------------------------------------------------------------------
 # Health and root endpoints (Cloud Run friendly)
@@ -445,12 +462,6 @@ def cancel_task(job_id: str):
     if not t: raise HTTPException(404, "job not found")
     t._cancel = True; return {"ok": True}
 
-@app.get("/api/tasks/recent")
-def recent_tasks():
-    items = []
-    for t in sorted(TM.jobs.values(), key=lambda x: x.created_at, reverse=True)[:20]:
-        items.append({"id": t.id, "kind": t.kind, "status": t.status, "created_at": t.created_at})
-    return {"items": items}
 
 @app.get("/api/tasks/{job_id}/stream")
 async def stream_task(job_id: str):
