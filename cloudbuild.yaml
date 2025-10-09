@@ -1,47 +1,27 @@
-# cloudbuild.yaml
-# 목적: GitHub에서 푸시될 때 Cloud Build가 이미지를 빌드하여 GCR에 올리고 Cloud Run에 배포합니다.
-# 사용법: 이 파일을 repo 루트에 저장(cloudbuild.yaml). 트리거는 "cloudbuild.yaml 사용"으로 설정.
-# 필요시 _REPO_NAME / _SERVICE / _REGION 값을 바꿔주세요.
 options:
-  logging: CLOUD_LOGGING_ONLY
+  logging: CLOUD_LOGGING_ONLY   # 빌드 로그는 Cloud Logging에서만(문서 권장)
+                                # → 콘솔 경고 사라지고 로그 한 곳으로 모임
 
 substitutions:
-  _REPO_NAME: "quali-journal"
-  _SERVICE: "quali-journal"
-  _REGION: "asia-northeast3"
+  _REGION: asia-northeast3
+  _SERVICE: quali-journal
 
 steps:
-  # 1) Docker 이미지 빌드
-  - name: "gcr.io/cloud-builders/docker"
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/quali-journal:$SHORT_SHA', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/quali-journal:$SHORT_SHA']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
     args:
-      - "build"
-      - "-t"
-      - "gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA"
-      - "."
-
-  # 2) 빌드한 이미지를 GCR에 push
-  - name: "gcr.io/cloud-builders/docker"
-    args:
-      - "push"
-      - "gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA"
-
-  # 3) Cloud Run에 배포
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - |
-        set -e
-        echo "Deploying to Cloud Run: service=${_SERVICE}, region=${_REGION}"
-        # 배포: 공개 엔드포인트로 배포하여 누구나 접근 가능하게 설정합니다(필요시 --no-allow-unauthenticated로 변경)
-        gcloud run deploy "${_SERVICE}" \
-          --image="gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA" \
-          --region="${_REGION}" \
-          --platform=managed \
-          --no-allow-unauthenticated \
-          --project="$PROJECT_ID"
-
-images:
-  - "gcr.io/$PROJECT_ID/${_REPO_NAME}:$SHORT_SHA"
-
-timeout: "1200s"
+      - run
+      - deploy
+      - $_SERVICE
+      - --image=gcr.io/$PROJECT_ID/quali-journal:$SHORT_SHA
+      - --region=$_REGION
+      - --platform=managed
+      - --port=8080
+      - --set-env-vars=APP_ENV=prod,QUALI_DB_MODE=prod,PYTHONIOENCODING=UTF-8
+      - --set-secrets=OPENAI_API_KEY=OPENAI_API_KEY:latest
