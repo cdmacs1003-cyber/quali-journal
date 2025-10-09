@@ -101,6 +101,24 @@ except Exception:  # pragma: no cover
 # ---------------------------------------------------------------------------
 app = FastAPI(title="QualiJournal Admin API")
 
+# --- 디버그: 오케스트레이터/설정/피드 파일 존재 여부 확인 ---
+@app.get("/api/debug/files")
+def debug_files() -> Dict[str, str | bool]:
+    feeds_dir = ROOT / "feeds"
+    community_json = feeds_dir / "community_sources.json"
+    return {
+        "cwd": os.getcwd(),
+        "ROOT": str(ROOT),
+        "ORCH": str(ORCH),
+        "ORCH_exists": ORCH.exists(),
+        "CONFIG_FILE": str(CONFIG_FILE),
+        "CONFIG_exists": CONFIG_FILE.exists(),
+        "feeds_dir": str(feeds_dir),
+        "feeds_dir_exists": feeds_dir.exists(),
+        "community_sources.json": str(community_json),
+        "community_sources_exists": community_json.exists(),
+    }
+
 # --- ensure task log dir exists (for /api/tasks/*) ---
 try:
     TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)  # logs/tasks
@@ -176,24 +194,36 @@ def _ensure_id(item: dict) -> str:
 # ---------------------------------------------------------------------------
 def _run_orch(*args: str) -> dict:
     py = sys.executable or "python"
+    # 존재 확인(없으면 바로 원인 리턴)
+    if not ORCH.exists():
+        msg = f"[ORCH] not found: {ORCH}"
+        logger.error(msg)
+        return {"ok": False, "stdout": "", "stderr": msg, "cmd": f"{py} {ORCH} {' '.join(args)}"}
+
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
-    cp = subprocess.run(
-        [py, str(ORCH), *args],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-    )
+
     try:
-        logger.info("run orch: %s rc=%s", " ".join([str(ORCH), *args]), cp.returncode)
-        if cp.stderr:
-            logger.warning("orch stderr: %s", cp.stderr.strip().replace("\n", " ")[:200])
-    except Exception:
-        pass
-    return {"ok": cp.returncode == 0, "stdout": cp.stdout, "stderr": cp.stderr, "cmd": " ".join([str(ORCH), *args])}
+        cp = subprocess.run(
+            [py, "-u", str(ORCH), *args],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+            env=env,
+        )
+        # 표준출력/오류를 한 줄 요약으로 로깅
+        so = (cp.stdout or "").strip()
+        se = (cp.stderr or "").strip()
+        logger.info("run orch cmd=%s rc=%s", " ".join([str(ORCH), *args]), cp.returncode)
+        if se:
+            logger.warning("orch stderr: %s", se[:500].replace("\n", " "))
+        return {"ok": cp.returncode == 0, "stdout": so, "stderr": se, "cmd": " ".join([str(ORCH), *args])}
+    except Exception as e:
+        return {"ok": False, "stdout": "", "stderr": f"{type(e).__name__}: {e}", "cmd": " ".join([str(ORCH), *args])}
+
 
 # ---------------------------------------------------------------------------
 # Community helpers
