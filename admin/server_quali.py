@@ -97,13 +97,17 @@ except Exception:  # pragma: no cover
     logger.info("fallback logger initialized")
 
 # ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
+# App ------------------------------------------------------------
 app = FastAPI(title="QualiJournal Admin API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True
 )
+
+# ✅ Cloud Run 헬스체크
+@app.get("/health", include_in_schema=False)
+async def health():
+    return {"status": True}
 
 # ---------------------------------------------------------------------------
 # Task response models and helpers
