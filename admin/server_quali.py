@@ -15,7 +15,12 @@ import os, sys, json, csv, io, shutil, subprocess, datetime as _dt, hashlib, asy
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from fastapi import Header
-from dotenv import load_dotenv; load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    # dotenv is optional at runtime; skip if missing
+    pass
 from fastapi import FastAPI, Query, Response, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -95,6 +100,24 @@ except Exception:  # pragma: no cover
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="QualiJournal Admin API")
+
+# ---------------------------------------------------------------------------
+# Health and root endpoints
+# ---------------------------------------------------------------------------
+#
+# Cloud Run performs a startup probe against the container to ensure the
+# application is listening on the configured port.  Defining a simple
+# ``/health`` endpoint allows us to verify the service is up and running.
+# A root endpoint returns a minimal JSON response for convenience.
+@app.get("/health")
+async def health() -> Dict[str, bool]:  # pragma: no cover
+    """Liveness check for Cloud Run."""
+    return {"status": True}
+
+@app.get("/")
+async def root() -> Dict[str, bool]:  # pragma: no cover
+    """Root endpoint returning an ``ok`` status."""
+    return {"ok": True}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True
@@ -670,3 +693,10 @@ def index():
     p = INDEX_HTML if INDEX_HTML.exists() else (INDEX_LITE if INDEX_LITE.exists() else None)
     if p: return HTMLResponse(p.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>QualiJournal Admin</h1><p>index.html이 없습니다.</p>")
+
+
+if __name__ == "__main__":
+    # Local run helper (for dev/testing): respects Cloud Run-style PORT
+    import uvicorn, os as _os
+    _port = int(_os.getenv("PORT", "8080"))
+    uvicorn.run(app, host="0.0.0.0", port=_port, log_level="info")

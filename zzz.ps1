@@ -1,2 +1,0 @@
-﻿# hello
-Write-Host "test"
