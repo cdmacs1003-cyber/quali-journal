@@ -102,26 +102,25 @@ except Exception:  # pragma: no cover
 app = FastAPI(title="QualiJournal Admin API")
 
 # ---------------------------------------------------------------------------
-# Health and root endpoints
+# Health and root endpoints (Cloud Run friendly)
 # ---------------------------------------------------------------------------
-#
-# Cloud Run performs a startup probe against the container to ensure the
-# application is listening on the configured port.  Defining a simple
-# ``/health`` endpoint allows us to verify the service is up and running.
-# A root endpoint returns a minimal JSON response for convenience.
-@app.get("/health")
-async def health() -> Dict[str, bool]:  # pragma: no cover
-    """Liveness check for Cloud Run."""
-    return {"status": True}
+# NOTE:
+# - Ensure there is NO other `@app.get("/")` in this file to avoid duplicate route errors.
+# - `/health` is used by probes; it must be fast and side-effect free.
 
-@app.get("/")
-async def root() -> Dict[str, bool]:  # pragma: no cover
-    """Root endpoint returning an ``ok`` status."""
-    return {"ok": True}
+# CORS (add once, keeps things simple for admin UI / local tools)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
 )
+
+@app.get("/health", tags=["system"])
+async def health() -> Dict[str, bool]:  # pragma: no cover
+    """Liveness check for Cloud Run / health probe."""
+    return {"status": True}
 
 # ---------------------------------------------------------------------------
 # JSON helpers (BOM tolerant / safe write)
