@@ -101,6 +101,25 @@ except Exception:  # pragma: no cover
 # ---------------------------------------------------------------------------
 app = FastAPI(title="QualiJournal Admin API")
 
+# --- ensure task log dir exists (for /api/tasks/*) ---
+try:
+    TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)  # logs/tasks
+except Exception:
+    pass
+
+# --- safe recent tasks endpoint (never 404, return empty list) ---
+
+@app.get("/api/tasks/recent")
+def tasks_recent(limit: int = Query(10, ge=1, le=50)) -> Dict[str, List[Dict[str, int]]]:
+    items: List[Dict[str, int]] = []
+    try:
+        files = sorted(TASK_LOG_DIR.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for p in files[:limit]:
+            items.append({"id": p.stem, "size": p.stat().st_size})
+    except Exception:
+        items = []
+    return {"items": items}
+
 # ---------------------------------------------------------------------------
 # Health and root endpoints (Cloud Run friendly)
 # ---------------------------------------------------------------------------
