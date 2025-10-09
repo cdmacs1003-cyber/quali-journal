@@ -1,26 +1,25 @@
 # -*- coding: utf-8 -*-
 """
-QualiJournal Admin API + Lite Black UI (stable, Cloud Run friendly)
+QualiJournal Admin API + Lite Black UI (stable)
 - Community / Keyword / Daily flows (sync & async)
 - Async Task Manager (/api/tasks/*) + SSE stream
 - Gate config API (GET/PATCH /api/config/gate_required)
 - Report & Export (/api/report, /api/export/{md|csv})
 - Log viewing (/api/logs/*)
-- UTF-8 safe on Windows/Linux; optional deps are non-breaking.
+- UTF-8 safe on Windows; non-breaking fallback if optional modules are missing.
 """
 
 from __future__ import annotations
 
-import os, sys, json, csv, io, subprocess, datetime as _dt, hashlib, asyncio, threading, secrets, time
+import os, sys, json, csv, io, shutil, subprocess, datetime as _dt, hashlib, asyncio, threading, secrets, time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-
 try:
-    from dotenv import load_dotenv  # optional
+    from dotenv import load_dotenv
     load_dotenv()
 except Exception:
+    # dotenv is optional at runtime; skip if missing
     pass
-
 from fastapi import FastAPI, Query, Response, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,10 +27,10 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Str
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
-# Constants & Paths
+# Paths / Constants
 # ---------------------------------------------------------------------------
 BASE = Path(__file__).resolve().parent          # admin/
-ROOT = BASE.parent                              # repo root
+ROOT = BASE.parent                               # repo root
 ARCHIVE = ROOT / "archive"
 TOOLS = ROOT / "tools"
 ORCH = ROOT / "orchestrator.py"
@@ -42,38 +41,14 @@ CAND_COMM = [SEL_COMM, ROOT / "archive" / "selected_community.json"]
 
 INDEX_HTML = BASE / "index.html"
 INDEX_LITE = BASE / "index_lite_black.html"
+
 CONFIG_FILE = ROOT / "config.json"
 
-# Persistent task logs (survive restarts)
+# Directory to persist task logs. Logs are saved as <job_id>.log
 TASK_LOG_DIR = ROOT / "logs" / "tasks"
 
-# Python executable (works on Linux/Windows; avoids 'py' which doesn't exist on Linux)
-PY = sys.executable or "python3"
-
 # ---------------------------------------------------------------------------
-# Optional auth utils (do not fail if missing)
-# ---------------------------------------------------------------------------
-try:
-    from auth_utils import verify_jwt_token, require_two_factor  # type: ignore
-except Exception:  # pragma: no cover
-    async def verify_jwt_token(*args, **kwargs):  # type: ignore
-        return {}
-    async def require_two_factor(*args, **kwargs):  # type: ignore
-        return {}
-
-# Simple bearer-token guard (enabled only if API_TOKEN is set)
-security = HTTPBearer(auto_error=False)
-async def authorize(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    expected = os.environ.get("API_TOKEN")
-    if not expected:
-        return True
-    token = credentials.credentials if credentials else None
-    if not token or token != expected:
-        raise HTTPException(status_code=401, detail="invalid or missing token")
-    return True
-
-# ---------------------------------------------------------------------------
-# Logging (fallback-only)
+# Logging
 # ---------------------------------------------------------------------------
 try:
     from logging_setup import setup_logger  # type: ignore
@@ -91,43 +66,38 @@ except Exception:  # pragma: no cover
     logger.info("fallback logger initialized")
 
 # ---------------------------------------------------------------------------
-# Models
+# Auth (optional) — if auth_utils is missing, fall back to open access
 # ---------------------------------------------------------------------------
-class TaskItem(BaseModel):
-    id: str
-    size: int
+try:
+    from auth_utils import verify_jwt_token, require_two_factor  # type: ignore
+except Exception:  # pragma: no cover
+    async def verify_jwt_token(*args, **kwargs):  # type: ignore
+        return {}
+    async def require_two_factor(*args, **kwargs):  # type: ignore
+        return {}
 
-class TasksRecent(BaseModel):
-    items: List[TaskItem]
+# ---------------------------------------------------------------------------
+# Authorization (simple token based) — protects selected endpoints when API_TOKEN is set
+# ---------------------------------------------------------------------------
+security = HTTPBearer(auto_error=False)
 
-class SaveItem(BaseModel):
-    id: str
-    approved: bool
-    editor_note: str = ""
-
-class SavePayload(BaseModel):
-    changes: List[SaveItem]
-
-class FlowReq(BaseModel):
-    kind: str                  # daily|community|keyword
-    keyword: str | None = None
-
-class GateReq(BaseModel):
-    value: int
-
-class ReportReq(BaseModel):
-    date: str | None = None
-    keyword: str | None = None
-
-class EnrichReq(BaseModel):
-    keyword: str | None = None
+async def authorize(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    expected = os.environ.get("API_TOKEN")
+    # If no token configured, open access
+    if not expected:
+        return True
+    # When API_TOKEN is set, require a Bearer token
+    token = credentials.credentials if credentials else None
+    if not token or token != expected:
+        raise HTTPException(status_code=401, detail="invalid or missing token")
+    return True
 
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="QualiJournal Admin API")
 
-# CORS (admin UI & tools)
+# CORS (add once, keeps things simple for admin UI / local tools)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -136,12 +106,7 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-# --- Health for Cloud Run probe ---
-@app.get("/health", tags=["system"])
-async def health() -> Dict[str, bool]:  # pragma: no cover
-    return {"status": True}
-
-# --- Debug: verify important files/dirs ---
+# --- 디버그: 오케스트레이터/설정/피드 파일 존재 여부 확인 ---
 @app.get("/api/debug/files")
 def debug_files() -> Dict[str, str | bool]:
     feeds_dir = ROOT / "feeds"
@@ -149,15 +114,21 @@ def debug_files() -> Dict[str, str | bool]:
     return {
         "cwd": os.getcwd(),
         "ROOT": str(ROOT),
-        "ORCH": str(ORCH), "ORCH_exists": ORCH.exists(),
-        "CONFIG_FILE": str(CONFIG_FILE), "CONFIG_exists": CONFIG_FILE.exists(),
-        "feeds_dir": str(feeds_dir), "feeds_dir_exists": feeds_dir.exists(),
+        "ORCH": str(ORCH),
+        "ORCH_exists": ORCH.exists(),
+        "CONFIG_FILE": str(CONFIG_FILE),
+        "CONFIG_exists": CONFIG_FILE.exists(),
+        "feeds_dir": str(feeds_dir),
+        "feeds_dir_exists": feeds_dir.exists(),
         "community_sources.json": str(community_json),
         "community_sources_exists": community_json.exists(),
     }
 
-# Ensure task log dir exists
-TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)
+# --- ensure task log dir exists (for /api/tasks/*) ---
+try:
+    TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)  # logs/tasks
+except Exception:
+    pass
 
 def _task_log_dir() -> Path:
     d = (ROOT / "logs" / "tasks")
@@ -165,7 +136,26 @@ def _task_log_dir() -> Path:
     return d
 
 # ---------------------------------------------------------------------------
-# JSON helpers
+# Health and root endpoints (Cloud Run friendly)
+# ---------------------------------------------------------------------------
+@app.get("/health", tags=["system"])
+async def health() -> Dict[str, bool]:  # pragma: no cover
+    """Liveness check for Cloud Run / health probe."""
+    return {"status": True}
+
+@app.get("/")
+def index():
+    p = INDEX_HTML if INDEX_HTML.exists() else (INDEX_LITE if INDEX_LITE.exists() else None)
+    if p:
+        return HTMLResponse(p.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>QualiJournal Admin</h1><p>index.html이 없습니다.</p>")
+
+@app.get("/favicon.ico")
+def favicon_blank():
+    return Response(status_code=204)
+
+# ---------------------------------------------------------------------------
+# JSON helpers (BOM tolerant / safe write)
 # ---------------------------------------------------------------------------
 def _read_json(p: Path) -> dict:
     if not p.exists():
@@ -174,7 +164,7 @@ def _read_json(p: Path) -> dict:
         return json.loads(p.read_text(encoding="utf-8-sig"))
     except Exception:
         try:
-            return json.loads(p.read_bytes().decode("utf-8", errors="ignore").lstrip("\\ufeff"))
+            return json.loads(p.read_bytes().decode("utf-8", errors="ignore").lstrip("\ufeff"))
         except Exception:
             return {}
 
@@ -195,20 +185,22 @@ def _ensure_id(item: dict) -> str:
     return h
 
 # ---------------------------------------------------------------------------
-# Orchestrator runner (sync helpers; UTF‑8 safe)
+# Orchestrator runner (UTF-8 safe)
 # ---------------------------------------------------------------------------
 def _run_orch(*args: str) -> dict:
+    py = sys.executable or "python"
+    # 존재 확인(없으면 바로 원인 리턴)
     if not ORCH.exists():
         msg = f"[ORCH] not found: {ORCH}"
         logger.error(msg)
-        return {"ok": False, "stdout": "", "stderr": msg, "cmd": f"{PY} {ORCH} {' '.join(args)}"}
+        return {"ok": False, "stdout": "", "stderr": msg, "cmd": f"{py} {ORCH} {' '.join(args)}"}
 
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
 
     try:
         cp = subprocess.run(
-            [PY, "-u", str(ORCH), *args],
+            [py, "-u", str(ORCH), *args],
             cwd=str(ROOT),
             capture_output=True,
             text=True,
@@ -217,11 +209,12 @@ def _run_orch(*args: str) -> dict:
             timeout=600,
             env=env,
         )
+        # 표준출력/오류를 한 줄 요약으로 로깅
         so = (cp.stdout or "").strip()
         se = (cp.stderr or "").strip()
         logger.info("run orch cmd=%s rc=%s", " ".join([str(ORCH), *args]), cp.returncode)
         if se:
-            logger.warning("orch stderr: %s", se[:500].replace("\n", " "))
+            logger.warning("orch stderr: %s", se[:500].replace("\\n", " "))
         return {"ok": cp.returncode == 0, "stdout": so, "stderr": se, "cmd": " ".join([str(ORCH), *args])}
     except Exception as e:
         return {"ok": False, "stdout": "", "stderr": f"{type(e).__name__}: {e}", "cmd": " ".join([str(ORCH), *args])}
@@ -249,33 +242,27 @@ def _get_community_snapshot() -> dict:
     return {"date": date, "keyword": keyword, "articles": arts}
 
 def _sync_after_save() -> dict:
-    """Sync selected -> publish using tools/sync_selected_for_publish.py when available; else safe merge."""
+    """Sync selected -> publish (tools/sync_selected_for_publish.py if exists; else safe merge)."""
+    py = sys.executable or "python"
     script = TOOLS / "sync_selected_for_publish.py"
     if script.exists():
         try:
             env = os.environ.copy(); env.setdefault("PYTHONIOENCODING", "utf-8")
-            cp = subprocess.run([PY, str(script)], cwd=str(ROOT), capture_output=True, text=True,
-                                encoding="utf-8", errors="replace", timeout=120, env=env)
-            return {"ok": cp.returncode == 0, "stdout": (cp.stdout or ""), "stderr": (cp.stderr or "")}
+            cp = subprocess.run([py, str(script)], cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, env=env)
+            return {"ok": cp.returncode == 0, "stdout": cp.stdout, "stderr": cp.stderr}
         except Exception as e:
             return {"ok": False, "stderr": str(e)}
-
-    # Fallback merge (work -> publish only approved)
+    # fallback merge (work -> publish only approved)
     work = _read_json(SEL_WORK) or {}
     pub  = _read_json(SEL_PUB)  or {}
     merged: Dict[str, dict] = {}
     for art in pub.get("articles", []) or []:
-        try:
-            _ensure_id(art); merged[art["id"]] = art
-        except Exception:
-            continue
+        try: _ensure_id(art); merged[art["id"]] = art
+        except Exception: continue
     for art in work.get("articles", []) or []:
-        if not art.get("approved"):
-            continue
-        try:
-            _ensure_id(art); aid = art["id"]
-        except Exception:
-            continue
+        if not art.get("approved"): continue
+        try: _ensure_id(art); aid = art["id"]
+        except Exception: continue
         if aid in merged:
             ex = merged[aid]
             ex["approved"] = art.get("approved", ex.get("approved"))
@@ -290,8 +277,29 @@ def _sync_after_save() -> dict:
     _write_json(SEL_PUB, out)
     return {"ok": True, "stdout": "fallback merge ok"}
 
+def _rollover_archive_if_needed(keyword: str) -> Optional[List[str]]:
+    date = _dt.date.today().isoformat()
+    base = f"{date}_{_slug_kw(keyword)}"
+    created = []; ARCHIVE.mkdir(parents=True, exist_ok=True)
+    for ext in (".html", ".md", ".json"):
+        p = ARCHIVE / f"{base}{ext}"
+        if p.exists():
+            ts = _dt.datetime.now().strftime("%H%M")
+            newp = ARCHIVE / f"{base}_{ts}{ext}"
+            p.rename(newp); created.append(str(newp))
+    return created or None
+
+def _latest_published_paths(keyword: str) -> List[str]:
+    date = _dt.date.today().isoformat()
+    base = f"{date}_{_slug_kw(keyword)}"
+    out = []
+    for ext in (".html", ".md", ".json"):
+        p = ARCHIVE / f"{base}{ext}"
+        if p.exists(): out.append(str(p))
+    return out
+
 # ---------------------------------------------------------------------------
-# Async Task Manager (+SSE)
+# In-memory Async Task Manager (+SSE)
 # ---------------------------------------------------------------------------
 class Task:
     def __init__(self, kind: str, args: list[str]):
@@ -306,12 +314,15 @@ class Task:
         self.logs: list[str] = []
         self._cancel = False
         self._lock = threading.Lock()
-        # persistent log file path (survive restarts)
+        # persistent log file path. Use a dedicated tasks log directory.
+        # Store logs to disk so they survive server restarts.
         try:
             TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)
             self.log_file: Path | None = TASK_LOG_DIR / f"{self.id}.log"
-            self.log_file.write_text("", encoding="utf-8")  # ensure file exists
+            # ensure file exists
+            self.log_file.write_text("", encoding="utf-8")
         except Exception:
+            # if file cannot be created, fallback to None
             self.log_file = None
 
     def append(self, line: str):
@@ -319,6 +330,7 @@ class Task:
             ts = _dt.datetime.now().strftime("%H:%M:%S")
             msg = f"[{ts}] {line}"
             self.logs.append(msg)
+            # also persist to disk
             try:
                 if self.log_file:
                     with self.log_file.open("a", encoding="utf-8") as fp:
@@ -348,11 +360,9 @@ def _run_task(task: Task):
     task.status = "running"; task.started_at = time.time()
 
     def run_cmd(cmd: list[str]) -> int:
-        env = os.environ.copy()
-        env.setdefault("PYTHONIOENCODING", "utf-8")
         task.append(f"$ {' '.join(cmd)}")
         p = subprocess.Popen(
-            cmd, cwd=str(ROOT), env=env,
+            cmd, cwd=str(ROOT),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8"
         )
@@ -366,20 +376,20 @@ def _run_task(task: Task):
 
     try:
         if task.kind == "daily":
-            rc1 = run_cmd([PY, str(ORCH), "--collect-community"])
-            rc2 = run_cmd([PY, str(ORCH), "--publish-community", "--format", "all"])
-            rc3 = run_cmd([PY, str(ORCH), "--publish", "--format", "all"])
+            rc1 = run_cmd(["py", str(ORCH), "--collect-community"])
+            rc2 = run_cmd(["py", str(ORCH), "--publish-community", "--format", "all"])
+            rc3 = run_cmd(["py", str(ORCH), "--publish", "--format", "all"])
             rc = max(rc1, rc2, rc3)
         elif task.kind == "community":
-            rc1 = run_cmd([PY, str(ORCH), "--collect-community"])
-            rc2 = run_cmd([PY, str(ORCH), "--publish-community", "--format", "all"])
+            rc1 = run_cmd(["py", str(ORCH), "--collect-community"])
+            rc2 = run_cmd(["py", str(ORCH), "--publish-community", "--format", "all"])
             rc = max(rc1, rc2)
         elif task.kind == "keyword":
             kw = task.args[0] if task.args else ""
             if not kw: raise RuntimeError("keyword required")
-            rc1 = run_cmd([PY, str(ORCH), "--collect-keyword", kw])
-            rc2 = run_cmd([PY, str(ORCH), "--approve-keyword", kw, "--approve-keyword-top", "15"])
-            rc3 = run_cmd([PY, str(ORCH), "--publish-keyword", kw])
+            rc1 = run_cmd(["py", str(ORCH), "--collect-keyword", kw])
+            rc2 = run_cmd(["py", str(ORCH), "--approve-keyword", kw, "--approve-keyword-top", "15"])
+            rc3 = run_cmd(["py", str(ORCH), "--publish-keyword", kw])
             rc = max(rc1, rc2, rc3)
         else:
             raise RuntimeError(f"unknown kind: {task.kind}")
@@ -390,7 +400,11 @@ def _run_task(task: Task):
     finally:
         task.ended_at = time.time()
 
-# Create job
+# request model
+class FlowReq(BaseModel):
+    kind: str            # daily|community|keyword
+    keyword: str | None = None
+
 @app.post("/api/tasks/flow")
 def create_flow(req: FlowReq):
     kind = (req.kind or "").lower().strip()
@@ -401,26 +415,53 @@ def create_flow(req: FlowReq):
     th.start()
     return {"job_id": t.id, "status": t.status, "kind": t.kind, "args": t.args}
 
-# Job detail (in-memory)
 @app.get("/api/tasks/{job_id}")
 def get_task(job_id: str):
     t = TM.get(job_id)
     if not t: raise HTTPException(404, "job not found")
     return {
-        "id": t.id, "kind": t.kind, "status": t.status,
-        "created_at": t.created_at, "started_at": t.started_at, "ended_at": t.ended_at,
-        "exit_code": t.exit_code, "lines": len(t.logs),
+        "id": t.id,
+        "kind": t.kind,
+        "status": t.status,
+        "created_at": t.created_at,
+        "started_at": t.started_at,
+        "ended_at": t.ended_at,
+        "exit_code": t.exit_code,
+        "lines": len(t.logs),
+        # include path to the persistent log file if available
         "log_file": str(getattr(t, "log_file", "")) if getattr(t, "log_file", None) else None,
     }
 
-# Cancel
 @app.post("/api/tasks/{job_id}/cancel")
 def cancel_task(job_id: str):
     t = TM.get(job_id)
     if not t: raise HTTPException(404, "job not found")
     t._cancel = True; return {"ok": True}
 
-# SSE stream
+# --- safe recent tasks endpoint (never 404, return empty list) ---
+class TaskItem(BaseModel):
+    id: str           # 파일명 stem 등 문자열 ID
+    size: int         # 바이트 단위 파일 크기
+
+class TasksRecent(BaseModel):
+    items: List[TaskItem]
+
+@app.get("/api/tasks/recent", response_model=TasksRecent)
+def tasks_recent(limit: int = Query(10, ge=1, le=50)) -> TasksRecent:
+    """
+    최근 작업 로그 파일 목록을 반환합니다.
+    - id: 로그 파일명 stem (문자열)
+    - size: 파일 크기 (정수)
+    - 예외가 나도 500 대신 빈 배열을 반환합니다.
+    """
+    try:
+        d = _task_log_dir()
+        files = sorted(d.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        items = [TaskItem(id=p.stem, size=p.stat().st_size) for p in files[:limit]]
+        return TasksRecent(items=items)
+    except Exception:
+        return TasksRecent(items=[])
+
 @app.get("/api/tasks/{job_id}/stream")
 async def stream_task(job_id: str):
     t = TM.get(job_id)
@@ -430,28 +471,20 @@ async def stream_task(job_id: str):
         idx = 0
         while True:
             if idx < len(t.logs):
-                chunk = "\n".join(t.logs[idx:]); idx = len(t.logs)
-                yield f"data: {chunk}\n\n"
+                chunk = "\\n".join(t.logs[idx:]); idx = len(t.logs)
+                yield f"data: {chunk}\\n\\n"
             if t.status in ("done","error","canceled"):
-                yield f"event: end\ndata: {t.status}\n\n"; break
+                yield f"event: end\\ndata: {t.status}\\n\\n"; break
             await asyncio.sleep(0.5)
 
     return StreamingResponse(_gen(), media_type="text/event-stream")
 
-# Recent jobs (FILE-BASED ONLY: never 404; survives restarts)
-@app.get("/api/tasks/recent", response_model=TasksRecent)
-def tasks_recent(limit: int = Query(10, ge=1, le=50)) -> TasksRecent:
-    try:
-        d = _task_log_dir()
-        files = sorted(d.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
-        items = [TaskItem(id=p.stem, size=p.stat().st_size) for p in files[:limit]]
-        return TasksRecent(items=items)
-    except Exception:
-        return TasksRecent(items=[])
+# ---------------------------------------------------------------------------
+# Gate config (GET/PATCH) — features.gate_required (keep backward compatibility)
+# ---------------------------------------------------------------------------
+class GateReq(BaseModel):
+    value: int
 
-# ---------------------------------------------------------------------------
-# Gate config (GET/PATCH)
-# ---------------------------------------------------------------------------
 def _load_cfg() -> dict:
     try:
         return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
@@ -475,6 +508,7 @@ def patch_gate_required(req: GateReq):
     cfg = _load_cfg()
     feats = cfg.setdefault("features", {})
     feats["gate_required"] = int(req.value)
+    # preserve flag if present
     feats["require_editor_approval"] = bool(feats.get("require_editor_approval", True))
     _save_cfg(cfg)
     return {"ok": True, "gate_required": feats["gate_required"]}
@@ -495,8 +529,17 @@ def get_report(date: str | None = None):
         items.append({"name": p.name, "size": p.stat().st_size})
     return {"date": day, "files": items}
 
+# ----------------------------------------------------------------------------
+# 추가: 보고서 작성 및 카드 요약/번역 엔드포인트
+
+class ReportReq(BaseModel):
+    """요청 본문: date(선택), keyword(선택)"""
+    date: str | None = None
+    keyword: str | None = None
+
 @app.post("/api/report")
 def post_report(req: ReportReq, authorized: bool = Depends(authorize)):
+    """지정된 날짜와 키워드로 보고서를 생성하여 archive/reports/에 저장합니다."""
     day = req.date or _dt.date.today().isoformat()
     kw = req.keyword or ""
     name = f"{day}_{kw}".strip("_") + ".md"
@@ -504,11 +547,15 @@ def post_report(req: ReportReq, authorized: bool = Depends(authorize)):
     reports_dir.mkdir(parents=True, exist_ok=True)
     path = reports_dir / name
     try:
-        content = f"# Report for {day} {kw}\n\n이 리포트는 자동 생성되었습니다.\n"
+        content = f"# Report for {day} {kw}\\n\\n이 리포트는 자동 생성되었습니다.\\n"
         path.write_text(content, encoding="utf-8")
         return {"ok": True, "path": str(path)}
     except Exception as e:
         raise HTTPException(500, f"report error: {e}")
+
+class EnrichReq(BaseModel):
+    """요약/번역 요청: keyword(선택)"""
+    keyword: str | None = None
 
 @app.post("/api/enrich/keyword")
 def enrich_keyword(req: EnrichReq, authorized: bool = Depends(authorize)):
@@ -516,7 +563,7 @@ def enrich_keyword(req: EnrichReq, authorized: bool = Depends(authorize)):
     name = f"enrich_keyword_{kw or _dt.date.today().isoformat()}.md"
     path = ARCHIVE / name
     try:
-        content = f"# Summary for keyword {kw}\n\n요약과 번역 내용이 여기 표시됩니다.\n"
+        content = f"# Summary for keyword {kw}\\n\\n요약과 번역 내용이 여기 표시됩니다.\\n"
         path.write_text(content, encoding="utf-8")
         return {"ok": True, "path": str(path)}
     except Exception as e:
@@ -528,10 +575,11 @@ def enrich_selection(req: EnrichReq, authorized: bool = Depends(authorize)):
     name = f"enrich_selection_{kw or _dt.date.today().isoformat()}.md"
     path = ARCHIVE / name
     try:
-        content = f"# Summary for selection {kw}\n\n선정본 요약과 번역 내용이 여기 표시됩니다.\n"
+        content = f"# Summary for selection {kw}\\n\\n선정본 요약과 번역 내용이 여기 표시됩니다.\\n"
         path.write_text(content, encoding="utf-8")
         return {"ok": True, "path": str(path)}
     except Exception as e:
+        # If an error occurs when creating the selection summary, bubble up
         raise HTTPException(500, f"enrich selection error: {e}")
 
 @app.get("/api/export/{fmt}")
@@ -548,8 +596,8 @@ def export_fmt(fmt: str, date: str | None = None, authorized: bool = Depends(aut
             title = a.get("title") or "(no title)"
             url = a.get("url") or "#"
             meta = f"👍{a.get('upvotes',0)} · 💬{a.get('comments',0)} · 👀{a.get('views','-')}"
-            lines.append(f"- [{title}]({url})  \n  {meta} · {a.get('source','')}")
-        md = "\n".join(lines) + "\n"
+            lines.append(f"- [{title}]({url})  \\n  {meta} · {a.get('source','')}")
+        md = "\\n".join(lines) + "\\n"
         return Response(content=md, media_type="text/markdown; charset=utf-8")
 
     if fmt.lower() == "csv":
@@ -558,15 +606,23 @@ def export_fmt(fmt: str, date: str | None = None, authorized: bool = Depends(aut
         for a in arts:
             w.writerow([a.get("title",""), a.get("url",""), a.get("source",""),
                         a.get("upvotes",0), a.get("comments",0), a.get("views","")])
-        data = "\\ufeff" + buf.getvalue()  # UTF-8 BOM for Excel
+        data = "\\ufeff" + buf.getvalue()  # UTF-8 BOM
         return Response(content=data, media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="community_{day}.csv"'})
 
     raise HTTPException(400, "unsupported format")
 
 # ---------------------------------------------------------------------------
-# Community / Save / Status / Publish (sync-compatible)
+# Community / Save / Status / Publish endpoints (sync compatible)
 # ---------------------------------------------------------------------------
+class SaveItem(BaseModel):
+    id: str
+    approved: bool
+    editor_note: str = ""
+
+class SavePayload(BaseModel):
+    changes: List[SaveItem]
+
 @app.get("/api/community")
 def api_get_community(only_pending: bool = Query(True)):
     snap = _get_community_snapshot()
@@ -595,7 +651,7 @@ def api_status():
     work = _read_json(SEL_WORK); sel_total = len(work.get("articles", []))
     sel_approved = sum(1 for a in work.get("articles", []) if a.get("approved"))
     snap = _get_community_snapshot(); comm_total = len(snap.get("articles", []))
-    cfg = _load_cfg()
+    cfg = _read_json(CONFIG_FILE)
     gate_required = int((cfg.get("features") or {}).get("gate_required") or cfg.get("gate_required") or 15)
     require_editor_approval = bool((cfg.get("features") or {}).get("require_editor_approval", True))
     return {"date": work.get("date", _dt.date.today().isoformat()),
@@ -612,26 +668,19 @@ class PublishReq(BaseModel):
 @app.post("/api/publish-keyword")
 def api_publish(req: PublishReq):
     ARCHIVE.mkdir(parents=True, exist_ok=True)
+    rollover = _rollover_archive_if_needed(req.keyword)
     out = _run_orch("--publish-keyword", req.keyword)
-    # Return any created outputs if exist
-    date = _dt.date.today().isoformat()
-    base = f"{date}_{_slug_kw(req.keyword)}"
-    outputs = []
-    for ext in (".html", ".md", ".json"):
-        p = ARCHIVE / f"{base}{ext}"
-        if p.exists(): outputs.append(str(p))
-    return {**out, "created": outputs}
+    outputs = _latest_published_paths(req.keyword)
+    return {**out, "rolled_over": rollover or [], "created": outputs}
 
-# Legacy sync flows
+# Legacy sync flows (kept for compatibility)
 @app.post("/api/flow/community")
 def api_flow_comm():
     return _run_orch("--collect-community")
 
 @app.post("/api/flow/daily")
 def api_flow_daily():
-    steps = [_run_orch("--collect-community"),
-             _run_orch("--publish-community","--format","all"),
-             _run_orch("--publish","--format","all")]
+    steps = [_run_orch("--collect-community"), _run_orch("--publish-community","--format","all"), _run_orch("--publish","--format","all")]
     ok = all(s.get("ok", True) for s in steps)
     return {"ok": ok, "steps": steps}
 
@@ -687,26 +736,15 @@ def download_log(log_name: str, user: dict = Depends(verify_jwt_token)):
     return FileResponse(str(path), filename=log_name, media_type="text/plain")
 
 # ---------------------------------------------------------------------------
-# Misc / Index
+# Misc
 # ---------------------------------------------------------------------------
 @app.get("/.well-known/appspecific/com.chrome.devtools.json")
 def devtools_config():
     return Response(content="{}", media_type="application/json", status_code=200)
 
-@app.get("/favicon.ico")
-def favicon_blank():
-    return Response(status_code=204)
 
-@app.get("/")
-def index():
-    p = INDEX_HTML if INDEX_HTML.exists() else (INDEX_LITE if INDEX_LITE.exists() else None)
-    if p: return HTMLResponse(p.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>QualiJournal Admin</h1><p>index.html이 없습니다.</p>")
-
-# ---------------------------------------------------------------------------
-# Entrypoint (local dev)
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    # Local run helper (for dev/testing): respects Cloud Run-style PORT
     import uvicorn, os as _os
     _port = int(_os.getenv("PORT", "8080"))
     uvicorn.run(app, host="0.0.0.0", port=_port, log_level="info")
