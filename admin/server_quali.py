@@ -10,7 +10,6 @@ QualiJournal Admin API + Lite Black UI (stable)
 """
 
 from __future__ import annotations
-
 import os, sys, json, csv, io, shutil, subprocess, datetime as _dt, hashlib, asyncio, threading, secrets, time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -18,6 +17,11 @@ from fastapi import Header
 try:
     from dotenv import load_dotenv
     load_dotenv()
+    MODE = (os.getenv("QUALI_DB_MODE") or "local").lower().strip()
+    # 예: local | cloud | test
+    from admin.db import make_engine
+    _engine = None
+
 except Exception:
     # dotenv is optional at runtime; skip if missing
     pass
@@ -25,7 +29,13 @@ from fastapi import FastAPI, Query, Response, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# --- [ADD] ForwardRef 안전장치 & 요청모델 정의 ---------------------------------
+class PublishOneReq(BaseModel):
+    approve: bool = Field(default=True, description="승인 여부")
+    editor_note: Optional[str] = Field(default=None, description="편집장 한마디(선택)")
+# ------------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Auth (optional) — if auth_utils is missing, fall back to open access
@@ -108,6 +118,10 @@ app.add_middleware(
 @app.get("/health", include_in_schema=False)
 async def health():
     return {"status": True}
+
+@app.get("/api/db/mode")
+def db_mode():
+    return {"mode": MODE}
 
 # ---------------------------------------------------------------------------
 # Task response models and helpers
@@ -202,6 +216,19 @@ def _get_community_snapshot() -> dict:
     for a in arts:
         _ensure_id(a); a.setdefault("approved", False); a.setdefault("editor_note", "")
         a.setdefault("score", a.get("score", 0)); a.setdefault("source", a.get("source", ""))
+    date = obj.get("date") or _dt.date.today().isoformat()
+    keyword = obj.get("keyword", "")
+    return {"date": date, "keyword": keyword, "articles": arts}
+
+def _get_work_snapshot() -> dict:
+    """Load selected_keyword_articles.json as work snapshot."""
+    obj = _read_json(SEL_WORK) or {}
+    arts = obj.get("articles", []) or []
+    for a in arts:
+        _ensure_id(a)
+        a.setdefault("approved", False)
+        a.setdefault("editor_note", "")
+        a.setdefault("state", (a.get("state") or "").lower() or "candidate")
     date = obj.get("date") or _dt.date.today().isoformat()
     keyword = obj.get("keyword", "")
     return {"date": date, "keyword": keyword, "articles": arts}
@@ -408,6 +435,19 @@ def tasks_recent(limit: int = Query(10, ge=1, le=50)) -> TasksRecent:
         return TasksRecent(items=items)
     except Exception:
         return TasksRecent(items=[])
+
+@app.get("/api/db/ping")
+def db_ping():
+    global _engine
+    if MODE != "cloud":
+        return {"ok": True, "mode": MODE, "db": "not-connected"}
+    if _engine is None:
+        _engine = make_engine()
+    with _engine.connect() as c:
+        c.exec_driver_sql("SELECT 1;")
+    return {"ok": True, "mode": "cloud", "db": "postgresql"}
+
+
 
 @app.get("/api/tasks/{job_id}")
 def get_task(job_id: str):
@@ -624,6 +664,59 @@ def api_save(payload: SavePayload):
     sync = _sync_after_save()
     return {"saved": changed, "synced": sync.get("ok", False), "sync_log": sync}
 
+@app.get("/api/items")
+def api_items(state: str = Query("ready"), date: str | None = None, keyword: str | None = None):
+    """
+    state=candidate|ready|rejected|published
+    date/keyword는 필터 힌트(현재 파일 구조에선 주로 상태 필터 사용)
+    """
+    snap = _get_work_snapshot()
+    s = (state or "").lower().strip()
+    arts = snap["articles"]
+    if s:
+        if s == "published":
+            # 발행본은 selected_articles.json에서 조회
+            pub = _read_json(SEL_PUB) or {}
+            items = pub.get("articles", []) or []
+            return {"date": pub.get("date", snap["date"]), "keyword": snap.get("keyword",""), "state": s, "items": items}
+        items = [a for a in arts if (a.get("state","").lower() == s)]
+    else:
+        items = arts
+    return {"date": snap["date"], "keyword": snap.get("keyword",""), "state": s or "all", "items": items}
+
+@app.post("/api/items/{item_id}/publish")
+def api_items_publish(item_id: str, req: PublishOneReq):
+    """
+    단일 아이템 발행:
+    - work 파일에서 해당 id 기사 찾기 → approved/selected/editor_note 업데이트
+    - publish 파일로 동기화(_sync_after_save)
+    """
+    work = _read_json(SEL_WORK) or {}
+    arts = work.get("articles", []) or []
+    idx = None
+    for i, a in enumerate(arts):
+        try:
+            if _ensure_id(a) == item_id:
+                idx = i; break
+        except Exception:
+            continue
+    if idx is None:
+        raise HTTPException(status_code=404, detail="item not found")
+
+    a = arts[idx]
+    a["approved"] = bool(req.approve)
+    a["selected"] = True
+    a["editor_note"] = req.editor_note or a.get("editor_note","")
+    # 'published' 상태 표시는 선택적(리스트 필터 용이). 실제 발행 파일 반영은 sync에서 처리.
+    a["state"] = "published"
+
+    work["articles"] = arts
+    _write_json(SEL_WORK, work)
+
+    sync = _sync_after_save()
+    return {"ok": True, "synced": sync.get("ok", False), "item_id": item_id}
+
+
 @app.get("/api/status")
 def api_status():
     work = _read_json(SEL_WORK); sel_total = len(work.get("articles", []))
@@ -632,13 +725,23 @@ def api_status():
     cfg = _read_json(CONFIG_FILE)
     gate_required = int((cfg.get("features") or {}).get("gate_required") or cfg.get("gate_required") or 15)
     require_editor_approval = bool((cfg.get("features") or {}).get("require_editor_approval", True))
+    state_counts = {"candidate":0,"ready":0,"rejected":0}
+    for a in work.get("articles", []):
+        s = (a.get("state") or "").lower()
+        if s in state_counts: state_counts[s] += 1
+    for a in snap.get("articles", []):
+        s = (a.get("state") or "").lower()
+        if s in state_counts: state_counts[s] += 1
+
     return {"date": work.get("date", _dt.date.today().isoformat()),
             "keyword": work.get("keyword",""),
             "selection_total": sel_total, "selection_approved": sel_approved,
             "community_total": comm_total, "keyword_total": sel_total,
             "gate_required": gate_required, "require_editor_approval": require_editor_approval,
             "gate_pass": sel_approved >= gate_required,
+            "state_counts": state_counts,
             "paths": {"work": str(SEL_WORK), "publish": str(SEL_PUB), "community": "root_or_archive"}}
+
 
 class PublishReq(BaseModel):
     keyword: str
@@ -665,6 +768,10 @@ def api_flow_daily():
 class FlowKwReq(BaseModel):
     keyword: str
     use_external_rss: bool = False
+
+class PublishOneReq(BaseModel):
+    editor_note: str = ""
+    approve: bool = True
 
 @app.post("/api/flow/keyword")
 def api_flow_keyword(req: FlowKwReq):
