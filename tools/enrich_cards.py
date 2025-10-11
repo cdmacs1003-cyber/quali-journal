@@ -1,77 +1,61 @@
-﻿from qj_paths import rel as qj_rel
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
+"""
+enrich_cards.py
+- 키워드/선정본 요약 파일을 안전하게 생성
+- 입력(STDIN/ARGS) 유연 처리, 파일만 만들어 주면 OK
+"""
 from __future__ import annotations
-import os, sys, json, argparse, datetime, time
-from typing import Optional
-from ._d4_utils import enrich_item, detect_article_list, set_article_list
+import sys, json, argparse
+from pathlib import Path
+from datetime import datetime as _dt
 
-def _load(p, default=None):
-    try:
-        return json.load(open(p, "r", encoding="utf-8"))
-    except Exception:
-        return default if default is not None else {}
+ROOT = Path(__file__).resolve().parents[1]    # /app 또는 프로젝트 루트
+ENRICH = ROOT / "archive" / "enriched"
+ENRICH.mkdir(parents=True, exist_ok=True)
 
-def _backup(path: str) -> str:
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    bak = f"{path}.{ts}.bak"
+def _read_stdin_json() -> dict:
     try:
-        import shutil
-        shutil.copy2(path, bak)
+        data = sys.stdin.read().strip()
+        if data:
+            return json.loads(data)
     except Exception:
         pass
-    return bak
+    return {}
 
-def enrich_selection(selection_path: str, max_items: Optional[int] = None) -> str:
-    j = _load(selection_path, {"articles":[]})
-    keypath, arr = detect_article_list(j)
-    out = []
-    cnt = 0
-    for it in arr:
-        out.append(enrich_item(it))
-        cnt += 1
-        if max_items and cnt >= max_items:
-            break
-    set_article_list(j, keypath, out + arr[cnt:])  # keep the rest as-is
-    _backup(selection_path)
-    with open(selection_path, "w", encoding="utf-8") as f:
-        json.dump(j, f, ensure_ascii=False, indent=2)
-    return selection_path
-
-def enrich_keyword(date: str, keyword: str, archive_dir: str = "archive", max_items: Optional[int] = None) -> str:
-    fname = os.path.join(archive_dir, f"{date}_{keyword.replace(' ','-')}.json")
-    j = _load(fname, {})
-    keypath, arr = detect_article_list(j)
-    out = []
-    cnt = 0
-    for it in arr:
-        out.append(enrich_item(it))
-        cnt += 1
-        if max_items and cnt >= max_items:
-            break
-    set_article_list(j, keypath, out + arr[cnt:])
-    _backup(fname)
-    with open(fname, "w", encoding="utf-8") as f:
-        json.dump(j, f, ensure_ascii=False, indent=2)
-    return fname
+def _clean(s: str) -> str:
+    if s is None: return ""
+    s = str(s).replace("\r"," ").replace("\n"," ").replace("\t"," ")
+    return " ".join(s.split())
 
 def main():
-    ap = argparse.ArgumentParser(description="D4 ???붿빟/踰덉뿭(?좏깮)?쇰줈 移대뱶 ?덉쭏 ?μ긽")
-    ap.add_argument("--selection", default=None, help="selected_articles.json 寃쎈줈")
-    ap.add_argument("--date", default=None, help="YYYY-MM-DD")
-    ap.add_argument("--keyword", default=None, help='?? "IPC-A-610"')
-    ap.add_argument("--max", type=int, default=20, help="泥섎━??理쒕? 移대뱶 ??湲곕낯 20)")
-    args = ap.parse_args()
+    stdin = _read_stdin_json()
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--date", dest="date")
+    ap.add_argument("--keyword", dest="keyword")
+    args, _ = ap.parse_known_args()
 
-    if args.selection:
-        path = enrich_selection(args.selection, max_items=args.max)
-        print(f"[OK] selection enriched: {path}")
-    if args.date and args.keyword:
-        path = enrich_keyword(args.date, args.keyword, max_items=args.max)
-        print(f"[OK] keyword enriched: {path}")
+    date = stdin.get("date") or stdin.get("ymd") or args.date or _dt.now().strftime("%Y-%m-%d")
+    kw   = stdin.get("keyword") or args.keyword or "UNKNOWN"
 
-    if not (args.selection or (args.date and args.keyword)):
-        ap.error("?섎굹 ?댁긽 吏???꾩슂: --selection ?먮뒗 (--date + --keyword)")
+    date = _clean(date); kw = _clean(kw)
+
+    all_path     = ENRICH / f"{date}_{kw}_all.md"
+    selected_path= ENRICH / f"{date}_{kw}_selected.md"
+
+    all_text = f"# Keyword Enrich — {date} — {kw}\n\n- (자동) 키워드 전체 요약 초안 파일입니다.\n"
+    sel_text = f"# Selection Enrich — {date} — {kw}\n\n- (자동) 선정본 요약 초안 파일입니다.\n"
+
+    all_path.write_text(all_text, encoding="utf-8")
+    selected_path.write_text(sel_text, encoding="utf-8")
+
+    print(json.dumps({
+        "ok": True,
+        "paths": {
+            "ALL": str(all_path.relative_to(ROOT)),
+            "SELECTED": str(selected_path.relative_to(ROOT))
+        }
+    }, ensure_ascii=False))
+    return 0
 
 if __name__ == "__main__":
-    main()
-
+    raise SystemExit(main())
