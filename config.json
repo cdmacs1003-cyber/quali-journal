@@ -1,9 +1,9 @@
 {
   "community": {
     "enabled": true,
-    "fresh_hours": 336,
+    "fresh_hours": 87600,
     "min_upvotes": 3,
-    "min_comments": 0,
+    "min_comments": 2,
     "reddit_pages": 3,
     "max_total": 120,
     "score_threshold": 3.0,
@@ -29,22 +29,33 @@
       "require_keyword": true,
       "kw_min_tokens": 2,
       "kw_regex": [
-        "\\\\bIPC[\\\\s\\\\-]?A[\\\\s\\\\-]?610\\\\b"
+        "\\bIPC[\\s\\-]?A[\\s\\-]?610\\b",
+        "\\bJ\\-STD\\-001\\b",
+        "\\bNASA\\-STD\\-8739(\\.\\d+)?\\b",
+        "\\bECSS\\-Q\\-ST\\-70\\b"
       ],
       "allow_domains": [
+        "reddit.com",
+        "www.reddit.com",
+        "old.reddit.com",
+        "i.redd.it",
+        "v.redd.it",
         "ipc.org",
         "ecss.nl",
         "iconnect007.com",
-        "nist.gov",
-        "eeworld.com.cn",
-        "technologyreview.com",
+        "pcb007.com",
+        "smt007.com",
         "jedec.org",
         "ieee.org",
-        "nasa.gov"
+        "nist.gov",
+        "eeworld.com.cn",
+        "nasa.gov",
+        "technologyreview.com"
       ],
       "min_title_len": 6,
       "block_title_patterns": [
-        "(?i)hiring|job|promo|coupon|advert|sale|giveaway|subscribe|newsletter"
+        "(?i)hiring|job|promo|coupon|advert|sale|giveaway|subscribe|newsletter",
+        "(?i)\\bIndian Penal Code\\b|\\bIPC Section\\b|\\bSection 610\\b"
       ],
       "use_keyword_synonyms": true,
       "synonyms_source": "keyword_synonyms.json"
@@ -56,17 +67,27 @@
     "max_total": 50
   },
   "features": {
+    "use_value_gate": true,
     "require_editor_approval": true,
+    "publish_requires_editor": true,
     "trusted_domains": [
       "ipc.org",
       "ecss.nl",
       "iconnect007.com",
+      "pcb007.com",
+      "smt007.com",
       "jedec.org",
       "ieee.org",
       "nist.gov",
-      "eeworld.com.cn"
+      "eeworld.com.cn",
+      "nasa.gov"
     ],
     "gate_required": 15
+  },
+  "policy": {
+    "freshness_required": false,
+    "min_core_tokens": 1,
+    "min_context_tokens": 1
   },
   "paths": {
     "archive": "archive",
@@ -77,9 +98,8 @@
       "feeds/community_sources.json",
       "community_sources.json"
     ],
-    "keywords_txt": "而ㅻ??덊떚_?ㅼ썙??txt",
+    "keywords_txt": "keywords.txt",
     "smt_sources_file": "smt_sources.json",
     "supply_sources_file": "supply_sources.json"
-  },
-  "gate_required": 15
+  }
 }

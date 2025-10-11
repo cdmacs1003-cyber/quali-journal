@@ -201,6 +201,116 @@ def _value_score(kw_raw: int, upvotes: int, views: int, cfg: dict) -> float:
     vw = _norm01_log(views or 0, int(N.get("views_max", 100000)))
     return float(W.get("keyword", 3)) * kw + float(W.get("upvotes", 5)) * up + float(W.get("views", 2)) * vw
 
+# =============================== VALUE GATE ===============================
+def _safe_load_json(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+def _load_editor_rules() -> dict:
+    # CWD 기준 editor_rules.json, 없으면 기본값
+    rules = _safe_load_json(os.path.join(os.getcwd(), "editor_rules.json"))
+    # 기본값 보강
+    rules.setdefault("score_weights", {"domain_trust":0.30,"doc_type":0.25,"standards_coverage":0.25,"tech_depth":0.15,"citations":0.05})
+    rules.setdefault("doc_type_weights", {"pdf":1.0,"doc":0.9,"docx":0.9,"ppt":0.75,"pptx":0.75,"xls":0.7,"xlsx":0.7,"html":0.6,"md":0.6,"text":0.35})
+    rules.setdefault("domain_weights", {})
+    rules.setdefault("thresholds", {"auto_approve":0.65,"needs_review_min":0.50})
+    rules.setdefault("modifiers", {"doc_type_requires_standard":True,"doc_type_factor_if_no_standard":0.5})
+    rules.setdefault("standards_bundles", {})
+    return rules
+
+def _guess_doc_type(url: str) -> str:
+    u = (url or "").lower()
+    if re.search(r"\.pdf(\?|$)", u): return "pdf"
+    if re.search(r"\.(docx?|rtf)(\?|$)", u): return "docx" if ".docx" in u else "doc"
+    if re.search(r"\.pptx?(\?|$)", u): return "pptx" if ".pptx" in u else "ppt"
+    if re.search(r"\.xlsx?(\?|$)", u): return "xlsx" if ".xlsx" in u else "xls"
+    if re.search(r"\.(md|markdown)(\?|$)", u): return "md"
+    if re.search(r"^https?://", u): return "html"
+    return "text"
+
+def _doc_type_score(tp: str, rules: dict, has_standard: bool) -> float:
+    w = (rules.get("doc_type_weights") or {})
+    base = float(w.get(tp or "text", w.get("text", 0.35)))
+    mods = (rules.get("modifiers") or {})
+    if mods.get("doc_type_requires_standard", True) and not has_standard:
+        base *= float(mods.get("doc_type_factor_if_no_standard", 0.5))
+    return max(0.0, min(1.0, base))
+
+def _domain_trust(url: str, rules: dict) -> float:
+    host = _domain_of(url)
+    wmap = (rules.get("domain_weights") or {})
+    w = float(wmap.get(host, 0.0))
+    return max(0.0, min(1.0, w))
+
+def _standards_coverage(text: str, rules: dict, synonyms: dict) -> float:
+    text = (text or "").lower()
+    bundles = (rules.get("standards_bundles") or {})
+    core_hit = 0; ctx_hit = 0
+    # 1) bundles 우선
+    for b in bundles.values():
+        for c in (b.get("core") or []):
+            if c and c.lower() in text:
+                core_hit += 1; break
+        for c in (b.get("context") or []):
+            if c and c.lower() in text:
+                ctx_hit += 1; break
+    # 2) synonyms 보조(core로만 취급)
+    for k, arr in (synonyms or {}).items():
+        for c in arr or []:
+            if c and c.lower() in text:
+                core_hit += 1; break
+    if core_hit==0 and ctx_hit==0: return 0.0
+    if core_hit>=1 and ctx_hit>=1: return 1.0
+    if core_hit>=1 and ctx_hit==0: return 0.6
+    return 0.3
+
+def _tech_depth(text: str) -> float:
+    text = (text or "").lower()
+    cues = ["procedure","inspection","class 3","rework","acceptability","acceptance criteria","defect","workmanship","requirements","figure","table"]
+    hits = sum(1 for c in cues if c in text)
+    return max(0.0, min(1.0, hits/6.0))
+
+def _citations(text: str) -> float:
+    # 간단: 링크 갯수로 근사
+    n = len(re.findall(r"https?://", text or ""))
+    return max(0.0, min(1.0, n/5.0))
+
+def compute_value_score(a: dict, cfg: dict) -> tuple[float, dict]:
+    rules = _load_editor_rules()
+    w = (rules.get("score_weights") or {})
+    syn = _safe_load_json(os.path.join(os.getcwd(), "keyword_synonyms.json"))
+    title = a.get("title") or ""
+    body  = a.get("summary_ko_text") or a.get("summary") or a.get("selftext") or ""
+    url   = a.get("url") or ""
+    blob  = f"{title}\n{body}\n{url}"
+    has_std = _standards_coverage(blob, rules, syn)
+    dtp = _guess_doc_type(url)
+    sc_domain = _domain_trust(url, rules)
+    sc_doc    = _doc_type_score(dtp, rules, has_std >= 0.6)
+    sc_std    = has_std
+    sc_depth  = _tech_depth(blob)
+    sc_cite   = _citations(blob)
+    V = (w.get("domain_trust",0.3)*sc_domain + w.get("doc_type",0.25)*sc_doc +
+         w.get("standards_coverage",0.25)*sc_std + w.get("tech_depth",0.15)*sc_depth +
+         w.get("citations",0.05)*sc_cite)
+    brk = {"domain_trust":round(sc_domain,3),"doc_type":round(sc_doc,3),"standards":round(sc_std,3),
+           "tech_depth":round(sc_depth,3),"citations":round(sc_cite,3),"doc_type_name":dtp}
+    return round(float(V),3), brk
+
+def _state_from_value(v: float) -> str:
+    rules = _load_editor_rules()
+    th = (rules.get("thresholds") or {})
+    auto_ready = float(th.get("auto_approve", 0.65))
+    need_min   = float(th.get("needs_review_min", 0.50))
+    if v >= auto_ready: return "ready"
+    if v >= need_min:   return "candidate"
+    return "rejected"
+# ============================ /VALUE GATE END ============================
+
+
 def deep_merge(a: dict, b: dict) -> dict:
     """dict 재귀 병합(a <- b)."""
     if not isinstance(a, dict) or not isinstance(b, dict):
@@ -331,11 +441,18 @@ def collect_official(cfg: dict) -> List[Dict]:
                     "qg_status": None, "qg_score": 0,
                     "fc_status": None, "fc_score": 0,
                     "kw_score": 0, "kw_hits": [],
-                    "domain_score": 0, "total_score": 0,
-                    "selected": False, "approved": False,
                     "pinned": False, "pin_ts": 0,
                     "summary_ko_text": (desc or None)
                 }
+                # --- Value Gate 적용 ---
+                vscore, brk = compute_value_score({"title": title, "summary_ko_text": desc or "", "url": first}, cfg)
+                art["doc_type"] = brk.get("doc_type_name","text")
+                art["value_score"] = vscore
+                art["scores_breakdown"] = brk
+                art["total_score"] = vscore
+                art["state"] = _state_from_value(vscore)  # candidate/ready/rejected
+                art["approved"] = False
+                art["selected"] = False
                 items.append(art)
             except Exception:
                 continue
@@ -501,8 +618,14 @@ def collect_community(cfg: dict) -> List[Dict]:
                     kw_hits += 1
             if require_kw and kw_hits <= 0:
                 continue
-            score = _value_score(kw_hits, int(r.get("upvotes", 0)), 0, cfg)
-            if score < thr:
+            # --- Value Gate로 재점수화 ---
+            tmp_article = {
+                "title": title, "summary_ko_text": r.get("selftext") or "",
+                "url": url
+            }
+            vscore, brk = compute_value_score(tmp_article, cfg)
+            state = _state_from_value(vscore)
+            if state == "rejected":
                 continue
             items.append({
                 "id": _article_id(url),
@@ -514,11 +637,16 @@ def collect_community(cfg: dict) -> List[Dict]:
                 "views": 0,
                 "ts": r.get("ts"),
                 "kw_hits": kw_hits,
-                "total_score": round(float(score), 3),
+                "doc_type": brk.get("doc_type_name","text"),
+                "value_score": vscore,
+                "scores_breakdown": brk,
+                "total_score": vscore,            # 기존 정렬 호환
                 "section": "커뮤니티",
+                "state": state,                   # candidate / ready
                 "approved": False,
                 "selected": False
             })
+
 
     # -- Forums --
     for f_url in forums_cfg:

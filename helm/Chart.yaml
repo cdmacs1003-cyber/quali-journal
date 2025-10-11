@@ -1,0 +1,5 @@
+# helm/Chart.yaml
+apiVersion: v2
+name: quali-journal
+version: 0.1.0
+appVersion: "0.1.0"

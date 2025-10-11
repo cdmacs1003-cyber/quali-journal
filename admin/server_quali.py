@@ -28,8 +28,21 @@ except Exception:
 from fastapi import FastAPI, Query, Response, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
+
+# [ADD] ─────────────────────────────────────────────────────────────────
+class GatePatch(BaseModel):
+    gate_required: int
+# 전역 기본값(없으면 생성)
+try:
+    GATE
+except NameError:
+    
+    GATE = {"gate_required": int(os.getenv("GATE_REQUIRED", "3"))}
+
+# KPI 집계가 아직 없으면 0으로 응답
+KPI = {"selected": 0, "approved": 0, "published": 0}
 
 # --- [ADD] ForwardRef 안전장치 & 요청모델 정의 ---------------------------------
 class PublishOneReq(BaseModel):
@@ -78,6 +91,12 @@ ORCH = ROOT / "orchestrator.py"
 SEL_COMM = ROOT / "selected_community.json"
 SEL_WORK = ROOT / "data" / "selected_keyword_articles.json"
 SEL_PUB  = ROOT / "selected_articles.json"
+
+# Directory for summary markdown outputs.  Summarization endpoints will write
+# enriched summary files here.  It lives under ``archive/enriched`` relative
+# to the project root.  If the directory does not exist, it will be created
+# automatically when a summary is generated.
+ENRICHED_DIR = ARCHIVE / "enriched"
 CAND_COMM = [SEL_COMM, ROOT / "archive" / "selected_community.json"]
 
 INDEX_HTML = BASE / "index.html"
@@ -170,6 +189,67 @@ def _slug_kw(s: str) -> str:
 def _ensure_id(item: dict) -> str:
     if item.get("id"):
         return item["id"]
+
+# ---------------------------------------------------------------------------
+# Summary generation helpers
+# ---------------------------------------------------------------------------
+def _generate_summary_md(date: str, keyword: str, articles: List[dict], *, selected: bool = False) -> Path:
+    """Generate a Markdown summary file from a list of articles.
+
+    Parameters
+    ----------
+    date: str
+        The date used in the filename (YYYY-MM-DD).
+    keyword: str
+        Keyword slug for naming.  If empty, the slug will be omitted.
+    articles: List[dict]
+        List of article objects containing at least title, url/link, summary, ko_summary, desc,
+        and editor_note fields.
+    selected: bool, optional
+        When True, indicates the summary is for the selected articles.  The filename
+        will include ``_selected``; otherwise ``_all``.  Defaults to False.
+
+    Returns
+    -------
+    Path
+        Absolute Path to the generated Markdown file.
+    """
+    # Determine slug and suffix for the filename.  Use the helper to slugify the keyword.
+    slug = _slug_kw(keyword or "").strip()
+    suffix = "selected" if selected else "all"
+    # Build filename: date_keyword_suffix.md.  Omit keyword section if blank.
+    if slug:
+        fname = f"{date}_{slug}_{suffix}.md"
+    else:
+        fname = f"{date}_{suffix}.md"
+    # Ensure output directory exists
+    ENRICHED_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = ENRICHED_DIR / fname
+    # Compose Markdown content
+    header_kw = slug.replace("_", " ") if slug else ""
+    header_suffix = "선정본" if selected else "전체"
+    title_parts = ["QualiNews", date]
+    if header_kw:
+        title_parts.append(header_kw)
+    title_parts.append(f"({header_suffix})")
+    lines: List[str] = [" — ".join(title_parts), ""]
+    # Append each article with details
+    for i, art in enumerate(articles, 1):
+        title = art.get("title") or art.get("headline") or "(no title)"
+        url   = art.get("url") or art.get("link") or ""
+        summary = art.get("summary") or art.get("ko_summary") or art.get("desc") or ""
+        note  = art.get("editor_note") or ""
+        lines.append(f"### {i}. {title}")
+        if url:
+            lines.append(f"- 원문: {url}")
+        if summary:
+            lines.append(f"- 요약: {summary}")
+        if note:
+            lines.append(f"- 편집자 코멘트: {note}")
+        lines.append("")
+    md = "\n".join(lines)
+    out_path.write_text(md, encoding="utf-8")
+    return out_path
     h = hashlib.md5((item.get("url") or item.get("title","")).encode("utf-8")).hexdigest()
     item["id"] = h
     return h
@@ -197,6 +277,32 @@ def _run_orch(*args: str) -> dict:
     except Exception:
         pass
     return {"ok": cp.returncode == 0, "stdout": cp.stdout, "stderr": cp.stderr, "cmd": " ".join([str(ORCH), *args])}
+
+# ---------------------------------------------------------------------------
+# Tools runner (UTF-8 safe)
+# ---------------------------------------------------------------------------
+def _run_py(script_name: str, args: List[str] | None = None):
+    """
+    UTF-8 safe subprocess runner for tools/*.py or project-root scripts.
+    Looks for script in TOOLS or project root and executes it with optional args.
+    Returns (rc, stdout, stderr).
+    """
+    candidates = [TOOLS / script_name, ROOT / script_name]
+    target = next((p for p in candidates if p.exists()), None)
+    if not target:
+        return 127, "", f"{script_name} not found"
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    cp = subprocess.run(
+        [sys.executable or "python", str(target), * (args or [])],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env
+    )
+    return cp.returncode, cp.stdout, cp.stderr
 
 # ---------------------------------------------------------------------------
 # Community helpers
@@ -500,8 +606,6 @@ async def stream_task(job_id: str):
 # ---------------------------------------------------------------------------
 # Gate config (GET/PATCH) — features.gate_required (keep backward compatibility)
 # ---------------------------------------------------------------------------
-class GateReq(BaseModel):
-    value: int
 
 def _load_cfg() -> dict:
     try:
@@ -512,24 +616,6 @@ def _load_cfg() -> dict:
 def _save_cfg(obj: dict):
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-
-@app.get("/api/config/gate_required")
-def get_gate_required():
-    cfg = _load_cfg()
-    val = (cfg.get("features") or {}).get("gate_required")
-    if val is None:
-        val = cfg.get("gate_required", 15)  # backward compat
-    return {"gate_required": int(val)}
-
-@app.patch("/api/config/gate_required")
-def patch_gate_required(req: GateReq):
-    cfg = _load_cfg()
-    feats = cfg.setdefault("features", {})
-    feats["gate_required"] = int(req.value)
-    # preserve flag if present
-    feats["require_editor_approval"] = bool(feats.get("require_editor_approval", True))
-    _save_cfg(cfg)
-    return {"ok": True, "gate_required": feats["gate_required"]}
 
 # ---------------------------------------------------------------------------
 # Report / Export
@@ -557,58 +643,209 @@ class ReportReq(BaseModel):
 
 @app.post("/api/report")
 def post_report(req: ReportReq, authorized: bool = Depends(authorize)):
-    """지정된 날짜와 키워드로 보고서를 생성하여 archive/reports/에 저장합니다."""
+    """
+    Create a daily report by invoking make_daily_report.py.
+    Returns path to the generated Markdown file.
+    """
     day = req.date or _dt.date.today().isoformat()
-    kw = req.keyword or ""
-    name = f"{day}_{kw}".strip("_") + ".md"
-    reports_dir = ARCHIVE / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / name
-    try:
-        content = f"# Report for {day} {kw}\n\n이 리포트는 자동 생성되었습니다.\n"
-        path.write_text(content, encoding="utf-8")
-        return {"ok": True, "path": str(path)}
-    except Exception as e:
-        raise HTTPException(500, f"report error: {e}")
+    kw = (req.keyword or "").strip()
+    # build args for script
+    args: List[str] = []
+    if req.date:
+        args += ["--date", day]
+    if kw:
+        args += ["--keyword", kw]
+    # run the report script
+    rc, out, err = _run_py("make_daily_report.py", args)
+    # determine report path: script prints the path on stdout
+    if rc == 0:
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        report_path: Optional[str] = lines[-1] if lines else None
+        # if script did not output path, build default candidate
+        if not report_path:
+            filename = f"{day}_{kw}".strip("_") + "_report.md"
+            report_path = str((ARCHIVE / "reports" / filename))
+        return JSONResponse({"ok": True, "path": report_path, "stdout": out, "stderr": err})
+    else:
+        return JSONResponse({"ok": False, "stderr": err}, status_code=500)
 
 class EnrichReq(BaseModel):
-    """요약/번역 요청: keyword(선택)"""
+    """요약/번역 요청: date, keyword(선택)"""
+    date: str | None = None
     keyword: str | None = None
 
 @app.post("/api/enrich/keyword")
 def enrich_keyword(req: EnrichReq, authorized: bool = Depends(authorize)):
-    kw = (req.keyword or "").strip()
-    name = f"enrich_keyword_{kw or _dt.date.today().isoformat()}.md"
-    path = ARCHIVE / name
+    """
+    Enrich all collected articles for a given date/keyword.
+    Invokes enrich_cards.py with --date and --keyword.
+    """
+    day = req.date or _dt.date.today().isoformat()
+    kw  = (req.keyword or "").strip()
+    args: List[str] = []
+    if req.date:
+        args += ["--date", day]
+    if kw:
+        args += ["--keyword", kw]
+    rc, out, err = _run_py("enrich_cards.py", args)
+    # After enrichment script runs, attempt to build a human-friendly summary
+    summary_path: Optional[Path] = None
     try:
-        content = f"# Summary for keyword {kw}\n\n요약과 번역 내용이 여기 표시됩니다.\n"
-        path.write_text(content, encoding="utf-8")
-        return {"ok": True, "path": str(path)}
+        # Determine which JSON file holds the enriched articles.
+        # Prefer archive/{date}_{keyword}.json if it exists; otherwise fall back to
+        # selected_keyword_articles.json to summarise all collected items.
+        json_path: Optional[Path] = None
+        if kw:
+            # replace spaces with hyphens for filename
+            fname = f"{day}_{kw.replace(' ', '-')}.json"
+            cand = ARCHIVE / fname
+            if cand.exists():
+                json_path = cand
+        # Fallback to the working keyword file.  Try multiple candidate locations
+        if not json_path:
+            # Prefer data/selected_keyword_articles.json
+            if SEL_WORK.exists():
+                json_path = SEL_WORK
+            else:
+                # Also consider top-level selected_keyword_articles.json if present
+                root_kw = ROOT / "selected_keyword_articles.json"
+                if root_kw.exists():
+                    json_path = root_kw
+        data = _read_json(json_path) if json_path else {}
+        # Extract list of articles; if missing, default to empty list
+        articles = []
+        if isinstance(data, dict):
+            articles = data.get("articles") or []
+            # Some JSON structures might nest articles under sections
+            if not articles and isinstance(data.get("sections"), dict):
+                for v in data["sections"].values():
+                    if isinstance(v, list):
+                        articles = v
+                        break
+        # Determine keyword to use for filename; if not provided, fallback to data's keyword
+        kw_for_file = kw or data.get("keyword") or ""
+        summary_path = _generate_summary_md(date=day, keyword=kw_for_file, articles=articles, selected=False)
     except Exception as e:
-        raise HTTPException(500, f"enrich keyword error: {e}")
+        # Log error but proceed
+        logger.error("enrich_keyword: summary generation failed: %s", e, exc_info=True)
+        summary_path = None
+    # Respond with path to summary markdown along with stdout/stderr
+    return JSONResponse(
+        {
+            "ok": rc == 0,
+            "path": str(summary_path) if summary_path else None,
+            "stdout": out,
+            "stderr": err,
+        },
+        # Always return a 200 status so that callers receive the summary file path even
+        # if the underlying enrichment script fails.  The "ok" field reflects the
+        # success or failure of the script itself.
+        status_code=200,
+    )
 
 @app.post("/api/enrich/selection")
 def enrich_selection(req: EnrichReq, authorized: bool = Depends(authorize)):
-    kw = (req.keyword or "").strip()
-    name = f"enrich_selection_{kw or _dt.date.today().isoformat()}.md"
-    path = ARCHIVE / name
+    """
+    Enrich only the selected/published articles.
+    Invokes enrich_cards.py with --selection pointing to selected_articles.json.
+    """
+    args = ["--selection", str(SEL_PUB)]
+    rc, out, err = _run_py("enrich_cards.py", args)
+    # Build a summary of only the selected/published articles
+    summary_path: Optional[Path] = None
     try:
-        content = f"# Summary for selection {kw}\n\n선정본 요약과 번역 내용이 여기 표시됩니다.\n"
-        path.write_text(content, encoding="utf-8")
-        return {"ok": True, "path": str(path)}
+        # selected_articles.json holds the approved list.  Read and summarise it.
+        # Load the selected articles JSON.  If ``SEL_PUB`` does not exist or is empty,
+        # attempt to locate a fallback file (data/selected_articles.json or top-level).
+        data = _read_json(SEL_PUB)
+        if not data:
+            # Try standard locations for selected_articles.json
+            for pth in [ROOT / "selected_articles.json", ROOT / "data" / "selected_articles.json"]:
+                if pth.exists():
+                    data = _read_json(pth)
+                    if data:
+                        break
+        articles = []
+        if isinstance(data, dict):
+            articles = data.get("articles") or []
+            if not articles and isinstance(data.get("sections"), dict):
+                for v in data["sections"].values():
+                    if isinstance(v, list):
+                        articles = v
+                        break
+        # Determine date and keyword for file naming.  Use request.date if provided,
+        # otherwise attempt to get from data; fallback to today.
+        sel_day = req.date or data.get("date") or _dt.date.today().isoformat()
+        # Determine keyword: use request.keyword if provided or fallback to data's keyword.
+        sel_kw = (req.keyword or "").strip() or data.get("keyword") or ""
+        summary_path = _generate_summary_md(date=sel_day, keyword=sel_kw, articles=articles, selected=True)
     except Exception as e:
-        # If an error occurs when creating the selection summary, bubble up
-        raise HTTPException(500, f"enrich selection error: {e}")
+        logger.error("enrich_selection: summary generation failed: %s", e, exc_info=True)
+        summary_path = None
+    return JSONResponse(
+        {
+            "ok": rc == 0,
+            "path": str(summary_path) if summary_path else None,
+            "stdout": out,
+            "stderr": err,
+        },
+        # Always return a 200 status so that clients can access the summary file even
+        # when the enrichment script has a non-zero exit code.  Use the "ok" field
+        # to indicate script success or failure.
+        status_code=200,
+    )
 
 @app.get("/api/export/{fmt}")
 def export_fmt(fmt: str, date: str | None = None, authorized: bool = Depends(authorize)):
+    """
+    Export final selection or community articles.
+    If fmt is 'md' or 'csv', export selected_articles.json as Markdown or CSV.
+    Otherwise, fallback to community export based on archive/community_date.json.
+    """
     day = date or _dt.date.today().isoformat()
+    fmt_lower = fmt.lower()
+    # final selection export
+    if fmt_lower in ("md", "csv"):
+        data = _read_json(SEL_PUB)
+        articles = data.get("articles", []) or []
+        kw = data.get("keyword", "") or ""
+        if fmt_lower == "md":
+            lines = [f"# QualiNews — {day} — {kw}", ""]
+            for i, a in enumerate(articles, 1):
+                title = a.get("title", "(no title)")
+                url   = a.get("url") or a.get("link") or ""
+                summ  = a.get("summary") or a.get("ko_summary") or a.get("desc") or ""
+                note  = a.get("editor_note") or ""
+                lines.append(f"### {i}. {title}")
+                if url:  lines.append(f"- 원문: {url}")
+                if summ: lines.append(f"- 요약: {summ}")
+                if note: lines.append(f"- 편집자 코멘트: {note}")
+                lines.append("")
+            md = "\n".join(lines)
+            fname = f"quali_{day}_{_slug_kw(kw)}.md"
+            headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+            return Response(content=md, media_type="text/markdown; charset=utf-8", headers=headers)
+        elif fmt_lower == "csv":
+            buf = io.StringIO(); w = csv.writer(buf)
+            w.writerow(["title","url","source","date","score","approved","editor_note","summary"])
+            for a in articles:
+                w.writerow([
+                    a.get("title",""), a.get("url") or a.get("link") or "",
+                    a.get("source",""), a.get("date",""),
+                    a.get("score",""), a.get("approved",""),
+                    a.get("editor_note",""), a.get("summary") or a.get("ko_summary") or a.get("desc","")
+                ])
+            csv_text = buf.getvalue()
+            data_out  = "\ufeff" + csv_text  # add BOM
+            fname = f"quali_{day}_{_slug_kw(kw)}.csv"
+            headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+            return Response(content=data_out, media_type="text/csv; charset=utf-8", headers=headers)
+    # fallback community export
     cj = ARCHIVE / f"community_{day}.json"
     if not cj.exists():
         raise HTTPException(404, "community json not found")
     obj = _read_json(cj); arts = obj.get("articles", [])
-
-    if fmt.lower() == "md":
+    if fmt_lower == "md":
         lines = [f"# Community — {day}", ""]
         for a in arts:
             title = a.get("title") or "(no title)"
@@ -617,8 +854,7 @@ def export_fmt(fmt: str, date: str | None = None, authorized: bool = Depends(aut
             lines.append(f"- [{title}]({url})  \n  {meta} · {a.get('source','')}")
         md = "\n".join(lines) + "\n"
         return Response(content=md, media_type="text/markdown; charset=utf-8")
-
-    if fmt.lower() == "csv":
+    if fmt_lower == "csv":
         buf = io.StringIO(); w = csv.writer(buf)
         w.writerow(["title","url","source","upvotes","comments","views"])
         for a in arts:
@@ -627,7 +863,6 @@ def export_fmt(fmt: str, date: str | None = None, authorized: bool = Depends(aut
         data = "\ufeff" + buf.getvalue()  # UTF-8 BOM
         return Response(content=data, media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="community_{day}.csv"'})
-
     raise HTTPException(400, "unsupported format")
 
 # ---------------------------------------------------------------------------
@@ -716,33 +951,6 @@ def api_items_publish(item_id: str, req: PublishOneReq):
     sync = _sync_after_save()
     return {"ok": True, "synced": sync.get("ok", False), "item_id": item_id}
 
-
-@app.get("/api/status")
-def api_status():
-    work = _read_json(SEL_WORK); sel_total = len(work.get("articles", []))
-    sel_approved = sum(1 for a in work.get("articles", []) if a.get("approved"))
-    snap = _get_community_snapshot(); comm_total = len(snap.get("articles", []))
-    cfg = _read_json(CONFIG_FILE)
-    gate_required = int((cfg.get("features") or {}).get("gate_required") or cfg.get("gate_required") or 15)
-    require_editor_approval = bool((cfg.get("features") or {}).get("require_editor_approval", True))
-    state_counts = {"candidate":0,"ready":0,"rejected":0}
-    for a in work.get("articles", []):
-        s = (a.get("state") or "").lower()
-        if s in state_counts: state_counts[s] += 1
-    for a in snap.get("articles", []):
-        s = (a.get("state") or "").lower()
-        if s in state_counts: state_counts[s] += 1
-
-    return {"date": work.get("date", _dt.date.today().isoformat()),
-            "keyword": work.get("keyword",""),
-            "selection_total": sel_total, "selection_approved": sel_approved,
-            "community_total": comm_total, "keyword_total": sel_total,
-            "gate_required": gate_required, "require_editor_approval": require_editor_approval,
-            "gate_pass": sel_approved >= gate_required,
-            "state_counts": state_counts,
-            "paths": {"work": str(SEL_WORK), "publish": str(SEL_PUB), "community": "root_or_archive"}}
-
-
 class PublishReq(BaseModel):
     keyword: str
 
@@ -768,10 +976,6 @@ def api_flow_daily():
 class FlowKwReq(BaseModel):
     keyword: str
     use_external_rss: bool = False
-
-class PublishOneReq(BaseModel):
-    editor_note: str = ""
-    approve: bool = True
 
 @app.post("/api/flow/keyword")
 def api_flow_keyword(req: FlowKwReq):
@@ -820,6 +1024,16 @@ def download_log(log_name: str, user: dict = Depends(verify_jwt_token)):
     if not path.exists() or not path.is_file(): raise HTTPException(404, "log not found")
     return FileResponse(str(path), filename=log_name, media_type="text/plain")
 
+@app.get("/api/config/gate_required")
+async def get_gate_required():
+    return {"gate_required": int(GATE.get("gate_required", 3))}
+
+@app.patch("/api/config/gate_required")
+async def set_gate_required(p: GatePatch):
+    v = max(1, min(100, int(p.gate_required)))  # 1~100로 보호
+    GATE["gate_required"] = v
+    return {"ok": True, "gate_required": v}
+
 # ---------------------------------------------------------------------------
 # Misc
 # ---------------------------------------------------------------------------
@@ -837,6 +1051,16 @@ def index():
     if p: return HTMLResponse(p.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>QualiJournal Admin</h1><p>index.html이 없습니다.</p>")
 
+# [ADD] KPI 현황 조회 (UI가 30초마다 호출)
+@app.get("/api/status")
+async def get_status():
+    return {
+        "selected": KPI.get("selected", 0),
+        "approved": KPI.get("approved", 0),
+        "published": KPI.get("published", 0),
+        "gate_required": GATE["gate_required"],
+        "ts": int(time.time())
+    }
 
 if __name__ == "__main__":
     # Local run helper (for dev/testing): respects Cloud Run-style PORT
