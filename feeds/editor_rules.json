@@ -1,23 +1,55 @@
 {
-  "weights": {
-    "domain": {
-      "ipc.org": 20,
-      "ecss.nl": 20,
-      "jedec.org": 18,
-      "ieee.org": 16,
-      "iec.ch": 16,
-      "iconnect007.com": 16,
-      "smt007.com": 16,
-      "pcb007.com": 16,
-      "smta.org": 12,
-      "spectrum.ieee.org": 12,
-      "technologyreview.com": 10,
-      "nist.gov": 16,
-      "eeworld.com.cn": 12,
-      "blogs.nvidia.com": 10,
-      "deepmind.com": 10,
-      "ai.googleblog.com": 10,
-      "meta.com": 10
+  "score_weights": {
+    "domain_trust": 0.30,
+    "doc_type": 0.25,
+    "standards_coverage": 0.25,
+    "tech_depth": 0.15,
+    "citations": 0.05
+  },
+  "doc_type_weights": {
+    "pdf": 1.00,
+    "doc": 0.90, "docx": 0.90,
+    "ppt": 0.75, "pptx": 0.75,
+    "xls": 0.70, "xlsx": 0.70,
+    "md": 0.60, "rtf": 0.60, "odt": 0.60, "html": 0.60,
+    "text": 0.35
+  },
+  "domain_weights": {
+    "ipc.org": 1.00,
+    "ecss.nl": 0.95,
+    "nasa.gov": 0.95,
+    "nist.gov": 0.90,
+    "iconnect007.com": 0.95, "pcb007.com": 0.95, "smt007.com": 0.95,
+    "eeworld.com.cn": 0.85,
+    "reddit.com": 0.60,
+    "news.google.com": 0.10,
+    "bing.com": 0.10
+  },
+  "standards_bundles": {
+    "IPC-A-610": {
+      "core": ["IPC-A-610","IPC A-610","IPC-A610","IPC610","IPC 610"],
+      "context": ["acceptability","acceptance criteria","defect classification","solder joint","rework","Class 3","inspection","workmanship"]
+    },
+    "J-STD-001": {
+      "core": ["J-STD-001","J STD 001","JSTD-001","JSTD001"],
+      "context": ["soldering","assembly","requirements","Class 3","space hardware"]
+    },
+    "NASA-STD-8739": {
+      "core": ["NASA-STD-8739","8739.1","8739.2","8739.3","8739.4"],
+      "context": ["workmanship","soldered electrical connections","inspection","requirements"]
+    },
+    "ECSS": {
+      "core": ["ECSS-Q-ST-70","ECSS","ECSS-Q-70"],
+      "context": ["space","workmanship","materials","cleanliness","inspection"]
     }
+  },
+  "block_title_patterns": "(?i)hiring|job|promo|coupon|sale|giveaway|subscribe|newsletter|\\bIndian Penal Code\\b|\\bIPC Section\\b|\\bSection 610\\b",
+  "thresholds": {
+    "auto_approve": 0.65,
+    "needs_review_min": 0.50
+  },
+  "modifiers": {
+    "doc_type_requires_standard": true,
+    "doc_type_factor_if_no_standard": 0.5
   }
 }

@@ -1,8 +1,52 @@
 {
-  "ECSS Active Standards": "https://ecss.nl/standards",
-  "IPC News": "https://www.ipc.org/news",
-  "PCB007": "https://iconnect007.com/page/pcb007/12",
-  "SMT007": "https://iconnect007.com/page/smt007/11",
-  "NIST News": "https://www.nist.gov/news-events/news"
+  "sources": [
+    {
+      "name": "IPC",
+      "base": "https://www.ipc.org",
+      "prefer_file_types": ["pdf","docx","doc","pptx","ppt","xlsx","xls"],
+      "accept_mime_types": [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ],
+      "follow_rules": {
+        "extract_pdf_links_from_html": true,
+        "max_redirects": 3
+      }
+    },
+    {
+      "name": "NASA",
+      "base": "https://standards.nasa.gov",
+      "prefer_file_types": ["pdf","docx","doc","pptx","ppt","xlsx","xls"],
+      "accept_mime_types": [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ],
+      "follow_rules": { "extract_pdf_links_from_html": true, "max_redirects": 3 }
+    },
+    {
+      "name": "ECSS",
+      "base": "https://ecss.nl",
+      "prefer_file_types": ["pdf","docx","doc","pptx","ppt","xlsx","xls"],
+      "accept_mime_types": [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ],
+      "follow_rules": { "extract_pdf_links_from_html": true, "max_redirects": 3 }
+    }
+  ]
 }
-

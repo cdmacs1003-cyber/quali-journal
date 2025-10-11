@@ -87,12 +87,26 @@
       <div class="box">선정본 승인: <b id="selApproved">-</b></div>
       <div class="box">커뮤니티 후보: <b id="comTotal">-</b></div>
       <div class="box">키워드 특집: <b id="kwTotal">-</b></div>
+      <div class="box">후보: <b id="cntCandidate">-</b></div>
+      <div class="box">준비완료: <b id="cntReady">-</b></div>
+      <div class="box">거절: <b id="cntRejected">-</b></div>
     </div>
     <div class="row">
       <span class="pill">게이트(승인 ≥ <span id="gateReq">15</span>): <b id="gatePass">-</b></span>
       <button onclick="startApprove()">승인 UI 열기</button>
       <a class="pill" id="uiLink" href="#" target="_blank" rel="noopener"></a>
     </div>
+    <section id="readyPanel" class="card" style="margin-top:12px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h3 style="margin:0">준비완료(Ready) 목록</h3>
+        <div class="row">
+          <button class="primary" onclick="loadReady()">Ready 불러오기</button>
+          <button onclick="refresh()">KPI 새로고침</button>
+        </div>
+      </div>
+      <div id="readyList" style="margin-top:8px;display:grid;gap:8px"></div>
+    </section>
+
     <!-- 게이트 조정 슬라이더 -->
     <div class="row" style="gap:12px">
       <label for="gateSlider" class="pill" style="margin-right:4px">게이트 조절:</label>
@@ -224,6 +238,9 @@
       const j = await (await fetch(`${API}/api/status?date=${encodeURIComponent(date)}&keyword=${encodeURIComponent(keyword)}`)).json();
       el('selTotal').textContent=j.selection_total??'-';
       el('selApproved').textContent=j.selection_approved??'-';
+      el('cntCandidate').textContent = (j.state_counts && j.state_counts.candidate) || 0;
+      el('cntReady').textContent     = (j.state_counts && j.state_counts.ready) || 0;
+      el('cntRejected').textContent  = (j.state_counts && j.state_counts.rejected) || 0;
       el('comTotal').textContent=j.community_total??'-';
       el('kwTotal').textContent=j.keyword_total??'-';
       el('gateReq').textContent=j.gate_required??15;
@@ -240,7 +257,12 @@
     const v = parseInt(val||'0',10);
     if(!v) return;
     try{
-      const res = await fetch(`${API}/api/config/gate_required`,{method:'PATCH',headers:{'Content-Type':'application/json'},body: JSON.stringify({value:v})});
+      const res = await fetch(`${API}/api/config/gate_required`, {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        // 서버는 gate_required 필드를 사용합니다
+        body: JSON.stringify({gate_required: v})
+      });
       const js = await res.json().catch(()=>({}));
       if(js && js.gate_required!=null){ el('gateReq').textContent = js.gate_required; el('gateVal').textContent = js.gate_required; }
       await refresh();
@@ -265,7 +287,14 @@
     try{
       const res = await fetch(`${API}/api/enrich/keyword`,{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({keyword: kw})});
       const j = await res.json();
-      el('log').textContent = JSON.stringify(j,null,2);
+      // Show summary generation result.  If a path is returned, display it as a link.
+      if(j.path){
+        // Construct a full URL: relative paths are served by the API base.  Prefix with API_BASE
+        const url = `${API}${j.path.startsWith('/') ? '' : '/'}${j.path}`;
+        el('log').innerHTML = `요약 파일 생성 완료: <a href="${url}" target="_blank" rel="noopener">${j.path}</a>`;
+      } else {
+        el('log').textContent = JSON.stringify(j,null,2);
+      }
     }catch(e){ el('log').textContent='키워드 요약 실패: '+e; }
   }
 
@@ -275,19 +304,30 @@
     try{
       const res = await fetch(`${API}/api/enrich/selection`,{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({keyword: kw})});
       const j = await res.json();
-      el('log').textContent = JSON.stringify(j,null,2);
+      if(j.path){
+        const url = `${API}${j.path.startsWith('/') ? '' : '/'}${j.path}`;
+        el('log').innerHTML = `선정본 요약 파일 생성 완료: <a href="${url}" target="_blank" rel="noopener">${j.path}</a>`;
+      } else {
+        el('log').textContent = JSON.stringify(j,null,2);
+      }
     }catch(e){ el('log').textContent='선정본 요약 실패: '+e; }
   }
 
   // MD 내보내기
   async function exportMd(){
+    // 날짜와 키워드 값 추출 (필요시 기본값 사용)
     const date = el('reportDate').value || new Date().toISOString().slice(0,10);
+    const kw = el('reportKw').value.trim() || el('kw').value.trim();
     try{
-      const res = await fetch(`${API}/api/export/md?date=${encodeURIComponent(date)}`);
+      // 서버는 발행본(selected_articles.json)으로부터 Markdown을 생성합니다
+      const res = await fetch(`${API}/api/export/md`);
       if(!res.ok){ el('log').textContent='MD 내보내기 실패: '+res.status; return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `community_${date}.md`; document.body.appendChild(a); a.click(); a.remove();
+      // 키워드를 파일명에 포함하여 구분 가능하게 합니다. 공백은 밑줄로 교체
+      const slug = kw ? kw.replace(/\s+/g, '_') : '';
+      const fname = slug ? `quali_${date}_${slug}.md` : `quali_${date}.md`;
+      const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
       el('log').textContent = 'MD 파일 다운로드 완료';
     }catch(e){ el('log').textContent='MD 내보내기 실패: '+e; }
   }
@@ -295,12 +335,16 @@
   // CSV 내보내기
   async function exportCsv(){
     const date = el('reportDate').value || new Date().toISOString().slice(0,10);
+    const kw = el('reportKw').value.trim() || el('kw').value.trim();
     try{
-      const res = await fetch(`${API}/api/export/csv?date=${encodeURIComponent(date)}`);
+      // 서버는 발행본(selected_articles.json)으로부터 CSV를 생성합니다
+      const res = await fetch(`${API}/api/export/csv`);
       if(!res.ok){ el('log').textContent='CSV 내보내기 실패: '+res.status; return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `community_${date}.csv`; document.body.appendChild(a); a.click(); a.remove();
+      const slug = kw ? kw.replace(/\s+/g, '_') : '';
+      const fname = slug ? `quali_${date}_${slug}.csv` : `quali_${date}.csv`;
+      const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
       el('log').textContent = 'CSV 파일 다운로드 완료';
     }catch(e){ el('log').textContent='CSV 내보내기 실패: '+e; }
   }
@@ -423,6 +467,59 @@
     lockButtons(false);
   }
   async function showRecent(){ try{ const r=await fetch(`${API}/api/tasks/recent?limit=20`); el('log').textContent=JSON.stringify(await r.json(),null,2); }catch(e){ el('log').textContent='최근 작업 실패: '+e; } }
+    async function loadReady(){
+    const date=el('date')?.value?.trim()||'', keyword=el('kw')?.value?.trim()||'';
+    try{
+      const j = await (await fetch(`${API}/api/items?state=ready&date=${encodeURIComponent(date)}&keyword=${encodeURIComponent(keyword)}`)).json();
+      renderReadyList(j.items||[]);
+    }catch(e){ el('log').textContent='Ready 불러오기 실패: '+e; }
+  }
+  function renderReadyList(items){
+    const $ = el('readyList'); if(!$) return;
+    if(!items.length){ $.innerHTML='<div class="row" style="color:var(--muted)">Ready 항목이 없습니다.</div>'; return; }
+    $.innerHTML = items.map(a=>{
+      const id = a.id || '';
+      const src = a.source || '';
+      const url = a.url || '#';
+      const title = a.title || '(제목 없음)';
+      const v = (a.value_score!=null? a.value_score : a.total_score)||0;
+      const dt = a.doc_type || 'text';
+      const note = a.editor_note || '';
+      return `
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <div><b>${title}</b><br/><small>${src}</small></div>
+            <a href="${url}" target="_blank" rel="noopener">열기</a>
+          </div>
+          <div class="row" style="gap:12px;margin:8px 0">
+            <span class="pill">형식: ${dt}</span>
+            <span class="pill">V: ${v}</span>
+          </div>
+          <label>편집장 한마디</label>
+          <textarea id="note-${id}" rows="2" style="width:100%">${note.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
+          <div class="row" style="justify-content:flex-end;margin-top:8px">
+            <button class="primary" onclick="publishItem('${id}')">발행</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+  async function publishItem(id){
+    const noteEl = el('note-'+id); const editor_note = noteEl? noteEl.value : '';
+    try{
+      const r = await fetch(`${API}/api/items/${encodeURIComponent(id)}/publish`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ editor_note, approve: true })
+      });
+      const j = await r.json();
+      if(!r.ok || j.ok!==true){ throw new Error(j.detail || '발행 실패'); }
+      // UI 반영: 카드 제거 → KPI 갱신
+      const card = (noteEl && noteEl.closest('.card')); if(card) card.remove();
+      refresh().catch(()=>{});
+    }catch(e){
+      alert('발행 실패: '+e);
+    }
+  }
 
   // 30초마다 KPI 자동 새로고침
   setInterval(()=>{ refresh().catch(()=>{}); }, 30000);
