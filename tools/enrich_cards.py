@@ -1,19 +1,14 @@
-﻿# -*- coding: utf-8 -*-
-"""
-enrich_cards.py
-- 키워드/선정본 요약 파일을 안전하게 생성
-- 입력(STDIN/ARGS) 유연 처리, 파일만 만들어 주면 OK
-"""
+﻿# enrich_cards.py (safe ascii)
 from __future__ import annotations
-import sys, json, argparse
+import sys, json
 from pathlib import Path
-from datetime import datetime as _dt
+from datetime import datetime as dt
 
-ROOT = Path(__file__).resolve().parents[1]    # /app 또는 프로젝트 루트
-ENRICH = ROOT / "archive" / "enriched"
-ENRICH.mkdir(parents=True, exist_ok=True)
+ROOT = Path(__file__).resolve().parents[1]
+OUTDIR = ROOT / "archive" / "enriched"
+OUTDIR.mkdir(parents=True, exist_ok=True)
 
-def _read_stdin_json() -> dict:
+def read_stdin_json():
     try:
         data = sys.stdin.read().strip()
         if data:
@@ -22,39 +17,23 @@ def _read_stdin_json() -> dict:
         pass
     return {}
 
-def _clean(s: str) -> str:
-    if s is None: return ""
-    s = str(s).replace("\r"," ").replace("\n"," ").replace("\t"," ")
+def val(x: str) -> str:
+    if x is None: return ""
+    s = str(x).replace("\r"," ").replace("\n"," ").replace("\t"," ")
     return " ".join(s.split())
 
 def main():
-    stdin = _read_stdin_json()
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--date", dest="date")
-    ap.add_argument("--keyword", dest="keyword")
-    args, _ = ap.parse_known_args()
+    body = read_stdin_json()
+    date = val(body.get("date") or body.get("ymd") or dt.now().strftime("%Y-%m-%d"))
+    kw   = val(body.get("keyword") or "UNKNOWN")
 
-    date = stdin.get("date") or stdin.get("ymd") or args.date or _dt.now().strftime("%Y-%m-%d")
-    kw   = stdin.get("keyword") or args.keyword or "UNKNOWN"
+    p_all = OUTDIR / ("%s_%s_all.md" % (date, kw))
+    p_sel = OUTDIR / ("%s_%s_selected.md" % (date, kw))
 
-    date = _clean(date); kw = _clean(kw)
+    p_all.write_text("# Keyword Enrich - %s - %s\n\n- Auto draft.\n" % (date, kw), encoding="utf-8")
+    p_sel.write_text("# Selection Enrich - %s - %s\n\n- Auto draft.\n" % (date, kw), encoding="utf-8")
 
-    all_path     = ENRICH / f"{date}_{kw}_all.md"
-    selected_path= ENRICH / f"{date}_{kw}_selected.md"
-
-    all_text = f"# Keyword Enrich — {date} — {kw}\n\n- (자동) 키워드 전체 요약 초안 파일입니다.\n"
-    sel_text = f"# Selection Enrich — {date} — {kw}\n\n- (자동) 선정본 요약 초안 파일입니다.\n"
-
-    all_path.write_text(all_text, encoding="utf-8")
-    selected_path.write_text(sel_text, encoding="utf-8")
-
-    print(json.dumps({
-        "ok": True,
-        "paths": {
-            "ALL": str(all_path.relative_to(ROOT)),
-            "SELECTED": str(selected_path.relative_to(ROOT))
-        }
-    }, ensure_ascii=False))
+    print(json.dumps({"ok": True, "path_all": str(p_all.relative_to(ROOT)), "path_selected": str(p_sel.relative_to(ROOT))}))
     return 0
 
 if __name__ == "__main__":
