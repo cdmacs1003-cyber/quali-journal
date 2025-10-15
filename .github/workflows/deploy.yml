@@ -1,0 +1,87 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: {}   # Actions 탭에 Run workflow 버튼 표시
+
+concurrency:
+  group: cloudrun-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}             # 예: quali-journal-prod
+  REGION: ${{ vars.CLOUD_RUN_REGION }}                  # 예: asia-northeast3
+  SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}                # 예: quali-journal
+  ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}          # 예: http://localhost:3000,http://127.0.0.1:3000
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        shell: bash
+        run: |
+          test -n "$PROJECT_ID" || { echo "::error::Missing secret GCP_PROJECT_ID"; exit 1; }
+          test -n "$REGION"     || { echo "::error::Missing repo variable CLOUD_RUN_REGION"; exit 1; }
+          test -n "$SERVICE"    || { echo "::error::Missing repo variable CLOUD_RUN_SERVICE"; exit 1; }
+
+      - name: Auth to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure gcloud defaults (optional)
+        shell: bash
+        run: |
+          gcloud config set project "$PROJECT_ID"
+          gcloud config set run/region "$REGION"
+
+      - name: Deploy (Cloud Run from source)
+        shell: bash
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --source . \
+            --allow-unauthenticated \
+            --update-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
+            --set-env-vars "ALLOWED_ORIGINS=${ALLOWED_ORIGINS}" \
+            --quiet
+
+      - name: Show Service URL
+        id: url
+        shell: bash
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --format='value(status.url)')
+          echo "SERVICE_URL=$URL" >> "$GITHUB_OUTPUT"
+          echo "Service URL: $URL"
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### Cloud Run Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Service: $SERVICE"           >> "$GITHUB_STEP_SUMMARY"
+          echo "- Region : $REGION"            >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL    : ${{ steps.url.outputs.SERVICE_URL }}" >> "$GITHUB_STEP_SUMMARY"
