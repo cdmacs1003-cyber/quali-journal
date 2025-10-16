@@ -45,3 +45,20 @@ jobs:
             --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
             --allow-unauthenticated \
             --quiet
+      - name: Notify Slack
+        if: always()
+        run: |
+          set -e
+          WEBHOOK="${{ secrets.SLACK_WEBHOOK_URL }}"
+          if [ -z "$WEBHOOK" ]; then
+            echo "No SLACK_WEBHOOK_URL; skipping Slack notify."
+            exit 0
+          fi
+          STATUS="${{ job.status }}"
+          REPO="${{ github.repository }}"
+          REF="${{ github.ref_name }}"
+          SHA="${{ github.sha }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          MSG="🚀 Deploy ${STATUS} | ${REPO}@${REF} (${SHA})"
+          payload=$(printf '{"text":"%s\nLogs: %s"}' "$MSG" "$RUN_URL")
+          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$WEBHOOK" || echo "Slack post failed (non-blocking)"
