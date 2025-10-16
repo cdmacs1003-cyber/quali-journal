@@ -2,125 +2,37 @@ name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch: {}   # Actions 탭에 Run workflow 버튼 표시
-
-concurrency:
-  group: cloudrun-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
-  id-token: write
-
-env:
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}             # 예: quali-journal-prod
-  REGION:     ${{ vars.CLOUD_RUN_REGION }}              # 예: asia-northeast3
-  SERVICE:    ${{ vars.CLOUD_RUN_SERVICE }}             # 예: quali-journal
-  ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}          # 예: http://localhost:3000,http://127.0.0.1:3000
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   deploy:
-    name: Deploy to Cloud Run
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
 
-    timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ===== PR에서는 드라이런(비밀/배포 X) =====
-      - name: PR dry-run (no secrets)
-        if: ${{ github.event_name == 'pull_request' }}
-        shell: bash
-        run: |
-          echo "[PR] Dry run only. No deploy."
-          echo "ok" > /tmp/pr_check.txt
-
-      # ===== 실제 배포는 push/workflow_dispatch에서만 =====
-      - name: Validate inputs
-        if: ${{ github.event_name != 'pull_request' }}
-        shell: bash
-        run: |
-          test -n "$PROJECT_ID" || { echo "::error::Missing secret GCP_PROJECT_ID"; exit 1; }
-          test -n "$REGION"     || { echo "::error::Missing repo variable CLOUD_RUN_REGION"; exit 1; }
-          test -n "$SERVICE"    || { echo "::error::Missing repo variable CLOUD_RUN_SERVICE"; exit 1; }
-
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
+          # 풀/프로바이더 "정확한 경로" 하드코딩
           workload_identity_provider: projects/656593030029/locations/global/workloadIdentityPools/gh-pool/providers/gh-provider
           service_account: github-deploy@quali-journal-prod.iam.gserviceaccount.com
-
+          token_format: access_token
 
       - name: Setup gcloud
-        if: ${{ github.event_name != 'pull_request' }}
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure gcloud defaults
-        if: ${{ github.event_name != 'pull_request' }}
-        shell: bash
+      - name: Deploy to Cloud Run
         run: |
-          gcloud config set project "$PROJECT_ID"
-          gcloud config set run/region "$REGION"
-
-      - name: Deploy (Cloud Run from source)
-        if: ${{ github.event_name != 'pull_request' }}
-        shell: bash
-        run: |
-          gcloud run deploy "$SERVICE" \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --source . \
-            --allow-unauthenticated \
+          gcloud run deploy "quali-journal" \
+            --region "asia-northeast3" \
+            --source "." \
+            --service-account "quali-run-sa@quali-journal-prod.iam.gserviceaccount.com" \
             --update-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
-            --set-env-vars "ALLOWED_ORIGINS=${ALLOWED_ORIGINS}" \
-            --quiet
-
-      - name: Show Service URL
-        id: url
-        if: ${{ github.event_name != 'pull_request' }}
-        shell: bash
-        run: |
-          URL=$(gcloud run services describe "$SERVICE" \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --format='value(status.url)')
-          echo "SERVICE_URL=$URL" >> "$GITHUB_OUTPUT"
-          echo "Service URL: $URL"
-
-      # --- Summary (PR/배포 공용) ---
-      - name: Summary
-        shell: bash
-        run: |
-          echo "### Cloud Run Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Service: $SERVICE"           >> "$GITHUB_STEP_SUMMARY"
-          echo "- Region : $REGION"            >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "- Mode   : PR dry-run (no deploy)" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- URL    : ${{ steps.url.outputs.SERVICE_URL }}" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      # --- Slack 알림은 실제 배포 때만 ---
-      - name: Notify Slack (success)
-        if: ${{ github.event_name != 'pull_request' && success() }}
-        shell: bash
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data '{"text":"✅ Deploy OK · service='"$SERVICE"' · url=${{ steps.url.outputs.SERVICE_URL }}"}' \
-            "${{ secrets.SLACK_WEBHOOK_URL }}"
-
-      - name: Notify Slack (failure)
-        if: ${{ github.event_name != 'pull_request' && failure() }}
-        shell: bash
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data '{"text":"❌ Deploy FAIL · service='"$SERVICE"' · branch='${GITHUB_REF##*/}'"}' \
-            "${{ secrets.SLACK_WEBHOOK_URL }}"
+            --set-env-vars 'ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000' \
+            --allow-unauthenticated
