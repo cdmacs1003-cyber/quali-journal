@@ -27,10 +27,14 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
+          gcloud config set project "quali-journal-prod"
           gcloud run deploy "quali-journal" \
             --region "asia-northeast3" \
             --source "." \
             --service-account "quali-run-sa@quali-journal-prod.iam.gserviceaccount.com" \
+            --set-build-env-vars "GOOGLE_ENTRYPOINT=uvicorn server_quali:app --host 0.0.0.0 --port 8080" \
             --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
-            --set-env-vars 'ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000' \
-            --allow-unauthenticated
+            --set-env-vars "ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000" \
+            --allow-unauthenticated \
+            --quiet
+
