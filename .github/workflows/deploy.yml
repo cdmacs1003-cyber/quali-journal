@@ -25,6 +25,10 @@ jobs:
   deploy:
     name: Deploy to Cloud Run
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
     timeout-minutes: 30
 
     steps:
@@ -49,13 +53,11 @@ jobs:
           test -n "$SERVICE"    || { echo "::error::Missing repo variable CLOUD_RUN_SERVICE"; exit 1; }
 
       - name: Auth to Google Cloud (WIF)
-        if: ${{ github.event_name != 'pull_request' }}
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-          token_format: access_token
-          create_credentials_file: true
+          workload_identity_provider: projects/656593030029/locations/global/workloadIdentityPools/gh-pool/providers/gh-provider
+          service_account: github-deploy@quali-journal-prod.iam.gserviceaccount.com
+
 
       - name: Setup gcloud
         if: ${{ github.event_name != 'pull_request' }}
