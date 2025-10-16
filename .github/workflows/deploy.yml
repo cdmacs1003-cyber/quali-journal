@@ -44,6 +44,7 @@ jobs:
           gcloud run deploy "quali-journal" \
             --region "asia-northeast3" \
             --source "." \
+            --build-service-account "github-deploy@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --service-account "quali-run-sa@quali-journal-prod.iam.gserviceaccount.com" \
             --env-vars-file "env.yaml" \
             --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
