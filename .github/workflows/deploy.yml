@@ -2,7 +2,8 @@ name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -13,28 +14,38 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Auth to Google Cloud (JSON)
+      - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-
-      - name: Setup gcloud
+      - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
+
+      - name: Write Procfile for Cloud Run buildpacks
+        run: |
+          echo "web: uvicorn server_quali:app --host 0.0.0.0 --port 8080" > Procfile
 
       - name: Deploy to Cloud Run
         run: |
+          set -eux
+          # Set the correct project
           gcloud config set project "quali-journal-prod"
+
+          # Create an env file for runtime environment variables (comma-safe)
+          cat > env.yaml <<'EOF_ENV'
+          ALLOWED_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+          EOF_ENV
+
+          # Deploy the service from source
           gcloud run deploy "quali-journal" \
             --region "asia-northeast3" \
             --source "." \
             --service-account "quali-run-sa@quali-journal-prod.iam.gserviceaccount.com" \
-            --set-build-env-vars "GOOGLE_ENTRYPOINT=uvicorn server_quali:app --host 0.0.0.0 --port 8080" \
+            --env-vars-file "env.yaml" \
             --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
-            --set-env-vars "ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000" \
             --allow-unauthenticated \
             --quiet
-
