@@ -19,3 +19,4 @@ QualiNews 완성 템플릿 (생성: 2025-10-04 13:26 KST)
 - supply_sources.json : EMS/부품/산업 동향 소스
 - 커뮤니티_키워드.txt : 커뮤니티 수집 키워드 목록(1줄 1키워드)
 - keyword_synonyms.json : 키워드 변형/동의어 매핑
+
