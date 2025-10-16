@@ -31,6 +31,6 @@ jobs:
             --region "asia-northeast3" \
             --source "." \
             --service-account "quali-run-sa@quali-journal-prod.iam.gserviceaccount.com" \
-            --update-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
+            --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
             --set-env-vars 'ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000' \
             --allow-unauthenticated
