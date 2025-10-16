@@ -16,13 +16,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Auth to Google Cloud (WIF)
+      - name: Auth to Google Cloud (JSON)
         uses: google-github-actions/auth@v2
         with:
-          # 풀/프로바이더 "정확한 경로" 하드코딩
-          workload_identity_provider: projects/656593030029/locations/global/workloadIdentityPools/gh-pool/providers/gh-provider
-          service_account: github-deploy@quali-journal-prod.iam.gserviceaccount.com
-          token_format: access_token
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
