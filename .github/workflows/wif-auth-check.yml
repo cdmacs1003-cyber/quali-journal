@@ -15,10 +15,12 @@ jobs:
       - name: Auth via WIF
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account:         ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-          project_id:              ${{ secrets.GCP_PROJECT_ID }}
-          token_format:            "access_token"
+          # ⚠️ 시크릿 대신 '정확한 경로'를 직접 넣는다 (테스트용)
+          workload_identity_provider: "projects/656593003029/locations/global/workloadIdentityPools/github-pool/providers/gha-actions"
+          service_account: "gha-deploy-sa@quali-journal-prod.iam.gserviceaccount.com"
+          project_id: "quali-journal-prod"
+          token_format: "access_token"
+
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -31,3 +33,4 @@ jobs:
           gcloud auth list
           echo "== token length =="
           gcloud auth print-access-token | wc -c
+
