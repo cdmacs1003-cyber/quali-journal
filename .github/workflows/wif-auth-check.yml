@@ -1,0 +1,30 @@
+name: WIF Auth Check
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  auth-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auth via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/656589300029/locations/global/workloadIdentityPools/github-pool/providers/ghwif-main"
+          service_account: "github-deploy@quali-journal-prod.iam.gserviceaccount.com"
+          project_id: "quali-journal-prod"
+          token_format: "access_token"
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: quali-journal-prod
+
+      - name: Verify access token
+        run: |
+          gcloud auth list
+          tok=$(gcloud auth print-access-token)
+          test -n "$tok" && echo "OK: got access token"
