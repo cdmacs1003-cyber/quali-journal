@@ -13,23 +13,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Auth via WIF
         uses: google-github-actions/auth@v2
         with:
-          token_format: 'access_token'
-          # 프로젝트 **번호**를 사용한 WIF 프로바이더 경로를 정확히 넣습니다.
-          workload_identity_provider: 'projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/gha-actions'
-          service_account: 'gha-deploy-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com'
-          # audience는 생략(권장) 또는 아래처럼 https://iam.googleapis.com 형식으로 지정
-          # audience: 'https://iam.googleapis.com/projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/gha-actions'
+          workload_identity_provider: "projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/gha-actions"
+          service_account: "gha-deploy-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+          token_format: "access_token"
+          access_token_scopes: "https://www.googleapis.com/auth/cloud-platform"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Verify authentication
+      - name: Verify
         run: |
+          echo "== gcloud auth list =="
           gcloud auth list
+          echo "== token length =="
           gcloud auth print-access-token | wc -c
+          echo "== optional: list run services =="
           gcloud run services list --region asia-northeast3 || true
