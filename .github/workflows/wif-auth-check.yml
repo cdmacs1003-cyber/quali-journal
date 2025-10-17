@@ -1,7 +1,5 @@
 name: WIF Auth Check
-
-on:
-  workflow_dispatch:
+on: { workflow_dispatch: {} }
 
 permissions:
   contents: read
@@ -28,9 +26,5 @@ jobs:
 
       - name: Verify
         run: |
-          echo "== gcloud auth list =="
-          gcloud auth list
-          echo "== token length =="
-          gcloud auth print-access-token | wc -c
-          echo "== optional: list run services =="
-          gcloud run services list --region asia-northeast3 || true
+          echo "== gcloud auth list ==" && gcloud auth list
+          echo "== token length ==" && gcloud auth print-access-token | wc -c
