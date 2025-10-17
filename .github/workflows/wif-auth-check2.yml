@@ -1,5 +1,5 @@
-name: WIF Auth Check 2
-on: workflow_dispatch
+name: WIF Auth Check
+on: { workflow_dispatch: {} }
 
 permissions:
   contents: read
@@ -9,36 +9,22 @@ jobs:
   auth-check:
     runs-on: ubuntu-latest
     steps:
-      # 1) OIDC 토큰의 aud/iss/sub/repository/ref를 직접 확인 (audience는 URL-encode)
-      - name: Debug OIDC (print aud/iss/repo/ref)
-        env:
-          REQ_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
-          REQ_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-          AUD: "//iam.googleapis.com/projects/656589300029/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
-        run: |
-          set -e
-          echo "AUDIENCE=${AUD}"
-          # URL-encode 해야 'Bad hostname'가 안 납니다
-          AUD_ENC=$(jq -rn --arg x "$AUD" '$x|@uri')
-          jwt=$(curl -sSf -H "Authorization: Bearer ${REQ_TOKEN}" "${REQ_URL}&audience=${AUD_ENC}" | jq -r '.value')
-          body=$(echo "$jwt" | cut -d'.' -f2 | base64 -d 2>/dev/null || true)
-          echo "---- OIDC claims ----"
-          echo "$body" | jq -r '.aud, .iss, .sub, .repository, .ref' | awk '{print NR": "$0}'
-          echo "---------------------"
+      - uses: actions/checkout@v4
 
-
-      # 2) STS로 교환 (WIF 인증)
-      - name: Auth via WIF (exchange with STS)
+      - name: Auth via WIF
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: "projects/656589300029/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
-          service_account: "github-deploy@quali-journal-prod.iam.gserviceaccount.com"
-          project_id: "quali-journal-prod"
+          workload_identity_provider: "projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/gha-actions"
+          service_account: "gha-deploy-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
           token_format: "access_token"
-          audience: "//iam.googleapis.com/projects/656589300029/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
+          access_token_scopes: "https://www.googleapis.com/auth/cloud-platform"
 
-      # 3) 토큰 확인
-      - name: Verify access token
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Verify
         run: |
-          tok=$(gcloud auth print-access-token || true)
-          test -n "$tok" && echo "OK: got access token"
+          echo "== gcloud auth list ==" && gcloud auth list
+          echo "== token length ==" && gcloud auth print-access-token | wc -c
