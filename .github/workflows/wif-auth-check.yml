@@ -10,6 +10,24 @@ jobs:
   auth-check:
     runs-on: ubuntu-latest
     steps:
+      - name: Debug OIDC audience
+        if: ${{ always() }}
+        shell: bash
+        env:
+          REQ_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+          REQ_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+          TARGET_AUD: "//iam.googleapis.com/projects/656589300029/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
+        run: |
+          set -e
+          url="${REQ_URL}&audience=${TARGET_AUD}"
+          jwt=$(curl -sSf -H "Authorization: Bearer ${REQ_TOKEN}" "${url}" | jq -r '.value')
+          echo "JWT length: ${#jwt}"
+          # aud/iss/sub/repository/ref를 출력
+          body=$(echo "$jwt" | cut -d'.' -f2 | base64 -d 2>/dev/null | sed 's/}/}/')
+          echo "----- OIDC claims -----"
+          echo "$body" | jq -r '.aud, .iss, .sub, .repository, .ref' | awk '{print NR": "$0}'
+          echo "-----------------------"
+
       - name: Auth via WIF
         uses: google-github-actions/auth@v2
         with:
@@ -29,4 +47,5 @@ jobs:
           gcloud auth list
           tok=$(gcloud auth print-access-token)
           test -n "$tok" && echo "OK: got access token"
+
 
