@@ -13,10 +13,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 1) GitHub OIDC 토큰을 우리가 지정한 audience로 발급받아 aud/iss/repo/ref 확인
+      - name: Debug OIDC (aud/iss/repo/ref)
+        shell: bash
+        env:
+          REQ_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+          REQ_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+          AUD: "//iam.googleapis.com/projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/gha-actions"
+        run: |
+          set -e
+          echo "AUD=$AUD"
+          AUD_ENC=$(jq -rn --arg x "$AUD" '$x|@uri')
+          jwt=$(curl -sSf -H "Authorization: Bearer ${REQ_TOKEN}" "${REQ_URL}&audience=${AUD_ENC}" | jq -r '.value')
+          echo "OIDC length: ${#jwt}"
+          body=$(echo "$jwt" | cut -d'.' -f2 | base64 -d 2>/dev/null || true)
+          echo "---- OIDC claims ----"
+          echo "$body" | jq -r '.aud, .iss, .sub, .repository, .ref' | awk '{print NR": "$0}'
+          echo "---------------------"
+
+      # 2) WIF 인증 (audience를 명시)
       - name: Auth via WIF
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: "projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/gha-actions"
+          audience: "//iam.googleapis.com/projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/gha-actions"
           service_account: "gha-deploy-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
           project_id: "${{ secrets.GCP_PROJECT_ID }}"
           token_format: "access_token"
@@ -30,9 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "== gcloud auth list =="
           gcloud auth list
-          echo "== token length =="
+          echo "token length:"
           gcloud auth print-access-token | wc -c
-          echo "== list run services (optional) =="
           gcloud run services list --region asia-northeast3 || true
