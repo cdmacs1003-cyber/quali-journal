@@ -18,9 +18,7 @@ jobs:
           project_id: "quali-journal-prod"
           token_format: "access_token"
           audience: "//iam.googleapis.com/projects/656589300029/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
-
-
-
+          
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
@@ -31,8 +29,3 @@ jobs:
           gcloud auth list
           tok=$(gcloud auth print-access-token)
           test -n "$tok" && echo "OK: got access token"
-
-
-
-
-
