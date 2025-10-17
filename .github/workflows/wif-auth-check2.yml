@@ -9,6 +9,7 @@ jobs:
   auth-check:
     runs-on: ubuntu-latest
     steps:
+      # 1) OIDC 토큰의 aud/iss/sub/repository/ref를 직접 확인 (audience는 URL-encode)
       - name: Debug OIDC (print aud/iss/repo/ref)
         env:
           REQ_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
@@ -17,12 +18,14 @@ jobs:
         run: |
           set -e
           echo "AUDIENCE=${AUD}"
-          jwt=$(curl -sSf -H "Authorization: Bearer ${REQ_TOKEN}" "${REQ_URL}&audience=${AUD}" | jq -r '.value')
+          AUD_ENC=$(jq -rn --arg x "$AUD" '$x|@uri')
+          jwt=$(curl -sSf -H "Authorization: Bearer ${REQ_TOKEN}" "${REQ_URL}&audience=${AUD_ENC}" | jq -r '.value')
           body=$(echo "$jwt" | cut -d'.' -f2 | base64 -d 2>/dev/null || true)
           echo "---- OIDC claims ----"
           echo "$body" | jq -r '.aud, .iss, .sub, .repository, .ref' | awk '{print NR": "$0}'
           echo "---------------------"
 
+      # 2) STS로 교환 (WIF 인증)
       - name: Auth via WIF (exchange with STS)
         uses: google-github-actions/auth@v2
         with:
@@ -32,6 +35,7 @@ jobs:
           token_format: "access_token"
           audience: "//iam.googleapis.com/projects/656589300029/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
 
+      # 3) 토큰 확인
       - name: Verify access token
         run: |
           tok=$(gcloud auth print-access-token || true)
