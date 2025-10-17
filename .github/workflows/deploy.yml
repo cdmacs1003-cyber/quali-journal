@@ -45,6 +45,35 @@ jobs:
             --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
             --allow-unauthenticated \
             --quiet
+      - name: Smoke test (health & report)
+        run: |
+          set -euo pipefail
+          PROJ="quali-journal-prod"
+          REGION="asia-northeast3"
+          SVC="quali-journal-admin"
+
+          # 서비스 URL
+          URL=$(gcloud run services describe "$SVC" --region "$REGION" --format="value(status.url)")
+          echo "ℹ️ URL=$URL"
+
+          # 1) /health : 200 이어야 통과
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health")
+          if [ "$code" != "200" ]; then
+            echo "❌ /health failed (code=$code)"; exit 1
+          fi
+          echo "✅ /health OK"
+
+          # 2) /api/report : 토큰을 Secret에서 읽어 POST {}
+          TOKEN=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "$PROJ")
+          echo "::add-mask::${TOKEN}"  # 토큰 마스킹
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+                 -H "X-Admin-Token: ${TOKEN}" -H "Content-Type: application/json" \
+                 --data "{}" "$URL/api/report")
+          if [ "$code" != "200" ]; then
+            echo "❌ /api/report failed (code=$code)"; exit 1
+          fi
+          echo "✅ /api/report OK"
+
       - name: Notify Slack
         if: always()
         run: |
