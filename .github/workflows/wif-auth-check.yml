@@ -13,11 +13,11 @@ jobs:
       - name: Auth via WIF
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: "projects/656589300029/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
+          workload_identity_provider: "projects/quali-journal-prod/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
           service_account: "github-deploy@quali-journal-prod.iam.gserviceaccount.com"
           project_id: "quali-journal-prod"
           token_format: "access_token"
-          audience: "//iam.googleapis.com/projects/656589300029/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
+          audience: "//iam.googleapis.com/projects/quali-journal-prod/locations/global/workloadIdentityPools/gh-wif/providers/gh-oidc"
           
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -29,3 +29,4 @@ jobs:
           gcloud auth list
           tok=$(gcloud auth print-access-token)
           test -n "$tok" && echo "OK: got access token"
+
