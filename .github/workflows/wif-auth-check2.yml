@@ -18,12 +18,14 @@ jobs:
         run: |
           set -e
           echo "AUDIENCE=${AUD}"
+          # URL-encode 해야 'Bad hostname'가 안 납니다
           AUD_ENC=$(jq -rn --arg x "$AUD" '$x|@uri')
           jwt=$(curl -sSf -H "Authorization: Bearer ${REQ_TOKEN}" "${REQ_URL}&audience=${AUD_ENC}" | jq -r '.value')
           body=$(echo "$jwt" | cut -d'.' -f2 | base64 -d 2>/dev/null || true)
           echo "---- OIDC claims ----"
           echo "$body" | jq -r '.aud, .iss, .sub, .repository, .ref' | awk '{print NR": "$0}'
           echo "---------------------"
+
 
       # 2) STS로 교환 (WIF 인증)
       - name: Auth via WIF (exchange with STS)
