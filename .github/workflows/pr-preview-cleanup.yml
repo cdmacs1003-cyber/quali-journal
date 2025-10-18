@@ -1,0 +1,34 @@
+﻿name: PR Preview Cleanup (WIF)
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  cleanup:
+    if: ${{ github.event.pull_request.head.repo.fork == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth (WIF, PR Provider)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER_PR }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Delete Preview Service
+        env:
+          REGION:  ${{ secrets.CLOUD_RUN_REGION }}
+          SERVICE: quali-journal-pr-${{ github.event.number }}
+        run: |
+          gcloud run services delete "${SERVICE}" --region "${REGION}" --quiet || true
