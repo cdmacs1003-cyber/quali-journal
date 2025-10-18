@@ -1,0 +1,66 @@
+﻿name: PR Preview (WIF)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  deploy-preview:
+    # 포크 PR은 보안상 미사용(Secrets 접근 불가)  같은 저장소 PR만
+    if: ${{ github.event.pull_request.head.repo.fork == false }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth (WIF, PR Provider)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER_PR }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Enable APIs (idempotent)
+        run: |
+          gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+
+      - name: Deploy Preview Service
+        id: deploy
+        env:
+          REGION:  ${{ secrets.CLOUD_RUN_REGION }}
+          SERVICE: quali-journal-pr-${{ github.event.number }}
+          RUN_SA:  ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}   # 런타임 SA (선택)
+        run: |
+          set -euo pipefail
+          SA_OPT=""
+          if [[ -n "${RUN_SA:-}" ]]; then SA_OPT="--service-account ${RUN_SA}"; fi
+          gcloud run deploy "${SERVICE}" --region "${REGION}" --source . \
+            ${SA_OPT} \
+            --set-secrets ADMIN_TOKEN=ADMIN_TOKEN:latest \
+            --allow-unauthenticated --quiet
+          URL=$(gcloud run services describe "${SERVICE}" --region "${REGION}" --format='value(status.url)')
+          echo "url=${URL}" >> $GITHUB_OUTPUT
+
+      - name: Comment Preview URL
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.url }}
+        with:
+          script: |
+            const url = process.env.PREVIEW_URL;
+            const num = context.payload.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: num,
+              body: `🚀 Preview deployed: ${url}`
+            });
