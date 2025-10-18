@@ -14,8 +14,10 @@
       "kw_hits": 1,
       "trust_score": 0,
       "approved": true,
-      "editor_note": "",
-      "fallback": false
+      "editor_note": "string",
+      "fallback": false,
+      "selected": true,
+      "state": "published"
     },
     {
       "id": "f16e468642a3a8645703a7b2d52f6260",
@@ -29,8 +31,10 @@
       "kw_hits": 1,
       "trust_score": 0,
       "approved": true,
-      "editor_note": "",
-      "fallback": false
+      "editor_note": "PS publish test",
+      "fallback": false,
+      "selected": true,
+      "state": "published"
     },
     {
       "id": "1c4637b535252747a0d0ef6e7be305c6",

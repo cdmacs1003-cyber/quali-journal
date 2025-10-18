@@ -1,0 +1,5 @@
+# 2025-10-13 · J-STD-001 · Daily Report
+
+## 1. Test article for publish
+- 원문: https://example.com/test-article
+- 요약(EN): Test summary

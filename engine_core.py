@@ -1,4 +1,6 @@
-﻿from qj_paths import rel as qj_rel
+from __future__ import annotations
+
+from qj_paths import rel as qj_rel
 # -*- coding: utf-8 -*-
 """
 퀄리뉴스 수집 + QG + FC + 선정/발행 파이프라인
@@ -8,7 +10,6 @@
 - 발행 시 선택 기사에 번역(전문/요약) + 편집장 한마디 자동 보강
 필수 패키지: requests, beautifulsoup4
 """
-from __future__ import annotations
 
 import argparse
 import base64
@@ -49,52 +50,6 @@ from config_schema import DEFAULT_CFG as SCHEMA_DEFAULT_CFG, load_config as sche
 # them here.
 DEFAULT_CFG = SCHEMA_DEFAULT_CFG
 
-def load_config() -> dict:
-    """
-    Load the runtime configuration using the unified schema.  This
-    function delegates to ``config_schema.load_config`` to parse
-    ``config.json`` and apply default values.  The returned mapping
-    is a plain dict suitable for consumption by the legacy code in
-    engine_core.
-
-    Environment variables such as ``OPENAI_TRANSLATE_MODEL`` may
-    override certain settings after the schema has been applied.
-
-    Returns:
-        dict: merged configuration
-    """
-    cfg_model = schema_load_config()
-    # Convert the Pydantic model to a plain dictionary.  If using
-    # Pydantic v2 this would be ``model_dump()``, but v1 supports
-    # ``dict()``.  Note: nested BaseModels are also converted.
-    cfg = cfg_model.dict()
-    # Override translate_model from environment if provided
-    env_model = os.getenv("OPENAI_TRANSLATE_MODEL")
-    if env_model:
-        cfg.setdefault("features", {}).setdefault("translate_model", env_model)
-    return cfg
-
-# 런모드 (인자/플래그로도 제어)
-RUN_MODE = os.getenv("JJIPPA_RUN_MODE", "collect")
-COLLECT_PHASE = RUN_MODE == "collect"
-
-# OpenAI
-_OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-_OPENAI_MODEL = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o")
-_OPENAI_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-
-# 프록시
-PROXY_PREFIX = "https://r.jina.ai/"
-PROXY_FIRST_DOMAINS = {
-    "openai.com",
-    "x.ai",
-    "ipc.org",
-    "www.ipc.org",
-    "ipcglobalinsight.org",
-    "www.ipcglobalinsight.org",
-}
-
-# ======= 공통 유틸 =======
 def setup_rotating_logger(log_path: str) -> None:
     try:
         os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
@@ -1792,4 +1747,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

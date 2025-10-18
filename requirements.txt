@@ -1,24 +1,22 @@
-# QualiJournal — runtime dependencies
-
+﻿# Admin API (server_quali.py)
 # Core HTTP & parsing
-requests>=2.31.0,<3
-beautifulsoup4>=4.12.2,<5
-lxml>=4.9.3,<6
-
-# Admin API (server_quali.py)
-fastapi>=0.110,<1
-uvicorn[standard]>=0.24,<1
-pydantic==1.*
-python-multipart>=0.0.9,<0.1
-aiofiles>=23.2.1,<24
-
-# RSS/Reddit helpers
-feedparser>=6.0,<7
-praw>=7.7,<8
-
-python-dotenv>=1.0.1,<2
-
 # DB/Cloud SQL
+# QualiJournal ??runtime dependencies
+# RSS/Reddit helpers
+aiofiles>=23.2.1,<24
+beautifulsoup4
+beautifulsoup4>=4.12.2,<5
+cloud-sql-python-connector>=1.5.0   # ???뺣떟 ?⑦궎吏紐?pg8000>=1.29
+fastapi>=0.110,<1
+feedparser
+feedparser>=6.0,<7
+lxml
+lxml>=4.9.3,<6
+praw>=7.7,<8
+pydantic==1.*
+python-dotenv>=1.0.1,<2
+python-multipart>=0.0.9,<0.1
+requests
+requests>=2.31.0,<3
 sqlalchemy>=2.0,<3
-cloud-sql-python-connector>=1.5.0   # ← 정답 패키지명
-pg8000>=1.29
+uvicorn[standard]>=0.24,<1

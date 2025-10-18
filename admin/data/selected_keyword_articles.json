@@ -1,0 +1,14 @@
+{
+  "date": "2025-10-07",
+  "keyword": "J-STD-001",
+  "items": [
+    {
+      "title": "Test article for publish",
+      "url": "https://example.com/test-article",
+      "summary_en": "Test summary",
+      "approved": true,
+      "score": 5,
+      "state": "ready"
+    }
+  ]
+}
