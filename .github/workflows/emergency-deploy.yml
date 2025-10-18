@@ -1,0 +1,52 @@
+name: Emergency Deploy (Key)
+on:
+  workflow_dispatch:    # 수동 실행 버튼
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1) gcloud를 SA 키로 인증
+      - name: Set up gcloud with SA key
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      # 2) 필요한 API 활성화(여러 번 실행해도 안전)
+      - name: Enable required APIs
+        run: |
+          gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+
+      # 3) Artifact Registry 'containers' 리포지토리 보장
+      - name: Ensure Artifact Registry repo
+        run: |
+          gcloud artifacts repositories describe containers --location ${{ secrets.CLOUD_RUN_REGION }} || \
+          gcloud artifacts repositories create containers --repository-format=docker --location=${{ secrets.CLOUD_RUN_REGION }}
+
+      # 4) Cloud Build로 컨테이너 이미지 빌드/푸시 (키 방식)
+      - name: Build (Cloud Build)
+        run: |
+          gcloud builds submit --tag ${{ secrets.CLOUD_RUN_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/containers/${{ secrets.CLOUD_RUN_SERVICE }}:${{ github.sha }}
+
+      # 5) Cloud Run 배포 + 환경변수 주입
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ secrets.CLOUD_RUN_SERVICE }} \
+            --image ${{ secrets.CLOUD_RUN_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/containers/${{ secrets.CLOUD_RUN_SERVICE }}:${{ github.sha }} \
+            --region ${{ secrets.CLOUD_RUN_REGION }} --platform managed \
+            --allow-unauthenticated \
+            --update-env-vars "ADMIN_TOKEN=${{ secrets.ADMIN_TOKEN }},API_KEY=${{ secrets.API_KEY }}"
+
+      # 6) 최종 서비스 URL 출력
+      - name: Show URL
+        run: |
+          gcloud run services describe ${{ secrets.CLOUD_RUN_SERVICE }} \
+            --region ${{ secrets.CLOUD_RUN_REGION }} --format='value(status.url)'
