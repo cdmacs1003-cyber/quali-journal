@@ -1,10 +1,10 @@
 name: Deploy to Cloud Run
-on:
-  pull_request:          # PR에서도 체크가 붙도록 추가
-  workflow_dispatch:     # 수동 실행 유지
-  push:
-    branches: [ "main" ] # main 푸시 시에도 동작
 
+on:
+  workflow_dispatch:        # 수동 실행 버튼
+  push:
+    branches: [ "main" ]    # main 푸시 시 자동 실행
+  pull_request:             # PR 체크도 붙도록
 
 permissions:
   contents: read
@@ -12,43 +12,103 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      # 1) gcloud를 SA 키로 인증
-      - name: Set up gcloud with SA key
-        uses: google-github-actions/setup-gcloud@v1
+    steps:
+      # 0) 소스 체크아웃
+      - name: Run actions/checkout@v4
+        uses: actions/checkout@v4
+
+      # 1) Google Cloud 인증 (응급: 서비스계정 JSON 키)
+      - name: Auth to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          # GitHub Secrets에 저장한 서비스계정 키(JSON) 전체
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      # 2) gcloud 설치 + 프로젝트 설정
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      # 2) 필요한 API 활성화(여러 번 실행해도 안전)
+      # 3) 필수 API 보장 (여러번 실행해도 안전)
       - name: Enable required APIs
         run: |
-          gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+          gcloud services enable \
+            run.googleapis.com \
+            cloudbuild.googleapis.com \
+            artifactregistry.googleapis.com
 
-      # 3) Artifact Registry 'containers' 리포지토리 보장
-      - name: Ensure Artifact Registry repo
-        run: |
-          gcloud artifacts repositories describe containers --location ${{ secrets.CLOUD_RUN_REGION }} || \
-          gcloud artifacts repositories create containers --repository-format=docker --location=${{ secrets.CLOUD_RUN_REGION }}
+      # 4) (선택) 런타임 환경변수 파일이 필요하면 작성
+      #    지금은 --update-env-vars 로 주입하므로 필요없음
+      # - name: Write env.yaml
+      #   run: |
+      #     cat > env.yaml <<'EOF'
+      #     ADMIN_TOKEN=${{ secrets.ADMIN_TOKEN }}
+      #     API_KEY=${{ secrets.API_KEY }}
+      #     EOF
 
-      # 4) Cloud Build로 컨테이너 이미지 빌드/푸시 (키 방식)
-      - name: Build (Cloud Build)
-        run: |
-          gcloud builds submit --tag ${{ secrets.CLOUD_RUN_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/containers/${{ secrets.CLOUD_RUN_SERVICE }}:${{ github.sha }}
-
-      # 5) Cloud Run 배포 + 환경변수 주입
+      # 5) Cloud Run 배포(소스에서 빌드 → 배포)
+      #    실행 서비스계정은 필요 시 Secrets에 GOOGLE_SERVICE_ACCOUNT로 보관
       - name: Deploy to Cloud Run
+        shell: bash
+        env:
+          REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          RUN_SA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }} # 예: quali-run-sa@quali-journal-prod.iam.gserviceaccount.com
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          API_KEY: ${{ secrets.API_KEY }}
         run: |
-          gcloud run deploy ${{ secrets.CLOUD_RUN_SERVICE }} \
-            --image ${{ secrets.CLOUD_RUN_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/containers/${{ secrets.CLOUD_RUN_SERVICE }}:${{ github.sha }} \
-            --region ${{ secrets.CLOUD_RUN_REGION }} --platform managed \
-            --allow-unauthenticated \
-            --update-env-vars "ADMIN_TOKEN=${{ secrets.ADMIN_TOKEN }},API_KEY=${{ secrets.API_KEY }}"
+          set -eux
+          # 실행 SA가 지정되어 있으면 옵션 구성
+          SA_OPT=""
+          if [[ -n "${RUN_SA:-}" ]]; then
+            SA_OPT="--service-account ${RUN_SA}"
+          fi
 
-      # 6) 최종 서비스 URL 출력
+          # env 주입 문자열 구성(API_KEY가 비어있어도 안전)
+          ENV_OPTS="--update-env-vars ADMIN_TOKEN=${ADMIN_TOKEN}"
+          if [[ -n "${API_KEY:-}" ]]; then
+            ENV_OPTS="${ENV_OPTS},API_KEY=${API_KEY}"
+          fi
+
+          # 소스에서 빌드하여 배포 (Cloud Build 사용)
+          gcloud run deploy "${SERVICE}" \
+            --region "${REGION}" \
+            --source . \
+            ${SA_OPT} \
+            ${ENV_OPTS} \
+            --allow-unauthenticated \
+            --quiet
+
+      # 6) 서비스 URL 출력
       - name: Show URL
+        id: show-url
+        shell: bash
+        env:
+          REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
         run: |
-          gcloud run services describe ${{ secrets.CLOUD_RUN_SERVICE }} \
-            --region ${{ secrets.CLOUD_RUN_REGION }} --format='value(status.url)'
+          URL=$(gcloud run services describe "${SERVICE}" --region "${REGION}" --format='value(status.url)')
+          echo "Service URL: ${URL}"
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+
+      # 7) 초간단 스모크 테스트 (200 OK 기대)
+      - name: Smoke test (health & report)
+        if: always()
+        shell: bash
+        env:
+          URL: ${{ steps.show-url.outputs.url }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -e
+          echo "Ping: ${URL}/api/status"
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${ADMIN_TOKEN}" "${URL}/api/status" || true)
+          echo "HTTP ${CODE}"
+          # 2xx면 통과로 간주
+          if [[ "${CODE}" =~ ^2 ]]; then
+            echo "Smoke OK"
+          else
+            echo "::warning::Smoke test returned HTTP ${CODE}"
+          fi
