@@ -67,20 +67,24 @@ jobs:
             SA_OPT="--service-account ${RUN_SA}"
           fi
 
-          # env 주입 문자열 구성(API_KEY가 비어있어도 안전)
-          ENV_OPTS="--update-env-vars ADMIN_TOKEN=${ADMIN_TOKEN}"
+          # ADMIN_TOKEN은 Secret로, API_KEY만(있으면) 평문 ENV로
+          ENV_OPTS=""
           if [[ -n "${API_KEY:-}" ]]; then
-            ENV_OPTS="${ENV_OPTS},API_KEY=${API_KEY}"
+            ENV_OPTS="--update-env-vars API_KEY=${API_KEY}"
           fi
-
-          # 소스에서 빌드하여 배포 (Cloud Build 사용)
+          
+          # Secret Manager의 ADMIN_TOKEN 최신 버전을 매핑
+          SECRET_OPTS="--set-secrets ADMIN_TOKEN=ADMIN_TOKEN:latest"
+          
           gcloud run deploy "${SERVICE}" \
             --region "${REGION}" \
             --source . \
             ${SA_OPT} \
             ${ENV_OPTS} \
+            ${SECRET_OPTS} \
             --allow-unauthenticated \
             --quiet
+
 
       # 6) 서비스 URL 출력
       - name: Show URL
