@@ -1,0 +1,18 @@
+﻿# --- 기본 제외 ---
+.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.zip
+*.7z
+*.log
+logs/
+archive/**
+
+# --- HTML 강제 포함 ---
+!index.html
+!index_lite_black.html
+!**/*.html

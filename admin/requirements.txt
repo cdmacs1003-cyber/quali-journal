@@ -1,24 +1,9 @@
-# QualiJournal — runtime dependencies
-
-# Core HTTP & parsing
-requests>=2.31.0,<3
-beautifulsoup4>=4.12.2,<5
-lxml>=4.9.3,<6
-
-# Admin API (server_quali.py)
-fastapi>=0.110,<1
-uvicorn[standard]>=0.24,<1
-pydantic==1.*
-python-multipart>=0.0.9,<0.1
-aiofiles>=23.2.1,<24
-
-# RSS/Reddit helpers
-feedparser>=6.0,<7
-praw>=7.7,<8
-
-python-dotenv>=1.0.1,<2
-
-# DB/Cloud SQL
-sqlalchemy>=2.0,<3
-cloud-sql-python-connector>=1.5.0   # ← 정답 패키지명
-pg8000>=1.29
+﻿aiofiles>=23.2
+beautifulsoup4
+fastapi==0.115.4
+feedparser
+jinja2>=3.1
+lxml
+python-dotenv==1.0.1
+requests
+uvicorn[standard]==0.30.6

@@ -1,0 +1,28 @@
+﻿term_ko,term_en,synonyms_ko,synonyms_en,category,ipc_ref,notes,status
+솔더,solder,납;땜납,tin-lead alloy;alloy,Material,IPC-A-610 (general),재료명. 합금 표기는 Pb 권장(예: Sn63/Pb37).,preferred
+솔더링,soldering,납땜;접합,joining,Process,IPC-A-610 (general),공정 행위.,preferred
+플럭스,flux,,,Material,J-STD-004 (🟡확인필요),활성제 종류(ROL0 등)와 잔류물 관리 중요.,preferred
+솔더 필렛,solder fillet,필렛,fillet,Feature,IPC-A-610 (general),접합부의 솔더 형상.,preferred
+습윤,wetting,젖음;젖음성,wetting,Phenomenon,IPC-A-610 (general),모재 표면에 솔더가 균일히 퍼짐.,preferred
+비습윤,non-wetting,,non-wetting,Defect,IPC-A-610 (general),솔더가 표면에 머물지 못함.,preferred
+브리징,solder bridging,쇼트;브리지,short;bridge,Defect,IPC-A-610 (general),인접 패드/리드를 솔더가 연결.,preferred
+오픈,open joint,단선;미납땜,open,Defect,IPC-A-610 (general),전기적 접속 불가 상태.,preferred
+보이드,void,기공,void,Defect,IPC-A-610 (general),솔더 내부 기포/공극.,preferred
+톰브스톤,tombstoning,세워짐,tombstoning,Defect,IPC-A-610 (general),칩 수동부품 한쪽이 들림.,preferred
+솔더볼링,solder balling,솔더볼,solder balls,Defect,IPC-A-610 (general),주변에 작은 솔더 구슬 발생.,preferred
+패드 들뜸,pad lift,패드 리프트,pad lift,Defect,IPC-A-600 (🟡확인필요),기판에서 패드가 박리.,preferred
+층간 박리,delamination,,delamination,Defect,IPC-A-600 (🟡확인필요),라미네이트 층간 분리.,preferred
+애뉼러 링,annular ring,애뉼러링,annular ring,Feature,IPC-2221 (🟡확인필요),패드 구멍 둘레 남는 구리 폭.,preferred
+배럴 크랙,barrel crack,,barrel crack,Defect,IPC-6012 (🟡확인필요),PTH 배럴의 균열.,preferred
+리드 돌출,lead protrusion,리드 연장,lead protrusion,Feature,IPC-A-610 (general),관통형 부품 리드의 돌출 길이.,preferred
+위킹,wicking,,wicking,Phenomenon,IPC-A-610 (general),솔더가 리드/스트랜드를 타고 올라감.,preferred
+디웨팅,dewetting,,dewetting,Defect,IPC-A-610 (general),일시 젖은 후 수축하며 노출.,preferred
+콜드 조인트,cold solder joint,콜드 솔더,cold joint,Defect,IPC-A-610 (general),"광택 저하, 기계적 약함.",preferred
+솔더 과다,excess solder,과납;납과다,excess solder,Defect,IPC-A-610 (general),필렛이 과도하거나 브리지 유발 위험.,preferred
+솔더 부족,insufficient solder,납부족,insufficient solder,Defect,IPC-A-610 (general),필렛 높이/면적 부족.,preferred
+솔더 마스크,solder mask,저항막;그린레지스트,solder resist,Material,IPC-SM-840 (🟡확인필요),기판 보호 코팅.,preferred
+솔더러빌리티,solderability,솔더링성,solderability,Test,J-STD-002 (🟡확인필요),납땜 가능성 평가.,preferred
+리워크,rework,수리,rework,Process,IPC-7711/7721 (🟡확인필요),재작업/수리 절차.,preferred
+검사,inspection,시각검사;AOI;X-ray,visual;AOI;X-ray,Process,IPC-A-610 (general),완제품/접합부 평가.,preferred
+제품 등급 Class 2,Class 2,클래스2,Class 2,Criteria,IPC-A-610 (general),일반 전자 제품 등급.,preferred
+제품 등급 Class 3,Class 3,클래스3,Class 3,Criteria,IPC-A-610 (general),고신뢰/군수/우주 등.,preferred

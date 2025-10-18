@@ -1,0 +1,15 @@
+﻿.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.zip
+*.7z
+*.log
+logs/
+archive/**
+!index.html
+!index_lite_black.html
+!**/*.html

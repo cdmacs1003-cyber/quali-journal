@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 QualiJournal Orchestrator
 - 공식(official)·커뮤니티(community) 소스 수집, 선별/승인, 발행(HTML/MD/JSON)
@@ -1122,7 +1122,6 @@ def publish_keyword_page(keyword: str) -> str:
     if not kw:
         raise ValueError("키워드를 입력해 주세요.")
 
-    from datetime import datetime as __dt
     safe_kw = re.sub(r'[\\/:*?"<>|]+', "-", kw).strip() or "keyword"
 
     arc_dir = Path(_os_rel("archive"))
@@ -1148,7 +1147,7 @@ def publish_keyword_page(keyword: str) -> str:
     def _unique(p: Path) -> Path:
         if not p.exists():
             return p
-        ts = __dt.now().strftime("%H%M%S")
+        ts = datetime.now().strftime("%H%M%S")
         return p.with_name(f"{p.stem}_{ts}{p.suffix}")
 
     # JSON

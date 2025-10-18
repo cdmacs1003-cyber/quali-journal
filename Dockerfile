@@ -1,16 +1,26 @@
+﻿# syntax=docker/dockerfile:1
 FROM python:3.11-slim
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONIOENCODING=UTF-8
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
-COPY requirements.txt .
-# pip 최신화 후 의존성 설치
-RUN python -m pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-COPY . .
-# ★ 여기서 권한 부여(윈도우에서도 OK)
-RUN chmod +x /app/start.sh
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# deps 설치
+COPY admin/requirements.txt /app/admin/requirements.txt
+RUN pip install --no-cache-dir -r /app/admin/requirements.txt
+
+# 앱 소스(루트 기준으로 묶기)
+COPY admin/ /app/admin/
+COPY tools/ /app/tools/
+COPY feeds/ /app/feeds/
+COPY config.json /app/config.json
+# (옵션) 오케스트레이터 사용 시
+COPY orchestrator.py /app/orchestrator.py
+
+ENV PYTHONPATH=/app
+ENV PORT=8080
 EXPOSE 8080
-CMD ["sh","-c","exec /app/start.sh"]
 
-
+CMD ["sh","-c","uvicorn admin.server_quali:app --host 0.0.0.0 --port ${PORT:-8080}"]

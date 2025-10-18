@@ -1,6 +1,28 @@
 <!doctype html>
 <html lang="ko" data-theme="light">
 <head>
+<style id="toast-style">
+  #toast{
+    position:fixed; right:16px; bottom:16px; z-index:10000; display:none;
+    padding:10px 12px; border-radius:10px; border:1px solid #1f2937;
+    background:#0b0e12; color:#e9eef5; font:13px/1.4 system-ui
+  }
+  #toast.ok{ border-color:#10b981 }
+  #toast.err{ border-color:#ef4444 }
+</style>
+
+<style id="preview-mark-style">
+  #previewBody mark{
+    background:#fde68a; color:inherit; border-radius:3px; padding:0 1px;
+  }
+</style>
+<style id="preview-fade-style">
+  #previewModal{ opacity:0; transition:opacity .18s ease; }
+  #previewModal.on{ opacity:1; }
+  #previewModal .panel{ transition:transform .18s ease, opacity .18s ease; transform:translateY(8px); opacity:.98; }
+  #previewModal.on .panel{ transform:translateY(0); opacity:1; }
+</style>
+
   <meta charset="utf-8"/>
   <title>QualiJournal — Admin (Unified)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -45,24 +67,72 @@
     #jobCard{max-width:780px;margin:60px auto;background:var(--card);
       border:1px solid var(--line);border-radius:12px;padding:14px}
     .steps{margin-top:10px}
-    .step{border-left:4px solid var(--line);padding:8px 10px;margin:6px 0;background:var(--panel);border-radius:8px}
-    .step.ok{border-color:var(--ok)} .step.fail{border-color:var(--err)} .step.running{border-color:var(--acc)}
+    .task-log{border-left:4px solid var(--line);padding:8px 10px;margin:6px 0;background:var(--panel);border-radius:8px;font:12px/1.5 ui-monospace,Consolas,monospace}
     .meta{color:var(--muted);font-size:12px}
     canvas{width:100%;height:140px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
-  </style>
-
-  <!-- [삽입] 비동기 작업 패널 스타일 (SSE 로그 포함) -->
-  <style>
+    /* 비동기 패널 */
     .task-panel{border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0;background:var(--panel)}
     .task-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
-    .task-log{background:#0a0f1a;color:#d2e3ff;border-radius:8px;padding:10px;height:240px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace}
+    .sse-log{background:#0a0f1a;color:#d2e3ff;border-radius:8px;padding:10px;height:240px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace}
     .btn{padding:8px 12px;border:1px solid #5a6aa6;border-radius:8px;background:#0f1730;color:#d2e3ff;cursor:pointer}
     .btn:hover{background:#16224a}
     .muted{color:#9fb2ff;font-size:12px}
-    input.kwin{padding:8px 10px;border:1px solid #5a6aa6;border-radius:8px;background:#0f1730;color:#d2e3ff}
+    .kwin{padding:8px 10px;border:1px solid #5a6aa6;border-radius:8px;background:#0f1730;color:#d2e3ff}
   </style>
+
+  <!-- 모든 /api/* 요청에 ADMIN 토큰 자동 부착 (절대·상대 URL 모두 지원) -->
+  <script>
+  (function () {
+    function getToken(){ return (localStorage.getItem('ADMIN_TOKEN') || '').trim(); }
+    const _fetch = window.fetch.bind(window);
+    window.fetch = function(input, init){
+      init = init || {};
+      let reqUrl;
+      try{
+        const raw = (typeof input === 'string') ? input : (input && input.url) || '';
+        reqUrl = new URL(raw, location.origin);
+      }catch(_){
+        reqUrl = new URL(String(input || ''), location.origin);
+      }
+      const isApi = !!(reqUrl && reqUrl.pathname && reqUrl.pathname.startsWith('/api/'));
+      const headers = new Headers(init.headers || {});
+      const tok = getToken();
+      if (isApi && tok && !headers.has('Authorization')) {
+        headers.set('Authorization', 'Bearer ' + tok);
+      }
+      init.headers = headers;
+      if (input instanceof Request) {
+        input = new Request(reqUrl.toString(), init);
+        return _fetch(input);
+      }
+      return _fetch(reqUrl.toString(), init);
+    };
+  })();
+  </script>
+
 </head>
 <body>
+<!-- === BUILD BADGE (auto-stamp, KST) === -->
+<div id="build-badge" style="position:fixed;top:6px;left:12px;z-index:9999;font:12px/1.4 system-ui;">
+  <span id="build-text" style="padding:2px 6px;border-radius:6px;background:#eef;color:#111;"></span>
+</div>
+<script>
+(function(){
+  // hide with ?badge=off
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("badge")==="off") { document.getElementById("build-badge").style.display="none"; return; }
+
+  // KST timestamp: vYYYY-MM-DD_HHMM
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', hour12:false
+  }).formatToParts(new Date()).reduce((a,p)=> (a[p.type]=p.value, a), {});
+  const stamp = `${parts.year}-${parts.month}-${parts.day}_${parts.hour}${parts.minute}`;
+  document.getElementById("build-text").textContent = `BUILD: v${stamp} (KST)`;
+})();
+</script>
+<!-- === /BUILD BADGE === -->
+
 <header>
   <div>
     <h1>QualiJournal — Admin</h1>
@@ -81,6 +151,12 @@
       <input id="date" aria-label="날짜"/>
       <input id="kw" aria-label="키워드" value="IPC-A-610"/>
       <button class="primary" onclick="refresh()">새로고침</button>
+      <!-- AUTO-REFRESH TOGGLE (idempotent) -->
+      <div class="row" id="autoRefreshRow" style="gap:8px">
+        <label for="autoRefreshToggle" class="pill">자동 새로고침(30초)</label>
+        <input id="autoRefreshToggle" type="checkbox" onchange="toggleAutoRefresh(this.checked)">
+      </div>
+
     </div>
     <div class="kpi" role="group" aria-label="KPI">
       <div class="box">선정본 총량: <b id="selTotal">-</b></div>
@@ -96,6 +172,7 @@
       <button onclick="startApprove()">승인 UI 열기</button>
       <a class="pill" id="uiLink" href="#" target="_blank" rel="noopener"></a>
     </div>
+
     <section id="readyPanel" class="card" style="margin-top:12px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <h3 style="margin:0">준비완료(Ready) 목록</h3>
@@ -110,9 +187,12 @@
     <!-- 게이트 조정 슬라이더 -->
     <div class="row" style="gap:12px">
       <label for="gateSlider" class="pill" style="margin-right:4px">게이트 조절:</label>
-      <input id="gateSlider" type="range" min="1" max="30" value="15" oninput="el('gateVal').textContent=this.value" onchange="updateGate(this.value)">
+      <input id="gateSlider" type="range" min="1" max="30" value="15"
+             oninput="document.getElementById('gateVal').textContent=this.value"
+             onchange="updateGate(this.value)">
       <span id="gateVal" class="pill">15</span>
     </div>
+
     <div id="log" role="region" aria-live="polite">여기에 결과 로그가 표시됩니다.</div>
   </section>
 
@@ -124,15 +204,17 @@
       <button class="primary" onclick="runDaily()">원클릭(커뮤니티)</button>
       <button onclick="runCommunity()">커뮤니티 수집</button>
     </div>
+
     <h4>키워드 특집</h4>
     <div class="row">
       <button class="ok" onclick="runKeyword()">수집→승인Top20→발행</button>
     </div>
+
+    <h4>작업 모니터</h4>
     <div class="row">
       <button onclick="showRecent()">최근 작업</button>
     </div>
 
-    <!-- 보고서/요약/내보내기 섹션 -->
     <h4>보고서·요약·내보내기</h4>
     <div class="row" style="flex-wrap:wrap">
       <input id="reportDate" type="date" aria-label="보고서 날짜">
@@ -140,9 +222,14 @@
       <button onclick="genReport()">보고서 생성</button>
       <button onclick="enrichKeyword()">키워드 요약/번역</button>
       <button onclick="enrichSelection()">선정본 요약/번역</button>
+      <button onclick="previewMd()">MD 미리보기</button>
       <button onclick="exportMd()">MD 내보내기</button>
       <button onclick="exportCsv()">CSV 내보내기</button>
     </div>
+
+    <p id="resultRow" style="margin-top:8px; display:none;">
+      결과: <a id="outLink" href="#" target="_blank" rel="noopener" download>열기</a>
+    </p>
   </section>
 </main>
 
@@ -176,354 +263,799 @@
     <button class="btn" onclick="startKeyword()">키워드 실행</button>
     <button class="btn" onclick="stopStream()">스트림 정지</button>
   </div>
-  <div class="task-log" id="taskLog">(여기에 실시간 로그가 표시됩니다)</div>
+  <div class="sse-log" id="taskLog">(여기에 실시간 로그가 표시됩니다)</div>
+</div>
+
+<!-- ===== 상단 고정 토큰 바 ===== -->
+<div id="adminTokenBar" style="position:fixed; right:12px; top:12px; z-index:9999; background:#111; color:#ddd; border:1px solid #444; border-radius:10px; padding:8px 10px; display:flex; gap:8px; align-items:center; font-size:12px;">
+  <span>ADMIN_TOKEN</span>
+  <input id="adminToken" type="password"
+         placeholder="your-admin-token-12345"
+         autocomplete="new-password" autocapitalize="off" spellcheck="false"
+         style="width:220px; padding:6px; border-radius:8px; border:1px solid #555; background:#222; color:#eee;">
+  <button onclick="saveAdminTokenJJ()" style="padding:6px 10px;">입력</button>
+  <button onclick="clearAdminTokenJJ()" style="padding:6px 10px;">해제</button>
+  <div id="tokenStatusChip" style="display:flex;align-items:center;gap:6px; padding:6px 10px;border-radius:999px;border:1px solid #333;background:#2b0a0a;">
+    <span id="tokenStatusDot" style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
+    <strong id="tokenStatusText" style="letter-spacing:0.5px;">미인증</strong>
+    <span style="opacity:.6;">|</span>
+    <span style="opacity:.8;">마지막 확인: <span id="tokenStatusLast">-</span></span>
+  </div>
 </div>
 
 <script>
-  /* =========================
-     API BASE 자동/유연 설정
-     =========================
-     우선순위:
-     1) localStorage.API_BASE
-     2) 쿼리스트링 ?api=...
-     3) location.origin (배포 기본)
-  */
-  let API_BASE =
-    localStorage.getItem("API_BASE") ||
-    new URLSearchParams(location.search).get("api") ||
-    location.origin;
+/* ===== 공통 헬퍼 ===== */
+function showToast(msg, type){
+  var t=document.getElementById('toast'); if(!t) return;
+  t.className = (type==='err') ? 'err' : 'ok';
+  t.textContent = String(msg||'');
+  t.style.display='block';
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(function(){ t.style.display='none'; }, 1800);
+}
+function el(id){ return document.getElementById(id); }
+function getCss(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function escapeHtml(s){ return (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
-  // 전역 노출
-  window.API_BASE = API_BASE;
+/* API BASE 자동 설정 */
+let API_BASE =
+  localStorage.getItem("API_BASE") ||
+  new URLSearchParams(location.search).get("api") ||
+  location.origin;
+window.API_BASE = API_BASE;
+document.addEventListener("DOMContentLoaded", () => {
+  var b = el("api-badge"); if(b){ b.textContent = API_BASE; }
+  var a = el("uiLink"); if(a){ a.href = API_BASE; a.textContent = API_BASE; }
+});
 
-  // 헤더 배지/보조 링크 세팅
-  document.addEventListener("DOMContentLoaded", () => {
-    const badge = document.getElementById("api-badge");
-    if (badge) badge.textContent = API_BASE;
+/* 보호 API 헤더 — 입력칸 값은 무시하고 localStorage만 신뢰 */
+function authHeaders(){
+  var t = (localStorage.getItem('ADMIN_TOKEN') || '').trim();
+  return t ? { Authorization: 'Bearer ' + t } : {};
+}
 
-    const uiLink = document.getElementById("uiLink");
-    if (uiLink) {
-      uiLink.href = API_BASE;          // 기본은 현재 도메인
-      uiLink.textContent = API_BASE;   // 배지처럼 표시
+/* 토큰 상태 UI */
+function setActionsEnabled(on){
+  ['exportMd','exportCsv','genReport','enrichKeyword','enrichSelection']
+    .forEach(name=>document.querySelectorAll('button[onclick*="'+name+'"]').forEach(b=>b.disabled=!on));
+}
+function updateAuthUI(ok){
+  el('tokenStatusLast').textContent = new Date().toLocaleTimeString();
+  var chip=el('tokenStatusChip'), txt=el('tokenStatusText'), dot=el('tokenStatusDot');
+  if(ok){ chip.style.background='#053'; chip.style.borderColor='#0fa'; dot.style.background='#10b981'; txt.textContent='인증됨'; setActionsEnabled(true); }
+  else  { chip.style.background='#2b0a0a'; chip.style.borderColor='#f66'; dot.style.background='#ef4444'; txt.textContent='미인증'; setActionsEnabled(false); }
+}
+function toggleAutoRefresh(on){
+  localStorage.setItem('AUTO_REFRESH', on?'1':'0');
+  if(on) startAutoRefresh(); else stopAutoRefresh();
+}
+
+function saveAdminTokenJJ(){
+  var v=el('adminToken')?.value?.trim()||'';
+  localStorage.setItem('ADMIN_TOKEN',v);
+  testToken();
+}
+
+/* 자동 새로고침 제어 — KPI 자동 새로고침/토큰 검사 (멱등) */
+if(!window.startAutoRefresh){
+  window.__kpiTimer = null;
+  window.startAutoRefresh = function(){
+    window.stopAutoRefresh();
+    refresh().catch(()=>{});
+    window.__kpiTimer = setInterval(function(){ refresh().catch(()=>{}); }, 30000);
+  };
+}
+if(!window.stopAutoRefresh){
+  window.stopAutoRefresh = function(){
+    if(window.__kpiTimer){ clearInterval(window.__kpiTimer); window.__kpiTimer = null; }
+  };
+}
+if(!window.testToken){
+  window.testToken = async function(){
+    try{
+      const r = await fetch(API_BASE+'/api/status', { headers: authHeaders() });
+      updateAuthUI(r.ok);
+      const auto = (localStorage.getItem('AUTO_REFRESH')==='1');
+      if(r.ok && auto) startAutoRefresh(); else stopAutoRefresh();
+    }catch(e){
+      updateAuthUI(false); stopAutoRefresh();
+    }
+  };
+}
+
+/* 테마 */
+(function initTheme(){
+  var saved=localStorage.getItem('THEME')||'dark';
+  document.documentElement.dataset.theme=saved;
+  var btn=el('theme-toggle'); if(btn) btn.textContent=(saved==='dark')?'라이트 모드':'다크 모드';
+  if(localStorage.getItem('ADMIN_TOKEN')){ el('adminToken').value=''; } // 자동완성 방지
+  setTimeout(function(){
+    // 토큰 테스트 후 토글 UI 상태 반영
+    testToken();
+    var chk=document.getElementById('autoRefreshToggle');
+    var v=localStorage.getItem('AUTO_REFRESH');
+    if(v==null){ localStorage.setItem('AUTO_REFRESH','1'); v='1'; } // 기본 ON
+    if(chk){ chk.checked=(v==='1'); }
+  }, 200);
+})();
+function toggleTheme(){
+  var now=document.documentElement.dataset.theme==='dark'?'light':'dark';
+  document.documentElement.dataset.theme=now; localStorage.setItem('THEME',now);
+  var btn=el('theme-toggle'); if(btn) btn.textContent=(now==='dark')?'라이트 모드':'다크 모드';
+}
+
+/* 완전 로그아웃 */
+function clearAdminTokenJJ(){
+  localStorage.removeItem('ADMIN_TOKEN');
+  var ip = document.getElementById('adminToken'); if (ip) ip.value='';
+  updateAuthUI(false);
+  stopAutoRefresh();
+  location.reload();
+}
+
+/* 날짜 기본값 */
+(function initToday(){
+  var t=new Date().toISOString().slice(0,10);
+  var d=el('date'); if(d && !d.value) d.value=t;
+})();
+
+/* 경로/링크 도우미 */
+function normPath(p){ if(!p) return ''; var s=String(p).replace(/\\/g,'/'); if(!s.startsWith('/')) s='/'+s; return s; }
+function absUrl(p){ return API_BASE + normPath(p); }
+function showLink(p){
+  var row=el('resultRow'), a=el('outLink'); if(!row||!a) return;
+  var url=absUrl(p); a.href=url; a.textContent='열기: '+url; row.style.display='block';
+}
+
+/* KPI 새로고침 트리거는 startAutoRefresh()가 담당 */
+
+/* KPI 새로고침 실제 로직 */
+async function refresh(){
+  var date=el('date').value.trim(), kw=el('kw').value.trim();
+  try{
+    var r = await fetch(API_BASE+'/api/status?date='+encodeURIComponent(date)+'&keyword='+encodeURIComponent(kw), { headers: authHeaders() });
+    var j = await r.json();
+    el('selTotal').textContent=j.selection_total??'-';
+    el('selApproved').textContent=j.selection_approved??'-';
+    el('cntCandidate').textContent=(j.state_counts&&j.state_counts.candidate)||0;
+    el('cntReady').textContent=(j.state_counts&&j.state_counts.ready)||0;
+    el('cntRejected').textContent=(j.state_counts&&j.state_counts.rejected)||0;
+    el('comTotal').textContent=j.community_total??'-';
+    el('kwTotal').textContent=j.keyword_total??'-';
+    el('gateReq').textContent=j.gate_required??15;
+    el('gatePass').textContent=j.gate_pass?'통과':'미통과';
+    var gs=el('gateSlider'), gv=el('gateVal'); if(gs) gs.value=j.gate_required??15; if(gv) gv.textContent=j.gate_required??15;
+  }catch(e){ el('log').textContent='상태 오류: '+e; }
+}
+
+/* 게이트 임계값 업데이트 */
+async function updateGate(val){
+  var v=parseInt(val||'0',10); if(!v){ showToast('숫자값 필요','err'); return; }
+  var gs=document.getElementById('gateSlider'); if(gs) gs.disabled=true;
+  try{
+    var res=await fetch(API_BASE+'/api/config/gate_required',{
+      method:'PATCH',
+      headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
+      body: JSON.stringify({value:v, gate_required:v}) // 서버 구현 차이 대비
+    });
+    var js=await res.json().catch(()=>({}));
+    if(!res.ok || js.error){ throw new Error(js.error || ('HTTP '+res.status)); }
+
+    var newV = (js.gate_required!=null)? js.gate_required : v;
+    var req = document.getElementById('gateReq');
+    var valSpan = document.getElementById('gateVal');
+    if(req) req.textContent = newV;
+    if(valSpan) valSpan.textContent = newV;
+
+    await refresh().catch(()=>{});
+    showToast('게이트 저장: '+newV,'ok');
+  }catch(e){
+    showToast('게이트 실패: '+e.message,'err');
+  }finally{
+    if(gs) gs.disabled=false;
+  }
+}
+
+/* 보고서/요약/내보내기 */
+async function genReport(){
+  var date=el('reportDate').value || new Date().toISOString().slice(0,10);
+  var kw=el('reportKw').value.trim();
+  try{
+    var res=await fetch(API_BASE+'/api/report',{
+      method:'POST', headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
+      body: JSON.stringify({date:date, keyword:kw})
+    });
+    var j=await res.json(); if(j.path) showLink(j.path);
+    el('log').textContent=JSON.stringify(j,null,2);
+  }catch(e){ el('log').textContent='보고서 생성 실패: '+e; }
+}
+async function enrichKeyword(){
+  var kw=el('reportKw').value.trim() || el('kw').value.trim();
+  if(!kw){ alert('키워드를 입력하세요'); return; }
+  try{
+    var res=await fetch(API_BASE+'/api/enrich/keyword',{
+      method:'POST', headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
+      body: JSON.stringify({keyword:kw})
+    });
+    var j=await res.json();
+    if(j.path){ showLink(j.path); el('log').innerHTML='요약 파일 생성 완료: <a href="'+absUrl(j.path)+'" target="_blank" rel="noopener">'+escapeHtml(normPath(j.path))+'</a>'; }
+    else{ el('log').textContent=JSON.stringify(j,null,2); }
+  }catch(e){ el('log').textContent='키워드 요약 실패: '+e; }
+}
+async function enrichSelection(){
+  var kw=el('reportKw').value.trim();
+  try{
+    var res=await fetch(API_BASE+'/api/enrich/selection',{
+      method:'POST', headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
+      body: JSON.stringify({keyword:kw})
+    });
+    var j=await res.json();
+    if(j.path){ showLink(j.path); el('log').innerHTML='선정본 요약 파일 생성 완료: <a href="'+absUrl(j.path)+'" target="_blank" rel="noopener">'+escapeHtml(normPath(j.path))+'</a>'; }
+    else{ el('log').textContent=JSON.stringify(j,null,2); }
+  }catch(e){ el('log').textContent='선정본 요약 실패: '+e; }
+}
+async function exportMd(){
+  var date=el('reportDate').value || new Date().toISOString().slice(0,10);
+  var kw=el('reportKw').value.trim() || el('kw').value.trim();
+  try{
+    var res=await fetch(API_BASE+'/api/export/md',{ headers: authHeaders() });
+    if(!res.ok){ el('log').textContent='MD 내보내기 실패: '+res.status; return; }
+    var blob=await res.blob(), url=URL.createObjectURL(blob);
+    var slug=kw?kw.replace(/\s+/g,'_'):''; var fname=slug?('quali_'+date+'_'+slug+'.md'):('quali_'+date+'.md');
+    var a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); a.remove();
+    el('log').textContent='MD 파일 다운로드 완료';
+  }catch(e){ el('log').textContent='MD 내보내기 실패: '+e; }
+}
+async function exportCsv(){
+  var date=el('reportDate').value || new Date().toISOString().slice(0,10);
+  var kw=el('reportKw').value.trim() || el('kw').value.trim();
+  try{
+    var res=await fetch(API_BASE+'/api/export/csv',{ headers: authHeaders() });
+    if(!res.ok){ el('log').textContent='CSV 내보내기 실패: '+res.status; return; }
+    var blob=await res.blob(), url=URL.createObjectURL(blob);
+    var slug=kw?kw.replace(/\s+/g,'_'):''; var fname=slug?('quali_'+date+'_'+slug+'.csv'):('quali_'+date+'.csv');
+    var a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); a.remove();
+    el('log').textContent='CSV 파일 다운로드 완료';
+  }catch(e){ el('log').textContent='CSV 내보내기 실패: '+e; }
+}
+</script>
+<!-- === MD PREVIEW (idempotent) === -->
+<script id="md-preview-js">
+(function(){
+  var hits = [];    // 검색 인덱스 목록
+  var cur  = -1;    // 현재 포인터
+
+  function _body(){
+    var html = document.getElementById('previewHtmlBody');
+    if (html && html.style.display !== 'none') return html; // HTML 탭이 보이면 HTML 영역 선택
+    return document.getElementById('previewBody');          // 아니면 MD 영역
+  }
+  function _findBox(){ return document.getElementById('previewFind'); }
+  function _toast(m,t){ if(typeof showToast==='function') showToast(m,t||'ok'); }
+
+  window.openPreview = function(text){
+    var m=document.getElementById('previewModal'); if(!m) return;
+    var pre=document.getElementById('previewBody');
+    if(pre){ pre.dataset.raw = String(text||''); pre.textContent = pre.dataset.raw; }
+    m.style.display='block';            // 먼저 보이게
+    requestAnimationFrame(function(){   // 다음 프레임에 페이드-인
+      m.classList.add('on');
+    });
+    setTimeout(function(){ var box=document.getElementById('previewFind'); if(box){ box.focus(); box.select&&box.select(); }}, 0);
+  };
+
+  window.closePreview = function(){
+    var m=document.getElementById('previewModal'); if(!m) return;
+    m.classList.remove('on');           // 페이드-아웃 시작
+    setTimeout(function(){ m.style.display='none'; }, 190); // 트랜지션(180ms) 끝난 뒤 숨김
+  };
+
+  // === HTML 미리보기 보조 ===
+  function mdToHtml(md){
+    const esc = s => (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    let h = '\n' + String(md||'').replace(/\r\n/g,'\n');
+
+    // 코드블록 보존
+    const blocks=[];
+    h = h.replace(/```([\s\S]*?)```/g, (_,code)=>{ blocks.push('<pre><code>'+esc(code)+'</code></pre>'); return `\u0000C${blocks.length-1}\u0000`; });
+
+    // 헤더/리스트/링크/스타일
+    h = h.replace(/\n###### (.*)/g,'\n<h6>$1</h6>')
+         .replace(/\n##### (.*)/g,'\n<h5>$1</h5>')
+         .replace(/\n#### (.*)/g,'\n<h4>$1</h4>')
+         .replace(/\n### (.*)/g,'\n<h3>$1</h3>')
+         .replace(/\n## (.*)/g,'\n<h2>$1</h2>')
+         .replace(/\n# (.*)/g,'\n<h1>$1</h1>')
+         .replace(/\n- (.*)/g,'\n<li>$1</li>')
+         .replace(/(?:\n<li>.*<\/li>)+/g, m=>'<ul>'+m.replace(/\n/g,'')+'</ul>')
+         .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+         .replace(/\*(.+?)\*/g,'<em>$1</em>')
+         .replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+    // 단락 처리
+    h = h.replace(/\n{2,}/g,'</p><p>').replace(/^\n+|\n+$/g,'');
+    h = '<p>'+h+'</p>';
+
+    // 코드블록 복원
+    h = h.replace(/\u0000C(\d+)\u0000/g, (_,i)=>blocks[Number(i)]||'');
+    return h;
+  }
+  window.useHtmlTab = function(on){
+    var pre=document.getElementById('previewBody');
+    var html=document.getElementById('previewHtmlBody');
+    if(!pre||!html) return;
+    if(on){ pre.style.display='none'; html.style.display='block'; }
+    else  { pre.style.display='block'; html.style.display='none'; }
+  };
+  window.previewHtml = function(){
+    try{
+      var pre=document.getElementById('previewBody');
+      var raw=(pre && pre.dataset && pre.dataset.raw) ? pre.dataset.raw : (pre? pre.textContent : '');
+      var box=document.getElementById('previewHtmlBody');
+      if(box) box.innerHTML = mdToHtml(raw||'');
+      useHtmlTab(true);
+    }catch(e){ if(typeof showToast==='function') showToast('HTML 미리보기 실패: '+e.message,'err'); }
+  };
+
+  window.previewMd = async function(){
+    var btn = (typeof event!=='undefined')? event.target : null;
+    try{
+      if(btn) btn.disabled = true;
+      const r = await fetch(API_BASE+'/api/export/md?preview=1', { headers: authHeaders() });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      openPreview(await r.text());
+    }catch(e){ _toast('미리보기 실패: '+e.message,'err'); }
+    finally{ if(btn) btn.disabled = false; }
+  };
+
+  // --- 복사 ---
+  window.copyPreview = async function(){
+    var pre=_body(); if(!pre) return;
+    try{
+      await navigator.clipboard.writeText(pre.textContent||'');
+      _toast('복사 완료');
+    }catch(e){ _toast('복사 실패: '+e.message, 'err'); }
+  };
+
+  // --- 검색 ---
+  function _buildHits(q){
+    hits=[]; cur=-1;
+    if(!q){ return; }
+    var txt = (_body()?.textContent)||'';
+    var needle = q.toLowerCase();
+    var pos = 0;
+    while(true){
+      var i = txt.toLowerCase().indexOf(needle, pos);
+      if(i<0) break;
+      hits.push(i);
+      pos = i + needle.length;
+      if(hits.length>5000) break; // 안전 가드
+    }
+  }
+  function _scrollTo(idx){
+    var pre=_body(); if(!pre || hits.length===0) return;
+    var total = (pre.textContent||'').length || 1;
+    var i = hits[idx];
+    pre.scrollTop = Math.max(0, Math.min(pre.scrollHeight - pre.clientHeight,
+                   Math.floor((i/total) * (pre.scrollHeight - pre.clientHeight))));
+    _toast((idx+1)+' / '+hits.length);
+  }
+
+  window.findInPreview = function(){
+    var q = (_findBox()?.value||'').trim();
+    if(hits.length===0 || !q){ _buildHits(q); }
+    if(hits.length===0){ _toast('검색 결과 없음','err'); return; }
+    cur = (cur+1) % hits.length;
+    _scrollTo(cur);
+  };
+  window.findPrevInPreview = function(){
+    var q = (_findBox()?.value||'').trim();
+    if(hits.length===0 || !q){ _buildHits(q); }
+    if(hits.length===0){ _toast('검색 결과 없음','err'); return; }
+    cur = (cur-1+hits.length) % hits.length;
+    _scrollTo(cur);
+  };
+
+  // --- 단축키: Esc 닫기 / Ctrl|⌘+F 검색창 포커스 / Enter 다음 / Shift+Enter 이전
+  window.addEventListener('keydown', function(ev){
+    var modal = document.getElementById('previewModal');
+    if(!modal || modal.style.display==='none') return;
+
+    if(ev.key==='Escape'){ ev.preventDefault(); closePreview(); return; }
+
+    var meta = ev.ctrlKey || ev.metaKey;
+    if(meta && (ev.key==='f' || ev.key==='F')){
+      ev.preventDefault();
+      var box = _findBox(); if(box){ box.focus(); box.select(); }
+      return;
+    }
+    if(ev.key==='Enter'){
+      ev.preventDefault();
+      if(ev.shiftKey) findPrevInPreview(); else findInPreview();
+      return;
     }
   });
+})();
+</script>
+<!-- === /MD PREVIEW === -->
+<script>
+/* ===== 비동기 작업(SSE) ===== */
+let currentJob=null, es=null;
+function appendSseLog(s){ var box=el('taskLog'); box.textContent += (s.endsWith('\n')? s : s+'\n'); box.scrollTop = box.scrollHeight; }
+function stopStream(){ if(es){ es.close(); es=null; } }
+async function startFlow(kind){
+  stopStream();
+  var r = await fetch(API_BASE+'/api/tasks/flow',{ method:'POST',
+    headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
+    body: JSON.stringify({kind:kind})
+  });
+  var j = await r.json(); currentJob=j.job_id;
+  el('q-info').textContent = 'job='+currentJob+' ('+j.kind+')';
+  appendSseLog('> started '+j.kind+' job='+currentJob);
+  openStream(currentJob);
+}
+async function startKeyword(){
+  var kw = el('kwInput').value.trim(); if(!kw){alert('키워드를 입력하세요');return;}
+  stopStream();
+  var r = await fetch(API_BASE+'/api/tasks/flow',{ method:'POST',
+    headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
+    body: JSON.stringify({kind:'keyword',keyword:kw})
+  });
+  var j = await r.json(); currentJob=j.job_id;
+  el('q-info').textContent = 'job='+currentJob+' (keyword:'+kw+')';
+  appendSseLog('> started keyword='+kw+' job='+currentJob);
+  openStream(currentJob);
+}
+function openStream(job){
+  stopStream();
+  var token=(localStorage.getItem('ADMIN_TOKEN')||'').trim();
+  var url = API_BASE+'/api/tasks/'+job+'/stream' + (token?('?token='+encodeURIComponent(token)):'');
+  es = new EventSource(url);
+  es.onmessage = ev=>{ if(ev.data) appendSseLog(ev.data); };
+  es.addEventListener('end', ev=>{ appendSseLog('\n<END> '+ev.data); stopStream(); });
+  es.onerror = ()=> appendSseLog('[SSE error] 재시도 중…');
+}
 
-  // 기존 코드가 기대하는 식별자/헬퍼
-  const API = API_BASE;
-  const el = id => document.getElementById(id);
+/* ===== 모달 & 동기 폴백 ===== */
+function lockButtons(lock){ document.querySelectorAll('section.card button').forEach(b=>b.disabled=!!lock); el('cancelBtn').disabled=!lock; }
+function openModal(){ el('jobModal').style.display='block'; }
+function closeModal(){ el('jobModal').style.display='none'; stopStream(); currentJob=null; lockButtons(false); }
+async function cancelJob(){ if(!currentJob) return; try{ await fetch(API_BASE+'/api/tasks/'+currentJob+'/cancel',{method:'POST',headers:authHeaders()}); }catch{} }
 
-  // 비동기 작업 지원 여부 한 번 체크
-  let HAS_TASKS = false;
-  async function checkTasks(){
-    try{ const r = await fetch(`${API}/api/tasks/recent?limit=1`); HAS_TASKS = r.ok; }
-    catch{ HAS_TASKS = false; }
+function renderSteps(st){
+  var box=el('steps'); if(!box) return;
+  var arr=(st && Array.isArray(st.steps))?st.steps:[];
+  if(arr.length===0){ box.innerHTML='<div class="task-log">표시할 단계 없음</div>'; return; }
+  box.innerHTML='';
+  for(var i=0;i<arr.length;i++){
+    var s=arr[i]||{}, num=i+1, state=s.ok?'OK':'ERR', name=s.cmd||s.name||'';
+    var stdout=s.stdout||'', stderr=s.stderr?('\nERR: '+s.stderr):'';
+    var div=document.createElement('div'); div.className='task-log';
+    div.textContent='['+num+'] '+state+' '+name+'\n'+stdout+stderr;
+    box.appendChild(div);
   }
-  checkTasks();
-
-  // 테마
-  function toggleTheme(){
-    const html=document.documentElement,btn=document.getElementById('theme-toggle');
-    const dark = html.getAttribute('data-theme')==='dark';
-    html.setAttribute('data-theme', dark?'light':'dark');
-    btn.textContent = dark?'다크 모드':'라이트 모드';
-  }
-
-  // 날짜 기본 값
-  (function initToday(){ const t=new Date().toISOString().slice(0,10);
-    const $d=el('date'); if($d && !$d.value) $d.value=t })();
-
-  async function refresh(){
-    const date=el('date').value.trim(), keyword=el('kw').value.trim();
-    try{
-      const j = await (await fetch(`${API}/api/status?date=${encodeURIComponent(date)}&keyword=${encodeURIComponent(keyword)}`)).json();
-      el('selTotal').textContent=j.selection_total??'-';
-      el('selApproved').textContent=j.selection_approved??'-';
-      el('cntCandidate').textContent = (j.state_counts && j.state_counts.candidate) || 0;
-      el('cntReady').textContent     = (j.state_counts && j.state_counts.ready) || 0;
-      el('cntRejected').textContent  = (j.state_counts && j.state_counts.rejected) || 0;
-      el('comTotal').textContent=j.community_total??'-';
-      el('kwTotal').textContent=j.keyword_total??'-';
-      el('gateReq').textContent=j.gate_required??15;
-      el('gatePass').textContent=j.gate_pass?'통과':'미통과';
-      // 슬라이더와 현재 값 동기화
-      const gs = el('gateSlider'), gv = el('gateVal');
-      if(gs){ gs.value = j.gate_required??15; }
-      if(gv){ gv.textContent = j.gate_required??15; }
-    }catch(e){ el('log').textContent='상태 오류: '+e; }
-  }
-
-  // 게이트 임계값을 서버에 업데이트
-  async function updateGate(val){
-    const v = parseInt(val||'0',10);
-    if(!v) return;
-    try{
-      const res = await fetch(`${API}/api/config/gate_required`, {
-        method:'PATCH',
-        headers:{'Content-Type':'application/json'},
-        // 서버는 gate_required 필드를 사용합니다
-        body: JSON.stringify({gate_required: v})
-      });
-      const js = await res.json().catch(()=>({}));
-      if(js && js.gate_required!=null){ el('gateReq').textContent = js.gate_required; el('gateVal').textContent = js.gate_required; }
-      await refresh();
-    }catch(e){ el('log').textContent='게이트 업데이트 실패: '+e; }
-  }
-
-  // 보고서 생성
-  async function genReport(){
-    const date = el('reportDate').value || new Date().toISOString().slice(0,10);
-    const kw = el('reportKw').value.trim();
-    try{
-      const res = await fetch(`${API}/api/report`,{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({date, keyword: kw})});
-      const j = await res.json();
-      el('log').textContent = JSON.stringify(j,null,2);
-    }catch(e){ el('log').textContent='보고서 생성 실패: '+e; }
-  }
-
-  // 키워드 카드 요약/번역
-  async function enrichKeyword(){
-    const kw = el('reportKw').value.trim() || el('kw').value.trim();
-    if(!kw){ alert('키워드를 입력하세요'); return; }
-    try{
-      const res = await fetch(`${API}/api/enrich/keyword`,{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({keyword: kw})});
-      const j = await res.json();
-      // Show summary generation result.  If a path is returned, display it as a link.
-      if(j.path){
-        // Construct a full URL: relative paths are served by the API base.  Prefix with API_BASE
-        const url = `${API}${j.path.startsWith('/') ? '' : '/'}${j.path}`;
-        el('log').innerHTML = `요약 파일 생성 완료: <a href="${url}" target="_blank" rel="noopener">${j.path}</a>`;
-      } else {
-        el('log').textContent = JSON.stringify(j,null,2);
-      }
-    }catch(e){ el('log').textContent='키워드 요약 실패: '+e; }
-  }
-
-  // 선정본 요약/번역
-  async function enrichSelection(){
-    const kw = el('reportKw').value.trim();
-    try{
-      const res = await fetch(`${API}/api/enrich/selection`,{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({keyword: kw})});
-      const j = await res.json();
-      if(j.path){
-        const url = `${API}${j.path.startsWith('/') ? '' : '/'}${j.path}`;
-        el('log').innerHTML = `선정본 요약 파일 생성 완료: <a href="${url}" target="_blank" rel="noopener">${j.path}</a>`;
-      } else {
-        el('log').textContent = JSON.stringify(j,null,2);
-      }
-    }catch(e){ el('log').textContent='선정본 요약 실패: '+e; }
-  }
-
-  // MD 내보내기
-  async function exportMd(){
-    // 날짜와 키워드 값 추출 (필요시 기본값 사용)
-    const date = el('reportDate').value || new Date().toISOString().slice(0,10);
-    const kw = el('reportKw').value.trim() || el('kw').value.trim();
-    try{
-      // 서버는 발행본(selected_articles.json)으로부터 Markdown을 생성합니다
-      const res = await fetch(`${API}/api/export/md`);
-      if(!res.ok){ el('log').textContent='MD 내보내기 실패: '+res.status; return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      // 키워드를 파일명에 포함하여 구분 가능하게 합니다. 공백은 밑줄로 교체
-      const slug = kw ? kw.replace(/\s+/g, '_') : '';
-      const fname = slug ? `quali_${date}_${slug}.md` : `quali_${date}.md`;
-      const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
-      el('log').textContent = 'MD 파일 다운로드 완료';
-    }catch(e){ el('log').textContent='MD 내보내기 실패: '+e; }
-  }
-
-  // CSV 내보내기
-  async function exportCsv(){
-    const date = el('reportDate').value || new Date().toISOString().slice(0,10);
-    const kw = el('reportKw').value.trim() || el('kw').value.trim();
-    try{
-      // 서버는 발행본(selected_articles.json)으로부터 CSV를 생성합니다
-      const res = await fetch(`${API}/api/export/csv`);
-      if(!res.ok){ el('log').textContent='CSV 내보내기 실패: '+res.status; return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const slug = kw ? kw.replace(/\s+/g, '_') : '';
-      const fname = slug ? `quali_${date}_${slug}.csv` : `quali_${date}.csv`;
-      const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
-      el('log').textContent = 'CSV 파일 다운로드 완료';
-    }catch(e){ el('log').textContent='CSV 내보내기 실패: '+e; }
-  }
-
-  // 모달/버튼 제어
-  let currentJob=null, es=null;
-  function lockButtons(lock){ document.querySelectorAll('section.card button').forEach(b=>b.disabled=!!lock); el('cancelBtn').disabled=!lock; }
-  function openModal(){ el('jobModal').style.display='block'; }
-  function closeModal(){ el('jobModal').style.display='none'; if(es){es.close(); es=null;} currentJob=null; lockButtons(false); }
-  async function cancelJob(){ if(!currentJob) return; try{ await fetch(`${API}/api/tasks/${currentJob}/cancel`,{method:'POST'}); }catch{} }
-
-  // 스텝/타임라인 렌더(동기 폴백에서도 재사용)
-  function renderSteps(st){
-    const box=el('steps'); box.innerHTML='';
-    (st.steps||[]).forEach(it=>{
-      const cls = it.ok===false?'fail':(it.ok===true?'ok':'running');
-      const icon = it.ok===false?'❌':(it.ok===true?'✅':'⏳');
-      const ms = (it.ms!=null)?` · ${it.ms} ms`: '';
-      const div=document.createElement('div'); div.className='step '+cls;
-      div.innerHTML =
-        `<div><span>${icon}</span> <b>${it.cmd}</b></div>`+
-        `<div class="meta">${it.t_start||'-'} → ${it.t_end||'-'}${ms}</div>`+
-        `${it.stdout?`<pre class="meta">${escapeHtml(it.stdout)}</pre>`:''}`+
-        `${it.stderr?`<pre class="meta" style="color:var(--err)">${escapeHtml(it.stderr)}</pre>`:''}`;
-      box.appendChild(div);
+}
+function drawTimeline(st){
+  var cvs=el('timeline'); if(!cvs||!cvs.getContext) return;
+  var ctx=cvs.getContext('2d'); ctx.clearRect(0,0,cvs.width,cvs.height);
+  var arr=(st&&st.steps)||[]; if(!arr.length) return;
+  var H=20, PAD=10, W=cvs.width-2*PAD;
+  var hasTime = arr.some(x=>x.t_start||x.t_end);
+  if(hasTime){
+    var times=arr.map(x=>({s:new Date(x.t_start||Date.now()), e:new Date(x.t_end||Date.now())}));
+    var t0=Math.min.apply(null,times.map(t=>t.s)), t1=Math.max.apply(null,times.map(t=>t.e));
+    var span=Math.max(1,t1-t0);
+    arr.forEach(function(it,i){
+      var ss=new Date(it.t_start||Date.now()), ee=new Date(it.t_end||ss);
+      var x=((ss-t0)/span)*W+PAD, w=Math.max(2,((ee-ss)/span)*W), y=10+i*(H+6);
+      ctx.fillStyle=(it.ok===false?getCss('--err'):(it.ok===true?getCss('--ok'):getCss('--acc'))); ctx.fillRect(x,y,w,H);
+    });
+  }else{
+    var w = Math.max(2, W/arr.length);
+    arr.forEach(function(it,i){
+      var y=10+i*(H+6);
+      ctx.fillStyle=(it.ok===false?getCss('--err'):(it.ok===true?getCss('--ok'):getCss('--acc'))); ctx.fillRect(PAD + i*w, y, w-4, H);
     });
   }
-  function drawTimeline(st){
-    const cvs=el('timeline'), ctx=cvs.getContext('2d'); ctx.clearRect(0,0,cvs.width,cvs.height);
-    const arr=(st.steps||[]); if(!arr.length) return;
-    const times=arr.map(s=>({s:new Date(s.t_start||Date.now()), e:new Date(s.t_end||Date.now())}));
-    const t0=Math.min(...times.map(t=>t.s)); const t1=Math.max(...times.map(t=>t.e));
-    const span=Math.max(1, t1-t0); const H=20, PAD=10;
-    arr.forEach((it,i)=>{ const ss=new Date(it.t_start||Date.now()); const ee=new Date(it.t_end||ss);
-      const x=((ss-t0)/span)*(cvs.width-2*PAD)+PAD, w=Math.max(2,((ee-ss)/span)*(cvs.width-2*PAD)), y=10+i*(H+6);
-      ctx.fillStyle=it.ok===false?getCss('--err'):(it.ok===true?getCss('--ok'):getCss('--acc')); ctx.fillRect(x,y,w,H); });
-  }
-  const getCss = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const escapeHtml = s => (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
 
-  // ===== 비동기: 버튼 → /api/tasks/flow → SSE =====
-  function appendLog(s){
-    const box=document.getElementById('taskLog');
-    box.textContent += (s.endsWith('\n')? s : s+'\n'); box.scrollTop = box.scrollHeight;
-  }
-  function stopStream(){ if(es){ es.close(); es=null; } }
+/* 비동기 지원 여부 체크 */
+let HAS_TASKS=false;
+async function checkTasks(){
+  try{ var r=await fetch(API_BASE+'/api/tasks/recent?limit=1',{headers:authHeaders()}); HAS_TASKS=r.ok; }
+  catch{ HAS_TASKS=false; }
+}
+checkTasks();
 
-  async function startFlow(kind){
-    stopStream(); const body = JSON.stringify({kind});
-    const r = await fetch(`${API}/api/tasks/flow`,{method:'POST',headers:{'Content-Type':'application/json'},body});
-    const j = await r.json(); currentJob=j.job_id;
-    el('q-info').textContent = `job=${currentJob} (${j.kind})`; appendLog(`> started ${j.kind} job=${currentJob}`);
-    openStream(currentJob);
-  }
-  async function startKeyword(){
-    const kw = document.getElementById('kwInput').value.trim(); if(!kw){alert('키워드를 입력하세요');return;}
-    stopStream(); const r = await fetch(`${API}/api/tasks/flow`,{
-      method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({kind:'keyword',keyword:kw})
+/* 동기/비동기 런처 */
+async function startJob(url, body){
+  lockButtons(true); openModal(); el('jobMeta').textContent='작업 준비 중…'; el('steps').innerHTML='';
+  try{
+    var res=await fetch(url,{
+      method:'POST',
+      headers: body ? Object.assign({'Content-Type':'application/json'}, authHeaders()) : authHeaders(),
+      body: body ? JSON.stringify(body) : null
     });
-    const j = await r.json(); currentJob=j.job_id;
-    el('q-info').textContent = `job=${currentJob} (keyword:${kw})`; appendLog(`> started keyword=${kw} job=${currentJob}`);
-    openStream(currentJob);
-  }
-  function openStream(job){
-    stopStream(); const url = `${API}/api/tasks/${job}/stream`; es = new EventSource(url);
-    es.onmessage = ev=>{ if(ev.data) appendLog(ev.data); };
-    es.addEventListener('end', ev=>{ appendLog(`\n<END> ${ev.data}`); stopStream(); });
-    es.onerror = ()=> appendLog('[SSE error] 재시도 중…');
-  }
-
-  // ===== 동기 폴백 런처(비동기 미구현/오류 시) =====
-  async function startJob(url, body=null){
-    lockButtons(true); openModal(); el('jobMeta').textContent='작업 준비 중…'; el('steps').innerHTML='';
-    try{
-      const res = await fetch(url,{method:'POST',headers: body?{'Content-Type':'application/json'}:{},body: body?JSON.stringify(body):null});
-      if(res.ok){ const js = await res.json().catch(()=>({})); if(js.job_id){
-        currentJob = js.job_id; es = new EventSource(`${API}/api/tasks/${js.job_id}/stream`);
+    if(res.ok){
+      var js=await res.json().catch(()=>({}));
+      if(js.job_id){
+        currentJob=js.job_id;
+        var t=(localStorage.getItem('ADMIN_TOKEN')||'').trim();
+        var sseUrl = API_BASE+'/api/tasks/'+js.job_id+'/stream' + (t?('?token='+encodeURIComponent(t)):'');
+        es=new EventSource(sseUrl);
         es.addEventListener('end', ()=>{ es.close(); es=null; lockButtons(false); refresh(); });
         return;
-      }}
-      await syncFallback(kindFromUrl(url), body);
-    }catch{ await syncFallback(kindFromUrl(url), body); }
-    lockButtons(false);
-  }
-  function kindFromUrl(u){ if(u.endsWith('/flow/daily')) return 'daily'; if(u.endsWith('/flow/community')) return 'community'; if(u.endsWith('/flow/keyword')) return 'keyword'; if(u.endsWith('/flow/merged')) return 'merged'; return 'unknown'; }
-  async function syncFallback(kind, body=null){
-    el('jobMeta').textContent = `동기 실행(폴백) — ${kind}`; el('steps').innerHTML = '';
-    let endpoint='', opt={method:'POST',headers:{'Content-Type':'application/json'}};
-    if(kind==='daily') endpoint=`${API}/api/flow/daily`, opt={method:'POST'};
-    else if(kind==='community') endpoint=`${API}/api/flow/community`, opt={method:'POST'};
-    else if(kind==='keyword') endpoint=`${API}/api/flow/keyword`, opt.body=JSON.stringify(body||{});
-    else if(kind==='merged') endpoint=`${API}/api/flow/merged`, opt={method:'POST'};
-    else { el('log').textContent=`알 수 없는 작업: ${kind}`; return; }
-    try{
-      const r = await fetch(endpoint,opt); const j = await r.json();
-      const st={name:`flow-${kind}`, status:j.ok?'done':'error', steps:[]};
-      (j.steps||[]).forEach(s=>st.steps.push({ok:s.ok,cmd:s.cmd||'(subprocess)',stdout:s.stdout||'',stderr:s.stderr||'',t_start:'-',t_end:'-',ms:null}));
-      renderSteps(st); drawTimeline(st); el('jobMeta').textContent = `작업: ${st.name} · 상태: ${st.status}`;
-    }catch(e){ el('log').textContent='동기 실행 실패: '+e; }
-    await refresh();
-  }
-
-  // 운영 버튼들 (비동기 지원 시 tasks/flow, 아니면 폴백)
-  async function runDaily(){ if(HAS_TASKS) await startJob(`${API}/api/tasks/flow/daily`); else await syncFallback('daily'); }
-  async function runCommunity(){ if(HAS_TASKS) await startJob(`${API}/api/tasks/flow/community`); else await syncFallback('community'); }
-  async function runKeyword(){ const keyword=el('kw').value.trim(); if(HAS_TASKS) await startJob(`${API}/api/tasks/flow/keyword`,{keyword, use_external_rss:true}); else await syncFallback('keyword',{keyword, use_external_rss:true}); }
-  async function runMerged(){ if(HAS_TASKS) await startJob(`${API}/api/tasks/flow/merged`); else await syncFallback('merged'); }
-
-  async function startApprove(){
-    lockButtons(true);
-    try{
-      const r=await fetch(`${API}/api/approve-ui/start`,{method:'POST'});
-      const d=await r.json().catch(()=>({}));
-      const ui = d.ui_url || API; // 서버가 ui_url 주면 사용, 없으면 현재 도메인
-      el('log').textContent=JSON.stringify(d,null,2);
-      window.open(ui,'_blank','noopener');
-    } catch(e){
-      el('log').textContent='승인 UI 열기 실패: '+e;
+      }
     }
-    lockButtons(false);
+    // ★ FIX: 폴백에 body 전달
+    await syncFallback(kindFromBody(body||{}), body);
+  }catch{
+    // ★ FIX: 폴백에 body 전달
+    await syncFallback(kindFromBody(body||{}), body);
   }
-  async function showRecent(){ try{ const r=await fetch(`${API}/api/tasks/recent?limit=20`); el('log').textContent=JSON.stringify(await r.json(),null,2); }catch(e){ el('log').textContent='최근 작업 실패: '+e; } }
-    async function loadReady(){
-    const date=el('date')?.value?.trim()||'', keyword=el('kw')?.value?.trim()||'';
-    try{
-      const j = await (await fetch(`${API}/api/items?state=ready&date=${encodeURIComponent(date)}&keyword=${encodeURIComponent(keyword)}`)).json();
-      renderReadyList(j.items||[]);
-    }catch(e){ el('log').textContent='Ready 불러오기 실패: '+e; }
-  }
-  function renderReadyList(items){
-    const $ = el('readyList'); if(!$) return;
-    if(!items.length){ $.innerHTML='<div class="row" style="color:var(--muted)">Ready 항목이 없습니다.</div>'; return; }
-    $.innerHTML = items.map(a=>{
-      const id = a.id || '';
-      const src = a.source || '';
-      const url = a.url || '#';
-      const title = a.title || '(제목 없음)';
-      const v = (a.value_score!=null? a.value_score : a.total_score)||0;
-      const dt = a.doc_type || 'text';
-      const note = a.editor_note || '';
-      return `
-        <div class="card">
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <div><b>${title}</b><br/><small>${src}</small></div>
-            <a href="${url}" target="_blank" rel="noopener">열기</a>
-          </div>
-          <div class="row" style="gap:12px;margin:8px 0">
-            <span class="pill">형식: ${dt}</span>
-            <span class="pill">V: ${v}</span>
-          </div>
-          <label>편집장 한마디</label>
-          <textarea id="note-${id}" rows="2" style="width:100%">${note.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
-          <div class="row" style="justify-content:flex-end;margin-top:8px">
-            <button class="primary" onclick="publishItem('${id}')">발행</button>
-          </div>
-        </div>`;
-    }).join('');
-  }
-  async function publishItem(id){
-    const noteEl = el('note-'+id); const editor_note = noteEl? noteEl.value : '';
-    try{
-      const r = await fetch(`${API}/api/items/${encodeURIComponent(id)}/publish`, {
+  lockButtons(false);
+}
+function kindFromBody(b){ return b.kind || 'unknown'; }
+
+/* 폴백 실행 — merged는 daily→community 순차 호출 */
+async function syncFallback(kind, body){
+  // 폴백 실행도 항상 모달을 띄워준다
+  openModal();
+  lockButtons(true);
+  el('jobMeta').textContent = '동기 실행(폴백) — ' + kind;
+  el('steps').innerHTML = '';
+
+  // 유틸
+  const mkStep   = s   => ({ ok: !!s.ok, cmd: s.cmd || s.name || '', stdout: s.stdout || '', stderr: s.stderr || '' });
+  const mergeSteps = (dst, js) => (js.steps || []).forEach(s => dst.steps.push(mkStep(s)));
+
+  try{
+    const st = { name: 'flow-'+kind, status: 'running', steps: [] };
+
+    if (kind === 'merged') {
+      // daily → community 순차 실행
+      let a = await fetch(API_BASE + '/api/flow/daily',     { method:'POST', headers: authHeaders() });
+      a = await a.json().catch(()=>({ok:false,steps:[]}));
+      mergeSteps(st, a); if (!a.ok) st.status = 'error';
+      renderSteps(st); drawTimeline(st);
+
+      let b = await fetch(API_BASE + '/api/flow/community', { method:'POST', headers: authHeaders() });
+      b = await b.json().catch(()=>({ok:false,steps:[]}));
+      mergeSteps(st, b); if (!b.ok) st.status = 'error';
+
+    } else if (kind === 'daily' || kind === 'community') {
+      let r = await fetch(API_BASE + '/api/flow/' + kind, { method:'POST', headers: authHeaders() });
+      r = await r.json().catch(()=>({ok:false,steps:[]}));
+      mergeSteps(st, r); if (!r.ok) st.status = 'error';
+
+    } else if (kind === 'keyword') {
+      let r = await fetch(API_BASE + '/api/flow/keyword', {
         method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ editor_note, approve: true })
+        headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+        body: JSON.stringify(body || {})
       });
-      const j = await r.json();
-      if(!r.ok || j.ok!==true){ throw new Error(j.detail || '발행 실패'); }
-      // UI 반영: 카드 제거 → KPI 갱신
-      const card = (noteEl && noteEl.closest('.card')); if(card) card.remove();
-      refresh().catch(()=>{});
-    }catch(e){
-      alert('발행 실패: '+e);
+      r = await r.json().catch(()=>({ok:false,steps:[]}));
+      mergeSteps(st, r); if (!r.ok) st.status = 'error';
+
+    } else {
+      el('log').textContent = '알 수 없는 작업: ' + kind;
+      return;
     }
+
+    if (st.status === 'running') st.status = 'done';
+    renderSteps(st); drawTimeline(st);
+    el('jobMeta').textContent = '작업: ' + st.name + ' · 상태: ' + st.status;
+    await refresh();
+
+  } catch (e) {
+    el('log').textContent = '동기 실행 실패: ' + e;
+  } finally {
+    lockButtons(false);
+  }
+}
+
+/* 운영 버튼 */
+async function runDaily(){ if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'daily'}); else await syncFallback('daily'); }
+async function runCommunity(){ if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'community'}); else await syncFallback('community'); }
+async function runKeyword(){
+  var keyword=el('kw').value.trim(); if(!keyword){ alert('키워드를 입력하세요'); return; }
+  if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'keyword', keyword:keyword, use_external_rss:true});
+  else await syncFallback('keyword', {keyword:keyword, use_external_rss:true});
+}
+async function runMerged(){ await syncFallback('merged'); }
+
+/* 승인 UI 열기 */
+async function startApprove(){
+  lockButtons(true);
+  try{
+    var r=await fetch(API_BASE+'/api/approve-ui/start',{method:'POST', headers:authHeaders()});
+    var d=await r.json().catch(()=>({}));
+    var ui=d.ui_url || API_BASE;
+    el('log').textContent=JSON.stringify(d,null,2);
+    window.open(ui,'_blank','noopener');
+  }catch(e){ el('log').textContent='승인 UI 열기 실패: '+e; }
+  lockButtons(false);
+}
+
+/* 최근 작업/Ready 목록 */
+async function showRecent(){
+  try{
+    var r=await fetch(API_BASE+'/api/tasks/recent?limit=20',{headers:authHeaders()});
+    el('log').textContent=JSON.stringify(await r.json(),null,2);
+  }catch(e){ el('log').textContent='최근 작업 실패: '+e; }
+}
+async function loadReady(){
+  var date=el('date')?.value?.trim()||'', keyword=el('kw')?.value?.trim()||'';
+  try{
+    var r=await fetch(API_BASE+'/api/items?state=ready&date='+encodeURIComponent(date)+'&keyword='+encodeURIComponent(keyword), { headers: authHeaders() });
+    var j=await r.json();
+    renderReadyList(j.items||[]);
+  }catch(e){ el('log').textContent='Ready 불러오기 실패: '+e; }
+}
+function renderReadyList(items){
+  var $=el('readyList'); if(!$) return;
+  if(!items.length){ $.innerHTML='<div class="row" style="color:var(--muted)">Ready 항목이 없습니다.</div>'; return; }
+  $.innerHTML = items.map(function(a){
+    var id=a.id||'', src=a.source||'', url=a.url||'#', title=a.title||'(제목 없음)';
+    var v=(a.value_score!=null? a.value_score : a.total_score)||0, dt=a.doc_type||'text', note=a.editor_note||'';
+    return '<div class="card">'
+      + '<div class="row" style="justify-content:space-between;align-items:center">'
+      +   '<div><b>'+escapeHtml(title)+'</b><br/><small>'+escapeHtml(src)+'</small></div>'
+      +   '<a href="'+url+'" target="_blank" rel="noopener">열기</a>'
+      + '</div>'
+      + '<div class="row" style="gap:12px;margin:8px 0">'
+      +   '<span class="pill">형식: '+escapeHtml(dt)+'</span>'
+      +   '<span class="pill">V: '+String(v)+'</span>'
+      + '</div>'
+      + '<label>편집장 한마디</label>'
+      + '<textarea id="note-'+id+'" rows="2" style="width:100%">'+escapeHtml(note)+'</textarea>'
+      + '<div class="row" style="justify-content:flex-end;margin-top:8px">'
+      +   '<button class="primary" onclick="publishItem(\''+id+'\')">발행</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+async function publishItem(id){
+  var noteEl=el('note-'+id); var editor_note=noteEl? noteEl.value : '';
+  try{
+    var r=await fetch(API_BASE+'/api/items/'+encodeURIComponent(id)+'/publish',{
+      method:'POST', headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
+      body: JSON.stringify({ editor_note: editor_note, approve: true })
+    });
+    var j=await r.json(); if(!r.ok || j.ok!==true) throw new Error(j.detail||'발행 실패');
+    var card=(noteEl && noteEl.closest('.card')); if(card) card.remove();
+    refresh().catch(function(){});
+  }catch(e){ alert('발행 실패: '+e); }
+}
+</script>
+<!-- === FOOTER RUNTIME BADGE === -->
+<div id="runtime-badge" style="position:fixed;bottom:6px;left:12px;z-index:9999;font:12px/1.4 system-ui;color:#aaa;"></div>
+<script>
+(async () => {
+  try {
+    const r = await fetch('/api/debug/runtime');
+    const j = await r.json();
+    const c = j.commit ? ` · COMMIT ${String(j.commit).slice(0,7)}` : '';
+    document.getElementById('runtime-badge').textContent =
+      `SERVICE ${j.service} · REV ${j.revision}${c} · ${j.time_kst}`;
+  } catch(e) { /* 무시 */ }
+})();
+</script>
+<!-- === /FOOTER RUNTIME BADGE === -->
+<!-- BACKUP BADGE -->
+<div id="backup-badge" style="position:fixed;bottom:6px;right:12px;z-index:9999;font:12px/1.4 system-ui;"></div>
+<script>
+(async()=>{
+  try{
+    const r = await fetch('/api/backup/status'); const j = await r.json();
+    const el = document.getElementById('backup-badge');
+    if(!j.ts){ el.textContent='백업 상태: 정보 없음'; return; }
+    const ageH = (Date.now()/1000 - j.ts)/3600;
+    const ok = j.ok && ageH < 26;
+    el.style.color = ok ? '#0f0' : '#f66';
+    const dt = new Date(j.ts*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'});
+    el.textContent = (ok?'백업 OK ':'백업 지연 ') + `· ${dt}`;
+  }catch(e){}
+})();
+</script>
+<!-- === MD PREVIEW MODAL (idempotent) === -->
+<div id="previewModal"
+     role="dialog" aria-modal="true" aria-labelledby="previewTitle"
+     style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:10000;"
+     onclick="if(event.target===this) closePreview()">
+  <div class="panel" tabindex="-1"
+       style="max-width:960px; margin:60px auto; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px;">
+    <div class="row" style="justify-content:space-between;align-items:center; margin-top:0;">
+      <h3 id="previewTitle" style="margin:0">MD/HTML 미리보기</h3>
+      <div class="row" style="gap:6px">
+        <input id="previewFind" placeholder="검색(Ctrl/⌘+F)" style="padding:6px 8px;width:220px">
+        <button onclick="findInPreview()">찾기</button>
+        <button onclick="findPrevInPreview()">이전</button>
+        <button onclick="copyPreview()">복사</button>
+        <button onclick="useHtmlTab(false)">MD보기</button>
+        <button onclick="previewHtml()">HTML보기</button>
+        <span class="pill" title="단축키: Ctrl/⌘+F=검색, Enter=다음, Shift+Enter=이전, Esc=닫기">단축키</span>
+        <button onclick="closePreview()">닫기(Esc)</button>
+      </div> 
+    </div>
+
+    <!-- MD 원문 영역 -->
+    <pre id="previewBody"
+         style="white-space:pre-wrap; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; max-height:60vh; overflow:auto; font:12px/1.5 ui-monospace,Consolas,monospace;"
+         aria-live="polite"></pre>
+
+    <!-- HTML 렌더 영역 -->
+    <div id="previewHtmlBody"
+         style="display:none; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; max-height:60vh; overflow:auto; font:14px/1.6 system-ui"></div>
+  </div>
+</div>
+<!-- === /MD PREVIEW MODAL === -->
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<!-- === Admin Quick Panel (보고서/요약/Export) === -->
+<div
+  id="adminOps"
+  role="complementary"
+  aria-label="Admin operations panel"
+  style="position:fixed; right:16px; top:90px; z-index:9999; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; width:260px;"
+>
+  <div style="font-weight:600; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+    <span aria-hidden="true">🛠</span><span>Admin Ops</span>
+  </div>
+
+  <button type="button" id="btnReport" class="primary" style="width:100%; margin-bottom:6px;">일일 보고서 생성</button>
+  <a id="linkReport" class="pill" href="#" target="_blank" rel="noopener" style="display:none;">보고서 열기</a>
+
+  <hr style="margin:10px 0; border:none; border-top:1px solid var(--line);" />
+
+  <button type="button" id="btnEnrichAll" style="width:100%; margin-bottom:6px;">키워드 요약/번역</button>
+  <a id="linkEnrichAll" class="pill" href="#" target="_blank" rel="noopener" style="display:none;">ALL.md 열기</a>
+
+  <button type="button" id="btnEnrichSel" style="width:100%; margin:8px 0 6px;">선정본 요약/번역</button>
+  <a id="linkEnrichSel" class="pill" href="#" target="_blank" rel="noopener" style="display:none;">SELECTED.md 열기</a>
+
+  <hr style="margin:10px 0; border:none; border-top:1px solid var(--line);" />
+
+  <button type="button" id="btn-export-md"  style="width:100%; margin-bottom:6px;">Export Markdown</button>
+  <button type="button" id="btn-export-csv" style="width:100%;">Export CSV</button>
+</div>
+
+<script>
+/* === Admin Ops: Wiring only (중복 함수 정의 제거, 기존 함수 재사용) === */
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+
+  // 버튼 비활성/복구 디바운스 래퍼
+  function withBusy(btn, fn) {
+    return async function () {
+      if (!btn) return;
+      if (btn.dataset.busy === '1') return;
+      btn.dataset.busy = '1';
+      const prev = btn.disabled;
+      btn.disabled = true;
+      try { await fn(); }
+      finally { btn.disabled = prev; btn.dataset.busy = '0'; }
+    };
   }
 
-  // 30초마다 KPI 자동 새로고침
-  setInterval(()=>{ refresh().catch(()=>{}); }, 30000);
+  function safeWire(id, handlerName) {
+    const el = $(id);
+    const fn = (typeof window[handlerName] === 'function') ? window[handlerName] : null;
+    if (!el || !fn || el.dataset.wired === '1') return;
+    el.onclick = withBusy(el, fn);
+    el.dataset.wired = '1';
+  }
+
+  // 기존 전역 함수(genReport/enrichKeyword/...)에만 연결
+  safeWire('btnReport',      'genReport');
+  safeWire('btnEnrichAll',   'enrichKeyword');
+  safeWire('btnEnrichSel',   'enrichSelection');
+  safeWire('btn-export-md',  'exportMd');
+  safeWire('btn-export-csv', 'exportCsv');
+})();
 </script>
+
 </body>
 </html>
-
