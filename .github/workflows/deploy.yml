@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
   id-token: write
+# 동시에 여러 이벤트가 겹쳐도 PR은 대기하지 않도록 이벤트/브랜치별로 분리
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deploy:
