@@ -1,4 +1,4 @@
-﻿name: Deploy to Cloud Run
+name: Deploy to Cloud Run
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   contents: read
   id-token: write
 
-# 이벤트/브랜치별로 동시 실행 분리
+# 이벤트/브랜치별 동시 실행 분리(중복 배포 방지)
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
@@ -24,7 +24,7 @@ env:
   ENTRYPOINT: "uvicorn server_quali:app --host 0.0.0.0 --port 8080"
 
 jobs:
-  # ✅ PR에서는 이 잡 하나가 몇 초 만에 성공  필수 체크 "Deploy to Cloud Run" 만족
+  # ✅ PR에서는 빠른 no-op 체크만 (실 배포 X)
   pr_check:
     if: ${{ github.event_name == 'pull_request' }}
     name: Deploy to Cloud Run
@@ -33,7 +33,7 @@ jobs:
       - name: PR no-op (preview handled by pr-preview.yml)
         run: echo "OK"
 
-  # ✅ main/수동 실행에서만 실제 배포
+  # ✅ main / 수동 실행에서만 실제 배포
   deploy:
     if: ${{ github.event_name != 'pull_request' }}
     name: Deploy to Cloud Run
@@ -55,11 +55,17 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Enable required APIs (idempotent)
+        shell: bash
         run: |
-          gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
-            artifactregistry.googleapis.com secretmanager.googleapis.com --quiet
+          gcloud services enable \
+            run.googleapis.com \
+            cloudbuild.googleapis.com \
+            artifactregistry.googleapis.com \
+            secretmanager.googleapis.com \
+            --quiet
 
       - name: Deploy to Cloud Run (main)
+        shell: bash
         run: |
           gcloud run deploy "$SERVICE_NAME" \
             --project "$PROJECT_ID" \
@@ -73,35 +79,52 @@ jobs:
 
       - name: Get Service URL
         id: url
+        shell: bash
         run: |
           URL=$(gcloud run services describe "$SERVICE_NAME" \
             --project "$PROJECT_ID" --region "$REGION" \
             --format='value(status.url)')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Service URL: $URL"
-  - name: Force traffic to latest
-    if: github.ref == 'refs/heads/main'
-    run: |
-      gcloud run services update-traffic "\" --to-latest --region "\" --project "\"
-  - name: Smoke check
+
+      # 🔒 배포 직후 항상 최신 리비전에 100% 전환 (드리프트 방지)
+      - name: Force traffic to latest
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          gcloud run services update-traffic "$SERVICE_NAME" \
+            --to-latest --region "$REGION" --project "$PROJECT_ID" --quiet
+
+      # 🩺 간단 스모크 (토큰 없이 /health → 실패 시 토큰으로 /api/status)
+      - name: Smoke check
         continue-on-error: true
         env:
           URL: ${{ steps.url.outputs.url }}
+        shell: bash
         run: |
           set -e
-          if curl -fsS "$URL/health" > /dev/null; then
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health")
+          if [ "$CODE" = "200" ]; then
             echo "✓ /health 200 OK"
             exit 0
           fi
-          echo "Trying /api/status with ADMIN_TOKEN..."
-          TOKEN=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN 2>/dev/null || true)
+          echo "Trying /api/status with ADMIN_TOKEN from Secret Manager..."
+          TOKEN=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "$PROJECT_ID" 2>/dev/null || true)
           if [ -n "$TOKEN" ]; then
-            curl -fsS -H "X-Admin-Token: $TOKEN" "$URL/api/status" > /dev/null && echo "✓ /api/status 200 OK" && exit 0
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "$URL/api/status")
+            if [ "$CODE" = "200" ]; then
+              echo "✓ /api/status 200 OK (Authorization: Bearer)"
+              exit 0
+            fi
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Admin-Token: $TOKEN" "$URL/api/status")
+            if [ "$CODE" = "200" ]; then
+              echo "✓ /api/status 200 OK (X-Admin-Token)"
+              exit 0
+            fi
           fi
-          echo "⚠ Smoke check skipped or failed."
+          echo "::warning:: Smoke test returned $CODE (health) or failed status check."
 
       - name: Echo done
+        shell: bash
         run: echo "✅ Deploy finished for $SERVICE_NAME in $REGION"
-
-
 
