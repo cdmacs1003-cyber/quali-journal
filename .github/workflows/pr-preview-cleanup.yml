@@ -1,34 +1,60 @@
-﻿name: PR Preview Cleanup (WIF)
+name: PR Preview Cleanup (WIF)
+
 on:
   pull_request:
-    types: [closed]
+    types: [ closed ]      # PR 닫힐 때만
 
 permissions:
   contents: read
-  id-token: write
+  id-token: write          # OIDC 필수
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cleanup:
-    if: ${{ github.event.pull_request.head.repo.fork == false }}
+    # 포크 PR은 보안상 WIF 제한될 수 있으니 동일 리포일 때만 수행
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 10
 
-      - name: Auth (WIF, PR Provider)
+    steps:
+      - name: Checkout (for metadata only)
+        uses: actions/checkout@v4
+
+      # PR용 Provider 우선, 없으면 메인 Provider로 폴백
+      - name: Pick WIF provider
+        id: pick
+        shell: bash
+        env:
+          PR_PROVIDER:    ${{ secrets.GOOGLE_WIF_PROVIDER_PR }}
+          MAIN_PROVIDER:  ${{ secrets.GOOGLE_WIF_PROVIDER }}
+        run: |
+          if [ -n "$PR_PROVIDER" ]; then
+            echo "wip=$PR_PROVIDER" >> "$GITHUB_OUTPUT"
+          else
+            echo "wip=$MAIN_PROVIDER" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Auth (WIF)
         uses: google-github-actions/auth@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER_PR }}
-          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+          workload_identity_provider: ${{ steps.pick.outputs.wip }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          token_format: "access_token"
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Delete Preview Service
+      - name: Cleanup preview resources
+        shell: bash
         env:
           REGION:  ${{ secrets.CLOUD_RUN_REGION }}
-          SERVICE: quali-journal-pr-${{ github.event.number }}
+          SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }} # 미리보기 네이밍 규칙 쓰는 경우 여기서 치환
         run: |
-          gcloud run services delete "${SERVICE}" --region "${REGION}" --quiet || true
+          set -e
+          echo ">> (예시) 미리보기 자원 정리"
+          # 필요에 맞게 실제 정리 커맨드를 넣으세요. 실패해도 워크플로는 통과하도록 || true 처리 권장
+          # gcloud run services delete "${SERVICE}-pr-${{ github.event.pull_request.number }}" --region "$REGION" --quiet || true
+          echo "Done"
