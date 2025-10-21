@@ -149,8 +149,8 @@
     <h3 id="sec-status">상태</h3>
     <div class="row">
       <input id="date" aria-label="날짜"/>
-      <input id="kw" aria-label="키워드" value="IPC-A-610"/>
-      <button class="primary" onclick="refresh()">새로고침</button>
+      <input id="kw" aria-label="키워드" placeholder="키워드 입력"/>
+      <button id="btnRefresh" class="primary" data-action="status:refresh">새로고침</button>
       <!-- AUTO-REFRESH TOGGLE (idempotent) -->
       <div class="row" id="autoRefreshRow" style="gap:8px">
         <label for="autoRefreshToggle" class="pill">자동 새로고침(30초)</label>
@@ -159,13 +159,13 @@
 
     </div>
     <div class="kpi" role="group" aria-label="KPI">
-      <div class="box">선정본 총량: <b id="selTotal">-</b></div>
-      <div class="box">선정본 승인: <b id="selApproved">-</b></div>
-      <div class="box">커뮤니티 후보: <b id="comTotal">-</b></div>
-      <div class="box">키워드 특집: <b id="kwTotal">-</b></div>
-      <div class="box">후보: <b id="cntCandidate">-</b></div>
-      <div class="box">준비완료: <b id="cntReady">-</b></div>
-      <div class="box">거절: <b id="cntRejected">-</b></div>
+      <div class="box" title="오늘 선정된 기사 총 개수">선정본 총량: <b id="selTotal">-</b></div>
+      <div class="box" title="승인된 선정본 기사 수">선정본 승인: <b id="selApproved">-</b></div>
+      <div class="box" title="커뮤니티에서 수집된 후보 기사 수">커뮤니티 후보: <b id="comTotal">-</b></div>
+      <div class="box" title="특집 키워드와 관련된 기사 수">키워드 특집: <b id="kwTotal">-</b></div>
+      <div class="box" title="해당 키워드 기준 후보 기사 수">후보: <b id="cntCandidate">-</b></div>
+      <div class="box" title="발행 준비가 완료된 기사 수">준비완료: <b id="cntReady">-</b></div>
+      <div class="box" title="승인되지 않은 기사 수">거절: <b id="cntRejected">-</b></div>
     </div>
     <div class="row">
       <span class="pill">게이트(승인 ≥ <span id="gateReq">15</span>): <b id="gatePass">-</b></span>
@@ -178,7 +178,7 @@
         <h3 style="margin:0">준비완료(Ready) 목록</h3>
         <div class="row">
           <button class="primary" onclick="loadReady()">Ready 불러오기</button>
-          <button onclick="refresh()">KPI 새로고침</button>
+          <button id="btnKpiRefresh" data-action="status:kpi">KPI 새로고침</button>
         </div>
       </div>
       <div id="readyList" style="margin-top:8px;display:grid;gap:8px"></div>
@@ -273,8 +273,8 @@
          placeholder="your-admin-token-12345"
          autocomplete="new-password" autocapitalize="off" spellcheck="false"
          style="width:220px; padding:6px; border-radius:8px; border:1px solid #555; background:#222; color:#eee;">
-  <button onclick="saveAdminTokenJJ()" style="padding:6px 10px;">입력</button>
-  <button onclick="clearAdminTokenJJ()" style="padding:6px 10px;">해제</button>
+  <button id="btn-token-set"   data-action="token:set"   onclick="saveAdminTokenJJ()" style="padding:6px 10px;">입력</button>
+  <button id="btn-token-clear" data-action="token:clear" onclick="clearAdminTokenJJ()" style="padding:6px 10px;">해제</button>
   <div id="tokenStatusChip" style="display:flex;align-items:center;gap:6px; padding:6px 10px;border-radius:999px;border:1px solid #333;background:#2b0a0a;">
     <span id="tokenStatusDot" style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
     <strong id="tokenStatusText" style="letter-spacing:0.5px;">미인증</strong>
@@ -351,14 +351,23 @@ if(!window.stopAutoRefresh){
   };
 }
 if(!window.testToken){
+  /**
+   * 상태 API를 호출하여 현재 토큰으로 인증 여부를 판별합니다.
+   * 이전 버전에서는 서버가 토큰을 요구하지 않아도 200 OK를 반환하면
+   * 항상 "인증됨"으로 표시되었으므로, 토큰이 없는 경우에는 미인증으로 처리합니다.
+   */
   window.testToken = async function(){
     try{
-      const r = await fetch(API_BASE+'/api/status', { headers: authHeaders() });
-      updateAuthUI(r.ok);
+      const res = await fetch(API_BASE+'/api/status', { headers: authHeaders() });
+      // 토큰이 존재하고 응답이 성공하면 인증된 것으로 간주. 토큰이 없으면 미인증.
+      const hasToken = !!(localStorage.getItem('ADMIN_TOKEN') || '').trim();
+      updateAuthUI(Boolean(hasToken && res.ok));
       const auto = (localStorage.getItem('AUTO_REFRESH')==='1');
-      if(r.ok && auto) startAutoRefresh(); else stopAutoRefresh();
+      // 상태 API는 토큰 유무와 상관없이 호출 가능하므로 r.ok 기준으로 자동 새로고침을 제어한다.
+      if(res.ok && auto) startAutoRefresh(); else stopAutoRefresh();
     }catch(e){
-      updateAuthUI(false); stopAutoRefresh();
+      updateAuthUI(false);
+      stopAutoRefresh();
     }
   };
 }
@@ -425,6 +434,7 @@ async function refresh(){
     el('gateReq').textContent=j.gate_required??15;
     el('gatePass').textContent=j.gate_pass?'통과':'미통과';
     var gs=el('gateSlider'), gv=el('gateVal'); if(gs) gs.value=j.gate_required??15; if(gv) gv.textContent=j.gate_required??15;
+    showToast('상태 갱신 완료','ok');
   }catch(e){ el('log').textContent='상태 오류: '+e; }
 }
 
@@ -456,6 +466,19 @@ async function updateGate(val){
   }
 }
 
+/* (추가) 버튼 비활성/토스트 자동 처리 래퍼 — ★ 중첩 <script> 제거, 동일 블록에 둠 */
+async function runWithUiFeedback(btn, task){
+  try{
+    if(btn) btn.disabled = true;
+    await task();
+    showToast('✅ 완료','ok');
+  }catch(e){
+    showToast('❌ 실패: ' + (e && e.message ? e.message : e), 'err');
+  }finally{
+    if(btn) btn.disabled = false;
+  }
+}
+
 /* 보고서/요약/내보내기 */
 async function genReport(){
   var date=el('reportDate').value || new Date().toISOString().slice(0,10);
@@ -467,7 +490,13 @@ async function genReport(){
     });
     var j=await res.json(); if(j.path) showLink(j.path);
     el('log').textContent=JSON.stringify(j,null,2);
-  }catch(e){ el('log').textContent='보고서 생성 실패: '+e; }
+    // 보고서 생성 성공 토스트
+    showToast('보고서 생성 완료','ok');
+  }catch(e){
+    el('log').textContent='보고서 생성 실패: '+e;
+    // 보고서 생성 실패 토스트
+    showToast('보고서 생성 실패','err');
+  }
 }
 async function enrichKeyword(){
   var kw=el('reportKw').value.trim() || el('kw').value.trim();
@@ -478,9 +507,21 @@ async function enrichKeyword(){
       body: JSON.stringify({keyword:kw})
     });
     var j=await res.json();
-    if(j.path){ showLink(j.path); el('log').innerHTML='요약 파일 생성 완료: <a href="'+absUrl(j.path)+'" target="_blank" rel="noopener">'+escapeHtml(normPath(j.path))+'</a>'; }
-    else{ el('log').textContent=JSON.stringify(j,null,2); }
-  }catch(e){ el('log').textContent='키워드 요약 실패: '+e; }
+    if(j.path){
+      showLink(j.path);
+      el('log').innerHTML='요약 파일 생성 완료: <a href="'+absUrl(j.path)+'" target="_blank" rel="noopener">'+escapeHtml(normPath(j.path))+'</a>';
+      // 키워드 요약 성공 토스트
+      showToast('키워드 요약 완료','ok');
+    } else {
+      el('log').textContent=JSON.stringify(j,null,2);
+      // 키워드 요약 성공 토스트(경로 없음)
+      showToast('키워드 요약 완료','ok');
+    }
+  }catch(e){
+    el('log').textContent='키워드 요약 실패: '+e;
+    // 키워드 요약 실패 토스트
+    showToast('키워드 요약 실패','err');
+  }
 }
 async function enrichSelection(){
   var kw=el('reportKw').value.trim();
@@ -490,9 +531,21 @@ async function enrichSelection(){
       body: JSON.stringify({keyword:kw})
     });
     var j=await res.json();
-    if(j.path){ showLink(j.path); el('log').innerHTML='선정본 요약 파일 생성 완료: <a href="'+absUrl(j.path)+'" target="_blank" rel="noopener">'+escapeHtml(normPath(j.path))+'</a>'; }
-    else{ el('log').textContent=JSON.stringify(j,null,2); }
-  }catch(e){ el('log').textContent='선정본 요약 실패: '+e; }
+    if(j.path){
+      showLink(j.path);
+      el('log').innerHTML='선정본 요약 파일 생성 완료: <a href="'+absUrl(j.path)+'" target="_blank" rel="noopener">'+escapeHtml(normPath(j.path))+'</a>';
+      // 선정본 요약 성공 토스트
+      showToast('선정본 요약 완료','ok');
+    } else {
+      el('log').textContent=JSON.stringify(j,null,2);
+      // 선정본 요약 성공 토스트 (경로 없음)
+      showToast('선정본 요약 완료','ok');
+    }
+  }catch(e){
+    el('log').textContent='선정본 요약 실패: '+e;
+    // 선정본 요약 실패 토스트
+    showToast('선정본 요약 실패','err');
+  }
 }
 async function exportMd(){
   var date=el('reportDate').value || new Date().toISOString().slice(0,10);
@@ -504,7 +557,13 @@ async function exportMd(){
     var slug=kw?kw.replace(/\s+/g,'_'):''; var fname=slug?('quali_'+date+'_'+slug+'.md'):('quali_'+date+'.md');
     var a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); a.remove();
     el('log').textContent='MD 파일 다운로드 완료';
-  }catch(e){ el('log').textContent='MD 내보내기 실패: '+e; }
+    // MD 내보내기 성공 토스트
+    showToast('MD 내보내기 완료','ok');
+  }catch(e){
+    el('log').textContent='MD 내보내기 실패: '+e;
+    // MD 내보내기 실패 토스트
+    showToast('MD 내보내기 실패','err');
+  }
 }
 async function exportCsv(){
   var date=el('reportDate').value || new Date().toISOString().slice(0,10);
@@ -516,9 +575,16 @@ async function exportCsv(){
     var slug=kw?kw.replace(/\s+/g,'_'):''; var fname=slug?('quali_'+date+'_'+slug+'.csv'):('quali_'+date+'.csv');
     var a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); a.remove();
     el('log').textContent='CSV 파일 다운로드 완료';
-  }catch(e){ el('log').textContent='CSV 내보내기 실패: '+e; }
+    // CSV 내보내기 성공 토스트
+    showToast('CSV 내보내기 완료','ok');
+  }catch(e){
+    el('log').textContent='CSV 내보내기 실패: '+e;
+    // CSV 내보내기 실패 토스트
+    showToast('CSV 내보내기 실패','err');
+  }
 }
 </script>
+
 <!-- === MD PREVIEW (idempotent) === -->
 <script id="md-preview-js">
 (function(){
@@ -890,6 +956,8 @@ async function loadReady(){
     var r=await fetch(API_BASE+'/api/items?state=ready&date='+encodeURIComponent(date)+'&keyword='+encodeURIComponent(keyword), { headers: authHeaders() });
     var j=await r.json();
     renderReadyList(j.items||[]);
+    // Ready 목록 갱신 완료 토스트
+    showToast('Ready 목록 갱신 완료','ok');
   }catch(e){ el('log').textContent='Ready 불러오기 실패: '+e; }
 }
 function renderReadyList(items){
@@ -928,12 +996,14 @@ async function publishItem(id){
   }catch(e){ alert('발행 실패: '+e); }
 }
 </script>
+
 <!-- === FOOTER RUNTIME BADGE === -->
 <div id="runtime-badge" style="position:fixed;bottom:6px;left:12px;z-index:9999;font:12px/1.4 system-ui;color:#aaa;"></div>
 <script>
 (async () => {
   try {
-    const r = await fetch('/api/debug/runtime');
+    // 토큰 필요 API에도 헤더 부착
+    const r = await fetch('/api/debug/runtime', { headers: authHeaders() });
     const j = await r.json();
     const c = j.commit ? ` · COMMIT ${String(j.commit).slice(0,7)}` : '';
     document.getElementById('runtime-badge').textContent =
@@ -942,6 +1012,7 @@ async function publishItem(id){
 })();
 </script>
 <!-- === /FOOTER RUNTIME BADGE === -->
+
 <!-- BACKUP BADGE -->
 <div id="backup-badge" style="position:fixed;bottom:6px;right:12px;z-index:9999;font:12px/1.4 system-ui;"></div>
 <script>
@@ -958,6 +1029,8 @@ async function publishItem(id){
   }catch(e){}
 })();
 </script>
+<!-- === /BACKUP BADGE === -->
+
 <!-- === MD PREVIEW MODAL (idempotent) === -->
 <div id="previewModal"
      role="dialog" aria-modal="true" aria-labelledby="previewTitle"
@@ -1055,6 +1128,29 @@ async function publishItem(id){
   safeWire('btn-export-md',  'exportMd');
   safeWire('btn-export-csv', 'exportCsv');
 })();
+</script>
+<script>
+  // (추가) 버튼 바인딩 보강 – 토큰 입력/해제, 새로고침, KPI 새로고침
+  document.addEventListener("DOMContentLoaded", function(){
+    // 상태 새로고침
+    var r = document.getElementById('btnRefresh');
+    if (r) r.onclick = (e)=> runWithUiFeedback(e.currentTarget, refresh);
+    // KPI 새로고침
+    var k = document.getElementById('btnKpiRefresh');
+    if (k) k.onclick = (e)=> runWithUiFeedback(e.currentTarget, refresh);
+    // 토큰 입력: saveAdminTokenJJ() 호출
+    var tSet = document.getElementById('btn-token-set');
+    if (tSet) tSet.onclick = (e)=> {
+      e.preventDefault();
+      runWithUiFeedback(tSet, () => saveAdminTokenJJ());
+    };
+    // 토큰 해제: clearAdminTokenJJ() 호출
+    var tClear = document.getElementById('btn-token-clear');
+    if (tClear) tClear.onclick = (e)=> {
+      e.preventDefault();
+      runWithUiFeedback(tClear, () => clearAdminTokenJJ());
+    };
+  });
 </script>
 
 </body>
