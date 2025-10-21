@@ -21,7 +21,7 @@ env:
   PROJECT_ID: quali-journal-prod
   REGION: asia-northeast3
   SERVICE_NAME: quali-admin-domap
-  ENTRYPOINT: uvicorn server_quali:app --host 0.0.0.0 --port 8080
+  ENTRYPOINT: "uvicorn server_quali:app --host 0.0.0.0 --port 8080"
 
 jobs:
   # ✅ PR에서는 이 잡 하나가 몇 초 만에 성공  필수 체크 "Deploy to Cloud Run" 만족
@@ -79,8 +79,11 @@ jobs:
             --format='value(status.url)')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Service URL: $URL"
-
-      - name: Smoke check
+  - name: Force traffic to latest
+    if: github.ref == 'refs/heads/main'
+    run: |
+      gcloud run services update-traffic "\" --to-latest --region "\" --project "\"
+  - name: Smoke check
         continue-on-error: true
         env:
           URL: ${{ steps.url.outputs.url }}
@@ -99,5 +102,6 @@ jobs:
 
       - name: Echo done
         run: echo "✅ Deploy finished for $SERVICE_NAME in $REGION"
+
 
 
