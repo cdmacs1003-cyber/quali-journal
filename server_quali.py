@@ -249,7 +249,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in (os.getenv("ALLOWED_ORIGINS","").split(",")) if o.strip()] or ["https://admin.example.com"],
     allow_methods=["GET","POST","PATCH","OPTIONS"],
-    allow_headers=["Authorization","Content-Type"],
+    allow_headers=["Authorization","X-Admin-Token","Content-Type"],
     allow_credentials=True,
 )
 
