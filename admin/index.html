@@ -395,12 +395,27 @@ function toggleTheme(){
 
 /* 완전 로그아웃 */
 function clearAdminTokenJJ(){
-  localStorage.removeItem('ADMIN_TOKEN');
-  var ip = document.getElementById('adminToken'); if (ip) ip.value='';
-  updateAuthUI(false);
-  stopAutoRefresh();
-  location.reload();
+  try{
+    // 1) 토큰 제거 + 입력창 비우기
+    localStorage.removeItem('ADMIN_TOKEN');
+    var ip = document.getElementById('adminToken');
+    if (ip) ip.value = '';
+
+    // 2) 배지/버튼 상태 즉시 반영
+    updateAuthUI(false);
+    stopAutoRefresh();
+
+    // 3) 강제 페이지 리로드 없이, 즉시 상태 재조회
+    if (typeof refresh === 'function') { try{ refresh(); }catch(_){} }
+    if (typeof testToken === 'function') { try{ testToken(); }catch(_){} }
+
+    // 4) 피드백
+    if (typeof showToast === 'function') showToast('토큰 해제 완료','ok');
+  }catch(e){
+    if (typeof showToast === 'function') showToast('토큰 해제 실패: ' + (e?.message || e), 'err');
+  }
 }
+
 
 /* 날짜 기본값 */
 (function initToday(){
@@ -1130,27 +1145,41 @@ async function publishItem(id){
 })();
 </script>
 <script>
-  // (추가) 버튼 바인딩 보강 – 토큰 입력/해제, 새로고침, KPI 새로고침
-  document.addEventListener("DOMContentLoaded", function(){
-    // 상태 새로고침
-    var r = document.getElementById('btnRefresh');
-    if (r) r.onclick = (e)=> runWithUiFeedback(e.currentTarget, refresh);
-    // KPI 새로고침
-    var k = document.getElementById('btnKpiRefresh');
-    if (k) k.onclick = (e)=> runWithUiFeedback(e.currentTarget, refresh);
-    // 토큰 입력: saveAdminTokenJJ() 호출
-    var tSet = document.getElementById('btn-token-set');
-    if (tSet) tSet.onclick = (e)=> {
-      e.preventDefault();
-      runWithUiFeedback(tSet, () => saveAdminTokenJJ());
-    };
-    // 토큰 해제: clearAdminTokenJJ() 호출
-    var tClear = document.getElementById('btn-token-clear');
-    if (tClear) tClear.onclick = (e)=> {
-      e.preventDefault();
-      runWithUiFeedback(tClear, () => clearAdminTokenJJ());
-    };
-  });
+// 첫 화면에서도 바로 KPI/Ready를 한 번 갱신하고 새로고침 버튼을 연결합니다.
+document.addEventListener('DOMContentLoaded', function(){
+  try {
+    if (typeof refresh === 'function') {
+      refresh().catch?.(() => {});
+    }
+  } catch (_) {}
+  try {
+    if (typeof loadReady === 'function') {
+      loadReady().catch?.(() => {});
+    }
+  } catch (_) {}
+  // 상태 패널의 "새로고침" 버튼 연결
+  var refreshBtn = document.getElementById('btnRefresh');
+  if (refreshBtn && !refreshBtn.dataset.wired) {
+    refreshBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      if (typeof refresh === 'function') {
+        refresh().catch?.(() => {});
+      }
+    });
+    refreshBtn.dataset.wired = '1';
+  }
+  // Ready 패널의 "KPI 새로고침" 버튼 연결
+  var kpiBtn = document.getElementById('btnKpiRefresh');
+  if (kpiBtn && !kpiBtn.dataset.wired) {
+    kpiBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      if (typeof refresh === 'function') {
+        refresh().catch?.(() => {});
+      }
+    });
+    kpiBtn.dataset.wired = '1';
+  }
+});
 </script>
 
 </body>
