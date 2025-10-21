@@ -20,7 +20,7 @@ concurrency:
 env:
   PROJECT_ID: quali-journal-prod
   REGION: asia-northeast3
-  SERVICE_NAME: quali-journal-admin
+  SERVICE_NAME: quali-admin-domap
   ENTRYPOINT: uvicorn server_quali:app --host 0.0.0.0 --port 8080
 
 jobs:
@@ -99,4 +99,5 @@ jobs:
 
       - name: Echo done
         run: echo "✅ Deploy finished for $SERVICE_NAME in $REGION"
+
 
