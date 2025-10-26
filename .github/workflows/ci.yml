@@ -1,0 +1,60 @@
+name: CI-CD Cloud Run
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_REGION:     ${{ secrets.GCP_REGION }}
+  SERVICE_NAME:   ${{ secrets.CLOUD_RUN_SERVICE }}
+  IMAGE:          ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quali-images/admin:${{ github.sha }}
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Configure Artifact Registry auth
+        run: |
+          gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev -q
+
+      - name: Build & Push
+        run: |
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region:  ${{ secrets.GCP_REGION }}
+          image:   ${{ env.IMAGE }}
+          flags: >-
+            --allow-unauthenticated
+          env_vars: >-
+            ADMIN_TOKEN=${{ secrets.ADMIN_TOKEN }},
+            API_KEY=${{ secrets.API_KEY }},
+            DB_URL=${{ secrets.DB_URL }}
+
+      - name: Describe & get URL
+        id: desc
+        run: |
+          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$GCP_REGION" --format='value(status.url)')
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Cloud Run URL: $URL"
+
+      - name: Smoke test (200 / 401 기대)
+        run: |
+          URL="${{ steps.desc.outputs.url }}"
+          echo "[health] $(curl -s -o /dev/null -w "%{http_code}" "$URL/health")"
+          echo "[status-401] $(curl -s -o /dev/null -w "%{http_code}" "$URL/api/status")"
+          echo "[status-200] $(curl -s -o /dev/null -H "Authorization: Bearer ${{ secrets.ADMIN_TOKEN }}" -w "%{http_code}" "$URL/api/status")"
