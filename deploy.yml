@@ -1,0 +1,64 @@
+﻿name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# 동일 브랜치/이벤트가 겹치면 가장 최근 것만 유지
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID: quali-journal-prod
+  REGION: asia-northeast3            # ← SRC 리전
+  SERVICE_NAME: quali-journal-admin  # ← SRC 서비스
+  ENTRYPOINT: "uvicorn server_quali:app --host 0.0.0.0 --port 8080"
+
+jobs:
+  # PR에서는 배포하지 않고 통과용 체크만 수행
+  pr_check:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR no-op
+        run: echo "OK"
+
+  # main에서만 실제 빌드/배포
+  deploy:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          export_default_credentials: true
+
+      # Cloud Run Source Deploy: 빌드 + 배포
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region:  ${{ env.REGION }}
+          source:  .
+          build_env_vars: |
+            GOOGLE_ENTRYPOINT=${{ env.ENTRYPOINT }}
+
+
