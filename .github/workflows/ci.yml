@@ -4,11 +4,12 @@ on:
   push:
     branches: [ "main" ]
 
-# WIF 인증에 필요한 권한(필수)
+# WIF(OIDC) 인증용 권한
 permissions:
   contents: read
   id-token: write
 
+# 같은 브랜치에서 중복 실행되면 이전 작업 취소
 concurrency:
   group: cloud-run-${{ github.ref }}
   cancel-in-progress: true
@@ -17,7 +18,7 @@ env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GCP_REGION:     ${{ secrets.CLOUD_RUN_REGION }}
   SERVICE_NAME:   ${{ secrets.CLOUD_RUN_SERVICE }}
-  # Artifact Registry 이미지 경로(레포지토리 이름: quali)
+  # Artifact Registry 이미지 경로(리포지토리 이름은 'quali'라고 가정)
   IMAGE:          ${{ secrets.CLOUD_RUN_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quali/${{ secrets.CLOUD_RUN_SERVICE }}:${{ github.sha }}
 
 jobs:
@@ -28,7 +29,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── ① WIF로 GCP 인증(키 파일 없이)
+      # ① WIF로 GCP 인증(서비스 계정 키 파일 없이)
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
@@ -36,38 +37,39 @@ jobs:
           service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
           token_format: 'access_token'
 
-      # ── ② gcloud CLI 설정
+      # ② gcloud CLI 준비
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-          export_default_credentials: true
 
-      # ── ③ Artifact Registry 로그인
+      # ③ Artifact Registry 로그인
       - name: Configure Artifact Registry auth
-        run: |
-          gcloud auth configure-docker $GCP_REGION-docker.pkg.dev -q
+        run: gcloud auth configure-docker $GCP_REGION-docker.pkg.dev -q
 
-      # ── ④ Docker 빌드 & 푸시
+      # ④ Docker 빌드 & 푸시
       - name: Build & Push image
         run: |
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
 
-      # ── ⑤ Cloud Run 배포
+      # ⑤ Cloud Run 배포
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.SERVICE_NAME }}
           region:  ${{ env.GCP_REGION }}
           image:   ${{ env.IMAGE }}
+          # ADMIN_TOKEN은 Secret Manager로 연결(형식 충돌 방지)
           flags: >-
             --allow-unauthenticated
+            --remove-env-vars ADMIN_TOKEN
+            --set-secrets ADMIN_TOKEN=ADMIN_TOKEN:latest
+          # 일반 환경변수(필요 시 추가)
           env_vars: >-
-            ADMIN_TOKEN=${{ secrets.ADMIN_TOKEN }},
             API_KEY=${{ secrets.API_KEY }}
 
-      # ── ⑥ 배포 URL 확보
+      # ⑥ 배포 URL 확보
       - name: Describe & get URL
         id: desc
         shell: bash
@@ -76,13 +78,13 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Cloud Run URL: $URL"
 
-      # ── ⑦ 스모크 테스트 (기대값: 200 / 401 / 200)
-      - name: Smoke test (health/status)
+      # ⑦ 스모크 테스트(기대값: 200 / 401 / 200)
+      - name: Smoke test
         shell: bash
         run: |
           URL="${{ steps.desc.outputs.url }}"
           echo "::group::Smoke"
-          echo "[health]      $(curl -s -o /dev/null -w "%{http_code}" "$URL/health")"
-          echo "[status-401]  $(curl -s -o /dev/null -w "%{http_code}" "$URL/api/status")"
-          echo "[status-200]  $(curl -s -o /dev/null -H "Authorization: Bearer ${{ secrets.ADMIN_TOKEN }}" -w "%{http_code}" "$URL/api/status")"
+          echo "[health]     $(curl -s -o /dev/null -w "%{http_code}" "$URL/health")"
+          echo "[status-401] $(curl -s -o /dev/null -w "%{http_code}" "$URL/api/status")"
+          echo "[status-200] $(curl -s -o /dev/null -H "Authorization: Bearer ${{ secrets.ADMIN_TOKEN }}" -w "%{http_code}" "$URL/api/status")"
           echo "::endgroup::"
