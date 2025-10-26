@@ -4,57 +4,85 @@ on:
   push:
     branches: [ "main" ]
 
+# WIF 인증에 필요한 권한(필수)
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: cloud-run-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GCP_REGION:     ${{ secrets.CLOUD_RUN_REGION }}
   SERVICE_NAME:   ${{ secrets.CLOUD_RUN_SERVICE }}
-  IMAGE:          ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quali-images/admin:${{ github.sha }}
+  # Artifact Registry 이미지 경로(레포지토리 이름: quali)
+  IMAGE:          ${{ secrets.CLOUD_RUN_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quali/${{ secrets.CLOUD_RUN_SERVICE }}:${{ github.sha }}
 
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── ① WIF로 GCP 인증(키 파일 없이)
+      - name: Auth to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+          token_format: 'access_token'
+
+      # ── ② gcloud CLI 설정
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
           export_default_credentials: true
 
+      # ── ③ Artifact Registry 로그인
       - name: Configure Artifact Registry auth
         run: |
-          gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev -q
+          gcloud auth configure-docker $GCP_REGION-docker.pkg.dev -q
 
-      - name: Build & Push
+      # ── ④ Docker 빌드 & 푸시
+      - name: Build & Push image
         run: |
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
 
+      # ── ⑤ Cloud Run 배포
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.SERVICE_NAME }}
-          region:  ${{ secrets.GCP_REGION }}
+          region:  ${{ env.GCP_REGION }}
           image:   ${{ env.IMAGE }}
           flags: >-
             --allow-unauthenticated
           env_vars: >-
             ADMIN_TOKEN=${{ secrets.ADMIN_TOKEN }},
-            API_KEY=${{ secrets.API_KEY }},
-            DB_URL=${{ secrets.DB_URL }}
+            API_KEY=${{ secrets.API_KEY }}
 
+      # ── ⑥ 배포 URL 확보
       - name: Describe & get URL
         id: desc
+        shell: bash
         run: |
-          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$GCP_REGION" --format='value(status.url)')
-          echo "url=$URL" >> $GITHUB_OUTPUT
+          URL="$(gcloud run services describe "$SERVICE_NAME" --region "$GCP_REGION" --format='value(status.url)')"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Cloud Run URL: $URL"
 
-      - name: Smoke test (200 / 401 기대)
+      # ── ⑦ 스모크 테스트 (기대값: 200 / 401 / 200)
+      - name: Smoke test (health/status)
+        shell: bash
         run: |
           URL="${{ steps.desc.outputs.url }}"
-          echo "[health] $(curl -s -o /dev/null -w "%{http_code}" "$URL/health")"
-          echo "[status-401] $(curl -s -o /dev/null -w "%{http_code}" "$URL/api/status")"
-          echo "[status-200] $(curl -s -o /dev/null -H "Authorization: Bearer ${{ secrets.ADMIN_TOKEN }}" -w "%{http_code}" "$URL/api/status")"
+          echo "::group::Smoke"
+          echo "[health]      $(curl -s -o /dev/null -w "%{http_code}" "$URL/health")"
+          echo "[status-401]  $(curl -s -o /dev/null -w "%{http_code}" "$URL/api/status")"
+          echo "[status-200]  $(curl -s -o /dev/null -H "Authorization: Bearer ${{ secrets.ADMIN_TOKEN }}" -w "%{http_code}" "$URL/api/status")"
+          echo "::endgroup::"
