@@ -1,0 +1,84 @@
+name: Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use base URL if provided
+        id: base
+        shell: bash
+        run: |
+          if [ -n "${SMOKE_BASE_URL}" ]; then
+            echo "url=${SMOKE_BASE_URL}" >> $GITHUB_OUTPUT
+          else
+            echo "url=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Auth to Google Cloud (WIF, optional)
+        if: steps.base.outputs.url == ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Setup gcloud
+        if: steps.base.outputs.url == ''
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve service URL via gcloud
+        if: steps.base.outputs.url == ''
+        id: resolve
+        shell: bash
+        run: |
+          URL=$(gcloud run services describe ${{ secrets.CLOUD_RUN_SERVICE }} \n            --project ${{ secrets.GCP_PROJECT_ID }} --region ${{ secrets.CLOUD_RUN_REGION }} \n            --format='value(status.url)')
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Ping /health
+        id: health
+        shell: bash
+        env:
+          URL: ${{ steps.base.outputs.url || steps.resolve.outputs.url }}
+        run: |
+          set -e
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "${URL}/health")
+          echo "code=${CODE}" >> $GITHUB_OUTPUT
+          if [ "$CODE" != "200" ]; then
+            echo 'Health not 200'
+            exit 1
+          fi
+
+      - name: /api/status (token)
+        shell: bash
+        env:
+          URL: ${{ steps.base.outputs.url || steps.resolve.outputs.url }}
+          TOKEN: ${{ secrets.ADMIN_TOKEN_PLAIN }}
+        run: |
+          set -e
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "${URL}/api/status")
+          if [ "$CODE" != "200" ]; then
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Admin-Token: ${TOKEN}" "${URL}/api/status")
+          fi
+          test "$CODE" = "200"
+
+      - name: /api/report (POST)
+        shell: bash
+        env:
+          URL: ${{ steps.base.outputs.url || steps.resolve.outputs.url }}
+          TOKEN: ${{ secrets.ADMIN_TOKEN_PLAIN }}
+        run: |
+          set -e
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "X-Admin-Token: ${TOKEN}" -H 'Content-Length: 0' "${URL}/api/report")
+          test "$CODE" = "200"
