@@ -1,0 +1,7 @@
+!.gcloudignore
+!index_lite_black.html
+!*.py
+!**/*.py
+
+!index.html
+!**/*.html
