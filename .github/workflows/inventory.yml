@@ -1,0 +1,34 @@
+name: Inventory
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 18 * * *'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build inventory
+        run: |
+          mkdir -p _inventory _meta docs tools
+          python3 - <<'PY'
+import os, json, hashlib, subprocess
+from pathlib import Path
+root = Path('.')
+items=[]
+for p in root.rglob('*'):
+  if p.is_file() and not any(str(p).startswith(x) for x in ['.git/']):
+    h=hashlib.sha256(p.read_bytes()).hexdigest()
+    items.append({"path": str(p).replace('\\','/'), "sha256": h, "size": p.stat().st_size, "component": "unknown", "anchors": []})
+Path('_inventory/inventory.json').write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2))
+Path('_meta/build.json').write_text(json.dumps({"generated_at": __import__('datetime').datetime.utcnow().isoformat()+ 'Z'}, indent=2))
+PY
+      - name: Commit inventory
+        run: |
+          git config user.name "quali-bot"
+          git config user.email "quali-bot@example.com"
+          git add _inventory/inventory.json _meta/build.json
+          git commit -m "chore: update inventory and build snapshot" || echo "no changes"
+      - name: Verify (placeholder)
+        run: echo ok

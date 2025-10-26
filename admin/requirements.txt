@@ -1,9 +1,0 @@
-﻿aiofiles>=23.2
-beautifulsoup4
-fastapi==0.115.4
-feedparser
-jinja2>=3.1
-lxml
-python-dotenv==1.0.1
-requests
-uvicorn[standard]==0.30.6
