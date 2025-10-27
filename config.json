@@ -62,14 +62,11 @@
     }
   },
   "external_rss": {
-    "gate_required": 15,
     "enabled": true,
     "max_total": 50
   },
   "features": {
-    "use_value_gate": true,
     "require_editor_approval": true,
-    "publish_requires_editor": true,
     "trusted_domains": [
       "ipc.org",
       "ecss.nl",
@@ -81,15 +78,14 @@
       "nist.gov",
       "eeworld.com.cn",
       "nasa.gov"
-    ],
-    "gate_required": 15
+    ]
   },
   "policy": {
     "freshness_required": false,
     "min_core_tokens": 1,
     "min_context_tokens": 1
   },
-  "paths": {
+    "paths": {
     "archive": "archive",
     "reports": "archive/reports",
     "selection_file": "selected_articles.json",
@@ -101,5 +97,10 @@
     "keywords_txt": "keywords.txt",
     "smt_sources_file": "smt_sources.json",
     "supply_sources_file": "supply_sources.json"
-  }
+  },
+  "gate_required": 70,
+  "url_timeout_ms": 3000,
+  "url_redirect_hops": 3,
+  "data_dir": "data"
 }
+

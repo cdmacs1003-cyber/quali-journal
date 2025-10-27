@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-QualiJournal Orchestrator
+QualiJournal Orchestrator (fixed)
 - 공식(official)·커뮤니티(community) 소스 수집, 선별/승인, 발행(HTML/MD/JSON)
 - 키워드 기반 선별/발행 및 키워드 히스토리 생성
 - 외부 의존(common_utils/logging_setup/qj_paths)이 없어도 안전하게 동작
@@ -53,7 +53,7 @@ except Exception:
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/127.0 Safari/537.36 QualiNewsBot/2025-10"
+    "Chrome/127 Safari/537.36 QualiNewsBot/2025-10"
 )
 REQUEST_TO = (8, 16)  # (connect timeout, read timeout)
 
@@ -121,6 +121,17 @@ def _save_json(path: str, data):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def _ensure_json_file(path: str):
+    """SSOT JSON이 없으면 폴더를 만들고 빈 구조로 생성."""
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"articles": []}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        # 무중단 운영을 위해 조용히 넘어감
+        pass
 
 def _find_first(cands: List[str]) -> Optional[str]:
     for p in cands:
@@ -196,10 +207,10 @@ def _value_score(kw_raw: int, upvotes: int, views: int, cfg: dict) -> float:
     c = (cfg.get("community") or {})
     W = (c.get("score_weights") or {"keyword": 3, "upvotes": 5, "views": 2})
     N = (c.get("norms") or {"kw_base": 2, "upvotes_max": 200, "views_max": 100000})
-    kw = min(1.0, (kw_raw or 0) / max(1, int(N.get("kw_base", 2))))
+    keyword = min(1.0, (kw_raw or 0) / max(1, int(N.get("kw_base", 2))))
     up = _norm01_log(upvotes or 0, int(N.get("upvotes_max", 200)))
     vw = _norm01_log(views or 0, int(N.get("views_max", 100000)))
-    return float(W.get("keyword", 3)) * kw + float(W.get("upvotes", 5)) * up + float(W.get("views", 2)) * vw
+    return float(W.get("keyword", 3)) * keyword + float(W.get("upvotes", 5)) * up + float(W.get("views", 2)) * vw
 
 # =============================== VALUE GATE ===============================
 def _safe_load_json(path: str) -> dict:
@@ -289,7 +300,7 @@ def compute_value_score(a: dict, cfg: dict) -> tuple[float, dict]:
     has_std = _standards_coverage(blob, rules, syn)
     dtp = _guess_doc_type(url)
     sc_domain = _domain_trust(url, rules)
-    sc_doc    = _doc_type_score(dtp, rules, has_std >= 0.6)
+    sc_doc    = _doc_type_score(dtp, rules, has_standard = has_std >= 0.6)
     sc_std    = has_std
     sc_depth  = _tech_depth(blob)
     sc_cite   = _citations(blob)
@@ -368,6 +379,7 @@ def write_selection_official(articles: List[Dict], cfg: dict) -> str:
             "approved": bool(old.get("approved", False)),
             "selected": bool(old.get("selected", False)),
             "pinned": bool(old.get("pinned", False)),
+            "pin_ts": int(old.get("pin_ts", 0)),
             "editor_note": (old.get("editor_note") or "")
         })
     _save_json(path, out)
@@ -586,7 +598,7 @@ def collect_community(cfg: dict) -> List[Dict]:
 
     # 키워드
     kw_list = _read_lines(cpaths.get("keywords_txt"))
-    require_kw = bool(filters.get("require_keyword") or comm_cfg.get("require_keyword") or False)
+    require_keyword = bool(filters.get("require_keyword") or comm_cfg.get("require_keyword") or False)
 
     items: List[Dict] = []
 
@@ -613,10 +625,10 @@ def collect_community(cfg: dict) -> List[Dict]:
             combined_text = (title or "") + " " + (r.get("selftext") or "")
             kw_hits = 0
             t = combined_text.lower()
-            for kw in kw_list:
-                if kw.lower() in t:
+            for keyword in kw_list:
+                if keyword.lower() in t:
                     kw_hits += 1
-            if require_kw and kw_hits <= 0:
+            if require_keyword and kw_hits <= 0:
                 continue
             # --- Value Gate로 재점수화 ---
             tmp_article = {
@@ -643,8 +655,7 @@ def collect_community(cfg: dict) -> List[Dict]:
                 "total_score": vscore,            # 기존 정렬 호환
                 "section": "커뮤니티",
                 "state": state,                   # candidate / ready
-                "approved": False,
-                "selected": False
+                "approved": False
             })
 
 
@@ -668,10 +679,10 @@ def collect_community(cfg: dict) -> List[Dict]:
                 continue
             kw_hits = 0
             t = (title or "").lower()
-            for kw in kw_list:
-                if kw.lower() in t:
+            for keyword in kw_list:
+                if keyword.lower() in t:
                     kw_hits += 1
-            if require_kw and kw_hits <= 0:
+            if require_keyword and kw_hits <= 0:
                 continue
             score = _value_score(kw_hits, int(e.get("upvotes", 0)), int(e.get("views", 0)), cfg)
             if score < thr:
@@ -688,8 +699,7 @@ def collect_community(cfg: dict) -> List[Dict]:
                 "kw_hits": kw_hits,
                 "total_score": round(float(score), 3),
                 "section": "커뮤니티",
-                "approved": False,
-                "selected": False
+                "approved": False
             })
 
     # dedupe & sort
@@ -1034,8 +1044,11 @@ def build_keyword_selection(keyword: str, cfg: dict | None = None, use_external_
     pats: List[re.Pattern] = []
     # (필요 시 여기서 동의어/패턴을 더 추가)
 
-    official = _load_json_safe(_os_rel("selected_articles.json"), {"articles": []})
-    community = _load_json_safe(_os_rel("archive", "selected_community.json"), {"articles": []})
+    # SSOT 경로(공식/커뮤니티)를 cfg에서 읽어 사용
+    off_path = _sel_official_path(cfg)
+    com_path = _sel_path(cfg)
+    official  = _load_json_safe(off_path, {"articles": []})
+    community = _load_json_safe(com_path, {"articles": []})
 
     candidates: list[dict] = []
     candidates.extend(official.get("articles", []))
@@ -1313,10 +1326,14 @@ def load_config() -> dict:
 # ---------------------------------------------------------------------
 # 키워드 자동 승인(상위 N)
 # ---------------------------------------------------------------------
-def _auto_approve_keyword(kw: str, top_n: int = 15, min_score: float = 0.0):
-    if not kw:
+def _auto_approve_keyword(keyword: str, top_n: int, min_score: float = 0.0, cfg=None):
+    # cfg 미전달 시 자체 로드
+    if cfg is None:
+        cfg = load_config()
+
+    if not keyword:
         raise ValueError("키워드를 입력해 주세요.")
-    pats = _safe_regex_list([re.escape(kw)])
+    pats = _safe_regex_list([re.escape(keyword)])
 
     def _load(p, d):
         try:
@@ -1343,7 +1360,7 @@ def _auto_approve_keyword(kw: str, top_n: int = 15, min_score: float = 0.0):
             ])
             t = text.lower()
             score = float(a.get("total_score") or a.get("qg_score") or 0)
-            if kw.lower() in t or any(p.search(text) for p in pats):
+            if keyword.lower() in t or any(p.search(text) for p in pats):
                 if score >= min_score:
                     rows.append((score, a))
         rows.sort(key=lambda x: x[0], reverse=True)
@@ -1357,6 +1374,16 @@ def _auto_approve_keyword(kw: str, top_n: int = 15, min_score: float = 0.0):
     for a in com.get("articles", []):
         if a.get("id") in ids:
             a["approved"] = True
+
+    # SSOT 경로 계산
+    off_p = _sel_official_path(cfg)
+    com_p = _sel_path(cfg)
+
+    # 보장 및 저장
+    os.makedirs(os.path.dirname(off_p) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(com_p) or ".", exist_ok=True)
+    _ensure_json_file(off_p)
+    _ensure_json_file(com_p)
 
     with open(off_p, "w", encoding="utf-8") as wf:
         json.dump(off, wf, ensure_ascii=False, indent=2)
@@ -1452,6 +1479,10 @@ def main(argv=None):
     ap.add_argument("--approve-keyword-top", type=int, default=0, help="Auto-approve top N (keyword)")
     ap.add_argument("--approve-keyword", type=str, default="", help="Keyword to auto-approve")
     ap.add_argument("--use-external-rss", action="store_true", help="Use external RSS for keyword selection")
+    # SSOT 경로(선정본 JSON) 고정/변경 옵션
+    ap.add_argument("--selected-json", type=str, default="", help="Path to official selection json (SSOT, default=/app/selected_articles.json)")
+    ap.add_argument("--community-json", type=str, default="", help="Path to community selection json (default=/app/archive/selected_community.json)")
+
     # 키워드 히스토리
     ap.add_argument("--collect-keyword-history", type=str, default="", help="Collect keyword history (timeline)")
     # 트렌드 데이터 갱신(옵션)
@@ -1465,6 +1496,18 @@ def main(argv=None):
 
     args = ap.parse_args(argv)
     cfg = load_config()
+    
+    # CLI로 들어온 경로를 cfg.paths에 반영(SSOT)
+    if args.selected_json:
+        cfg.setdefault("paths", {})["selection_file"] = args.selected_json
+    if args.community_json:
+        cfg.setdefault("paths", {})["community_selection_file"] = args.community_json
+    # SSOT 파일이 없으면 자동 생성(안전)
+    try:
+        _ensure_json_file(_sel_official_path(cfg))
+        _ensure_json_file(_sel_path(cfg))
+    except Exception:
+        pass
 
     # 트렌드 데이터 외부 도구 사용(있을 때만)
     if args.update_trend_data:
@@ -1491,7 +1534,12 @@ def main(argv=None):
         return
 
     if args.approve_keyword_top > 0 and args.approve_keyword:
-        _auto_approve_keyword(args.approve_keyword, args.approve_keyword_top, min_score=0.0)
+        _auto_approve_keyword(
+            args.approve_keyword,
+            args.approve_keyword_top,
+            min_score=0.0,
+            cfg=cfg  # ← 전달
+        )
         return
 
     # 공식

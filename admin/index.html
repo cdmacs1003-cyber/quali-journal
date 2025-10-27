@@ -1,117 +1,90 @@
 <!doctype html>
-<html lang="ko" data-theme="light">
+<html lang="ko">
 <head>
-<style id="toast-style">
-  #toast{
-    position:fixed; right:16px; bottom:16px; z-index:10000; display:none;
-    padding:10px 12px; border-radius:10px; border:1px solid #1f2937;
-    background:#0b0e12; color:#e9eef5; font:13px/1.4 system-ui
-  }
-  #toast.ok{ border-color:#10b981 }
-  #toast.err{ border-color:#ef4444 }
-</style>
 
-<style id="preview-mark-style">
-  #previewBody mark{
-    background:#fde68a; color:inherit; border-radius:3px; padding:0 1px;
-  }
-</style>
-<style id="preview-fade-style">
-  #previewModal{ opacity:0; transition:opacity .18s ease; }
-  #previewModal.on{ opacity:1; }
-  #previewModal .panel{ transition:transform .18s ease, opacity .18s ease; transform:translateY(8px); opacity:.98; }
-  #previewModal.on .panel{ transform:translateY(0); opacity:1; }
-</style>
-
+  
   <meta charset="utf-8"/>
   <title>QualiJournal — Admin (Unified)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
   <!-- 기본 UI 스타일 -->
-  <style>
-    :root{
-      --bg:#ffffff; --ink:#1a1d20; --muted:#64748b; --line:#e2e8f0;
-      --card:#ffffff; --panel:#f8fafc; --acc:#2563eb; --ok:#24c08b;
-      --warn:#f0b600; --err:#ef4444;
-    }
-    [data-theme="dark"]{
-      --bg:#0b0e12; --ink:#e9eef5; --muted:#8ea1b2; --line:#223047;
-      --card:#10161d; --panel:#0f141b; --acc:#1e90ff; --ok:#24c08b;
-      --warn:#f0b600; --err:#ff6b6b;
-    }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--ink);
-      font:14px/1.6 ui-sans-serif,system-ui,Segoe UI,Apple SD Gothic Neo,Malgun Gothic,sans-serif}
-    header{padding:16px 20px;border-bottom:1px solid var(--line);
-      display:flex;justify-content:space-between;align-items:center}
-    h1{font-size:18px;margin:0}
-    .sub{color:var(--muted);font-size:12px}
-    main{padding:16px;display:grid;grid-template-columns:300px 1fr;gap:16px}
-    @media (max-width:900px){ main{grid-template-columns:1fr} }
-    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
-    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
-    input,button{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
-    button{cursor:pointer}
-    button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
-    button.ok{background:var(--ok);border-color:var(--ok);color:#041b12}
-    #log{white-space:pre-wrap;background:var(--panel);border:1px dashed var(--line);
-      padding:10px;border-radius:8px;margin-top:8px;max-height:48vh;overflow:auto}
-    .kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-    .kpi .box{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px}
-    .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
-      color:var(--muted);font-size:12px;background:var(--panel)}
-    a.pill{color:var(--acc);text-decoration:none}
-    /* 모달 */
-    #jobModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999}
-    #jobCard{max-width:780px;margin:60px auto;background:var(--card);
-      border:1px solid var(--line);border-radius:12px;padding:14px}
-    .steps{margin-top:10px}
-    .task-log{border-left:4px solid var(--line);padding:8px 10px;margin:6px 0;background:var(--panel);border-radius:8px;font:12px/1.5 ui-monospace,Consolas,monospace}
-    .meta{color:var(--muted);font-size:12px}
-    canvas{width:100%;height:140px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
-    /* 비동기 패널 */
-    .task-panel{border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0;background:var(--panel)}
-    .task-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
-    .sse-log{background:#0a0f1a;color:#d2e3ff;border-radius:8px;padding:10px;height:240px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace}
-    .btn{padding:8px 12px;border:1px solid #5a6aa6;border-radius:8px;background:#0f1730;color:#d2e3ff;cursor:pointer}
-    .btn:hover{background:#16224a}
-    .muted{color:#9fb2ff;font-size:12px}
-    .kwin{padding:8px 10px;border:1px solid #5a6aa6;border-radius:8px;background:#0f1730;color:#d2e3ff}
-  </style>
-
-  <!-- 모든 /api/* 요청에 ADMIN 토큰 자동 부착 (절대·상대 URL 모두 지원) -->
+     
+  <!-- 모든 /api/* 요청에 ADMIN 토큰 자동 부착 (절대·상대 URL/Request 입력 지원) -->
   <script>
+  /* Authorization + X-Admin-Token 둘 다 부착, 중복 방지 */
   (function () {
-    function getToken(){ return (localStorage.getItem('ADMIN_TOKEN') || '').trim(); }
-    const _fetch = window.fetch.bind(window);
-    window.fetch = function(input, init){
-      init = init || {};
-      let reqUrl;
-      try{
-        const raw = (typeof input === 'string') ? input : (input && input.url) || '';
-        reqUrl = new URL(raw, location.origin);
-      }catch(_){
-        reqUrl = new URL(String(input || ''), location.origin);
+    const _origFetch = window.fetch.bind(window);
+
+    function getAdminToken() {
+      try {
+        const t = (typeof window.getToken === "function")
+          ? window.getToken()
+          : (localStorage.getItem("ADMIN_TOKEN") || "");
+        return (t || "").trim();
+      } catch (_) { return ""; }
+    }
+    function makeUrl(input) {
+      try {
+        const raw = (typeof input === "string") ? input : (input && input.url) || "";
+        return new URL(raw, location.origin);
+      } catch (_) {
+        return new URL(String(input || ""), location.origin);
       }
-      const isApi = !!(reqUrl && reqUrl.pathname && reqUrl.pathname.startsWith('/api/'));
-      const headers = new Headers(init.headers || {});
-      const tok = getToken();
-      if (isApi && tok && !headers.has('Authorization')) {
-        headers.set('Authorization', 'Bearer ' + tok);
+    }
+
+    window.fetch = function (input, init) {
+      init = init || {};
+      const urlObj = makeUrl(input);
+      const isApi  = !!(urlObj && urlObj.pathname && urlObj.pathname.startsWith("/api/"));
+
+      // 기존 헤더 + 새 헤더 병합
+      const headers = new Headers(
+        init.headers || (input instanceof Request ? input.headers : undefined) || {}
+      );
+
+      const tok = getAdminToken();
+      if (isApi && tok) {
+        if (!headers.has("Authorization"))  headers.set("Authorization",  "Bearer " + tok);
+        if (!headers.has("X-Admin-Token")) headers.set("X-Admin-Token", tok);
       }
       init.headers = headers;
+
+      // URL 문자열 또는 Request 재생성
+      let request = urlObj.toString();
       if (input instanceof Request) {
-        input = new Request(reqUrl.toString(), init);
-        return _fetch(input);
+        request = new Request(urlObj.toString(), init);
       }
-      return _fetch(reqUrl.toString(), init);
+
+      const p = _origFetch(request, init);
+      // /api/status 성공 시 카운트다운 리셋
+      try {
+        p.then((res) => {
+          try {
+            const path = urlObj.pathname || "";
+            if (path.indexOf("/api/status") >= 0 && res && res.ok && typeof window.__resetKpiCountdown === "function") {
+              window.__resetKpiCountdown();
+            }
+          } catch (_e) {}
+        });
+      } catch (_) {}
+      return p;
     };
   })();
   </script>
 
+<link href="assets/style.css" rel="stylesheet">
 </head>
 <body>
+
+<!-- ===== Quick Tools (approve / repair) ===== -->
+<div id="quick-tools" style="margin:12px 0;padding:10px;border:1px dashed #bbb;border-radius:10px;background:#fafafa">
+  <strong style="margin-right:10px">빠른 도구:</strong>
+  <button id="btnApproveTop" style="margin-right:6px">상위 N 자동 승인</button>
+  <button id="btnRepair">선정본 복구</button>
+  <span id="qt-msg" style="margin-left:12px;color:#666;font-size:12px"></span>
+</div>
+<!-- ========================================= -->
+
 <!-- === BUILD BADGE (auto-stamp, KST) === -->
 <div id="build-badge" style="position:fixed;top:6px;left:12px;z-index:9999;font:12px/1.4 system-ui;">
   <span id="build-text" style="padding:2px 6px;border-radius:6px;background:#eef;color:#111;"></span>
@@ -148,12 +121,17 @@
   <section class="card" aria-labelledby="sec-status">
     <h3 id="sec-status">상태</h3>
     <div class="row">
-      <input id="date" aria-label="날짜"/>
+      <input id="date" type="date" aria-label="날짜"/>
       <input id="kw" aria-label="키워드" placeholder="키워드 입력"/>
       <button id="btnRefresh" class="primary" data-action="status:refresh">새로고침</button>
       <!-- AUTO-REFRESH TOGGLE (idempotent) -->
       <div class="row" id="autoRefreshRow" style="gap:8px">
         <label for="autoRefreshToggle" class="pill">자동 새로고침(30초)</label>
+        <!-- 카운트다운 표시(멱등) -->
+        <span id="autoRefreshCountdown"
+              style="margin-left:.5rem;font-weight:600"
+              aria-live="polite"></span>
+
         <input id="autoRefreshToggle" type="checkbox" onchange="toggleAutoRefresh(this.checked)">
       </div>
 
@@ -208,8 +186,14 @@
     <h4>키워드 특집</h4>
     <div class="row">
       <button class="ok" onclick="runKeyword()">수집→승인Top20→발행</button>
+      <button id="btn-collect-only" style="margin-left:8px;">수집만</button>
     </div>
-
+    <div class="row" style="margin-top:4px;">
+      <label>
+        <input type="checkbox" id="chk-ext-rss"> 외부 RSS 사용
+      </label>
+    </div>
+    
     <h4>작업 모니터</h4>
     <div class="row">
       <button onclick="showRecent()">최근 작업</button>
@@ -226,7 +210,8 @@
       <button onclick="exportMd()">MD 내보내기</button>
       <button onclick="exportCsv()">CSV 내보내기</button>
     </div>
-
+    <!-- READY 고정 슬롯 (보고서·요약·내보내기 바로 아래) -->
+    <div id="ready-slot" style="margin-top:12px"></div>
     <p id="resultRow" style="margin-top:8px; display:none;">
       결과: <a id="outLink" href="#" target="_blank" rel="noopener" download>열기</a>
     </p>
@@ -295,7 +280,18 @@ function showToast(msg, type){
 }
 function el(id){ return document.getElementById(id); }
 function getCss(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-function escapeHtml(s){ return (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function escapeHtml(s){
+  // HTML 이스케이프에 작은따옴표와 큰따옴표도 포함하여 XSS를 예방합니다.
+  return (s||'').replace(/[&<>"']/g, function(c) {
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[c];
+  });
+}
 
 /* API BASE 자동 설정 */
 let API_BASE =
@@ -309,9 +305,10 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 /* 보호 API 헤더 — 입력칸 값은 무시하고 localStorage만 신뢰 */
+
 function authHeaders(){
   var t = (localStorage.getItem('ADMIN_TOKEN') || '').trim();
-  return t ? { Authorization: 'Bearer ' + t } : {};
+  return t ? { Authorization: 'Bearer ' + t, 'X-Admin-Token': t } : {};
 }
 
 /* 토큰 상태 UI */
@@ -365,6 +362,10 @@ if(!window.testToken){
       const auto = (localStorage.getItem('AUTO_REFRESH')==='1');
       // 상태 API는 토큰 유무와 상관없이 호출 가능하므로 r.ok 기준으로 자동 새로고침을 제어한다.
       if(res.ok && auto) startAutoRefresh(); else stopAutoRefresh();
+      // 토큰 검증 후 비동기 작업 지원 여부 갱신
+      if (typeof checkTasks === 'function') {
+        try { await checkTasks(); } catch (_e) {}
+      }
     }catch(e){
       updateAuthUI(false);
       stopAutoRefresh();
@@ -395,12 +396,27 @@ function toggleTheme(){
 
 /* 완전 로그아웃 */
 function clearAdminTokenJJ(){
-  localStorage.removeItem('ADMIN_TOKEN');
-  var ip = document.getElementById('adminToken'); if (ip) ip.value='';
-  updateAuthUI(false);
-  stopAutoRefresh();
-  location.reload();
+  try{
+    // 1) 토큰 제거 + 입력창 비우기
+    localStorage.removeItem('ADMIN_TOKEN');
+    var ip = document.getElementById('adminToken');
+    if (ip) ip.value = '';
+
+    // 2) 배지/버튼 상태 즉시 반영
+    updateAuthUI(false);
+    stopAutoRefresh();
+
+    // 3) 강제 페이지 리로드 없이, 즉시 상태 재조회
+    if (typeof refresh === 'function') { try{ refresh(); }catch(_){} }
+    if (typeof testToken === 'function') { try{ testToken(); }catch(_){ } }
+
+    // 4) 피드백
+    if (typeof showToast === 'function') showToast('토큰 해제 완료','ok');
+  }catch(e){
+    if (typeof showToast === 'function') showToast('토큰 해제 실패: ' + (e?.message || e), 'err');
+  }
 }
+
 
 /* 날짜 기본값 */
 (function initToday(){
@@ -418,25 +434,121 @@ function showLink(p){
 
 /* KPI 새로고침 트리거는 startAutoRefresh()가 담당 */
 
-/* KPI 새로고침 실제 로직 */
+/* KPI 새로고침 실제 로직 — 안정/멱등/카운트다운 연동 */
 async function refresh(){
-  var date=el('date').value.trim(), kw=el('kw').value.trim();
+  // -------- 공통 유틸(안전하게 DOM 업데이트) --------
+  const setText = (id, v) => { const n = el(id); if (n) n.textContent = (v ?? v === 0) ? v : '-'; };
+  const safeNum = (v, d=0) => (typeof v === 'number' && isFinite(v)) ? v : d;
+
+  // -------- 입력 값 확보 --------
+  const dateEl = el('date'), kwEl = el('kw');
+  const date = (dateEl?.value || '').trim();
+  const kw   = (kwEl?.value   || '').trim();
+
+  // -------- 상태표시(UI 버튼 잠깐 비활성 — 선택) --------
+  const btn = document.getElementById('btnKpiRefresh');
+  if (btn && !btn.dataset.busy) { btn.dataset.busy = '1'; btn.disabled = true; }
+
   try{
-    var r = await fetch(API_BASE+'/api/status?date='+encodeURIComponent(date)+'&keyword='+encodeURIComponent(kw), { headers: authHeaders() });
-    var j = await r.json();
-    el('selTotal').textContent=j.selection_total??'-';
-    el('selApproved').textContent=j.selection_approved??'-';
-    el('cntCandidate').textContent=(j.state_counts&&j.state_counts.candidate)||0;
-    el('cntReady').textContent=(j.state_counts&&j.state_counts.ready)||0;
-    el('cntRejected').textContent=(j.state_counts&&j.state_counts.rejected)||0;
-    el('comTotal').textContent=j.community_total??'-';
-    el('kwTotal').textContent=j.keyword_total??'-';
-    el('gateReq').textContent=j.gate_required??15;
-    el('gatePass').textContent=j.gate_pass?'통과':'미통과';
-    var gs=el('gateSlider'), gv=el('gateVal'); if(gs) gs.value=j.gate_required??15; if(gv) gv.textContent=j.gate_required??15;
-    showToast('상태 갱신 완료','ok');
-  }catch(e){ el('log').textContent='상태 오류: '+e; }
+    // -------- 요청 준비 --------
+    const qs = new URLSearchParams({ date, keyword: kw }).toString();
+    const url = `${API_BASE}/api/status?${qs}`;
+
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { ...authHeaders(), 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+
+    // -------- 오류 처리 --------
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { const t = await res.text(); if (t) msg += `: ${t.slice(0,200)}`; } catch(_) {}
+      throw new Error(msg);
+    }
+
+    // -------- 응답 파싱 --------
+    const j = await res.json();
+
+    // -------- KPI 숫자 업데이트(없으면 0/대시) --------
+    setText('selTotal',     safeNum(j.selection_total, 0));
+    setText('selApproved',  safeNum(j.selection_approved, 0));
+
+    const sc = j?.state_counts || {};
+    setText('cntCandidate', safeNum(sc.candidate, 0));
+    setText('cntReady',     safeNum(sc.ready, 0));
+    setText('cntRejected',  safeNum(sc.rejected, 0));
+
+    setText('comTotal',     safeNum(j.community_total, 0));
+    setText('kwTotal',      safeNum(j.keyword_total, 0));
+
+    const gateRequired = safeNum(j.gate_required, 15);
+    setText('gateReq', gateRequired);
+    setText('gatePass', j.gate_pass ? '통과' : '미통과');
+
+    const gs = el('gateSlider');
+    const gv = el('gateVal');
+    if (gs) gs.value = gateRequired;
+    if (gv) gv.textContent = gateRequired;
+
+    // -------- 사용자 알림 --------
+    showToast('상태 갱신 완료', 'ok');
+
+    // -------- 카운트다운 표시 리셋(있을 때만) --------
+    if (window.__resetKpiCountdown) window.__resetKpiCountdown();
+
+    return j; // 필요 시 호출측에서 활용
+
+  } catch (e) {
+    // -------- 실패 표시 --------
+    showToast('상태 갱신 실패', 'err');
+    const log = el('log');
+    if (log) log.textContent = '상태 오류: ' + (e?.message || e);
+    throw e;
+
+  } finally {
+    // -------- 버튼 복구 --------
+    if (btn && btn.dataset.busy) { delete btn.dataset.busy; btn.disabled = false; }
+  }
 }
+
+/* ===== Auto-Refresh Countdown (멱등) ===== */
+(function () {
+  if (window.__autoRefreshCountdownInstalled) return;
+  window.__autoRefreshCountdownInstalled = true;
+
+  var REFRESH_INTERVAL_SEC = 30;
+  var sec = REFRESH_INTERVAL_SEC, timer = null;
+  function $(id){ return document.getElementById(id); }
+  function draw(){
+    var el = $('autoRefreshCountdown');
+    if (el) el.textContent = '(' + String(sec).padStart(2,'0') + '초 남음)';
+  }
+  function stop(){ if (timer){ clearInterval(timer); timer=null; } }
+  function start(){ stop(); sec = REFRESH_INTERVAL_SEC; draw(); timer = setInterval(function(){ sec = Math.max(0, sec-1); draw(); }, 1000); }
+  // 밖에서 성공 시 리셋할 수 있는 훅
+  window.__resetKpiCountdown = function(){ sec = REFRESH_INTERVAL_SEC; draw(); };
+
+  // 자동 새로고침 시작/정지에 후킹(기존 기능은 그대로)
+  if (typeof window.startAutoRefresh === 'function') {
+    var _start = window.startAutoRefresh;
+    window.startAutoRefresh = function(){ var r = _start.apply(this, arguments); start(); return r; };
+  }
+  if (typeof window.stopAutoRefresh === 'function') {
+    var _stop = window.stopAutoRefresh;
+    window.stopAutoRefresh = function(){ stop(); return _stop.apply(this, arguments); };
+  }
+
+  // 카운트다운 리셋은 통합 fetch 래퍼에서 처리하므로 이곳에서 다시 fetch를 재정의하지 않습니다.
+
+  // 첫 진입 시 토글 상태에 맞춰 표시
+  document.addEventListener('DOMContentLoaded', function(){
+    try{
+      var on = (localStorage.getItem('AUTO_REFRESH') ?? '1') === '1';
+      if (on) start(); else { stop(); draw(); }
+    }catch(_){}
+  });
+})();
 
 /* 게이트 임계값 업데이트 */
 async function updateGate(val){
@@ -488,7 +600,17 @@ async function genReport(){
       method:'POST', headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
       body: JSON.stringify({date:date, keyword:kw})
     });
-    var j=await res.json(); if(j.path) showLink(j.path);
+    var j=await res.json();
+    if(j.path){
+      showLink(j.path);
+      // Quick Panel: update report link
+      var link = document.getElementById('linkReport');
+      if (link) {
+        link.href = absUrl(j.path);
+        link.textContent = '보고서 열기';
+        link.style.display = 'block';
+      }
+    }
     el('log').textContent=JSON.stringify(j,null,2);
     // 보고서 생성 성공 토스트
     showToast('보고서 생성 완료','ok');
@@ -500,7 +622,12 @@ async function genReport(){
 }
 async function enrichKeyword(){
   var kw=el('reportKw').value.trim() || el('kw').value.trim();
-  if(!kw){ alert('키워드를 입력하세요'); return; }
+  if(!kw){ showToast('키워드를 입력하세요','err'); return; }
+  // 토큰 확인
+  if(!(localStorage.getItem('ADMIN_TOKEN')||'').trim()){
+    showToast('토큰을 입력해주세요','err');
+    return;
+  }
   try{
     var res=await fetch(API_BASE+'/api/enrich/keyword',{
       method:'POST', headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
@@ -510,6 +637,13 @@ async function enrichKeyword(){
     if(j.path){
       showLink(j.path);
       el('log').innerHTML='요약 파일 생성 완료: <a href="'+absUrl(j.path)+'" target="_blank" rel="noopener">'+escapeHtml(normPath(j.path))+'</a>';
+      // Quick Panel: update ALL.md link
+      var linkAll = document.getElementById('linkEnrichAll');
+      if (linkAll) {
+        linkAll.href = absUrl(j.path);
+        linkAll.textContent = 'ALL.md 열기';
+        linkAll.style.display = 'block';
+      }
       // 키워드 요약 성공 토스트
       showToast('키워드 요약 완료','ok');
     } else {
@@ -524,25 +658,38 @@ async function enrichKeyword(){
   }
 }
 async function enrichSelection(){
-  var kw=el('reportKw').value.trim();
-  try{
-    var res=await fetch(API_BASE+'/api/enrich/selection',{
-      method:'POST', headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
-      body: JSON.stringify({keyword:kw})
+  var kw = el('reportKw').value.trim();
+  // 토큰 체크: 없으면 안내 후 중단
+  if (!(localStorage.getItem('ADMIN_TOKEN') || '').trim()) {
+    showToast('토큰을 입력해주세요', 'err');
+    return;
+  }
+  try {
+    var res = await fetch(API_BASE + '/api/enrich/selection', {
+      method: 'POST',
+      headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+      body: JSON.stringify({ keyword: kw })
     });
-    var j=await res.json();
-    if(j.path){
+    var j = await res.json();
+    if (j.path) {
       showLink(j.path);
-      el('log').innerHTML='선정본 요약 파일 생성 완료: <a href="'+absUrl(j.path)+'" target="_blank" rel="noopener">'+escapeHtml(normPath(j.path))+'</a>';
+      el('log').innerHTML = '선정본 요약 파일 생성 완료: <a href="' + absUrl(j.path) + '" target="_blank" rel="noopener">' + escapeHtml(normPath(j.path)) + '</a>';
+      // Quick Panel: update SELECTED.md link
+      var linkSel = document.getElementById('linkEnrichSel');
+      if (linkSel) {
+        linkSel.href = absUrl(j.path);
+        linkSel.textContent = 'SELECTED.md 열기';
+        linkSel.style.display = 'block';
+      }
       // 선정본 요약 성공 토스트
       showToast('선정본 요약 완료','ok');
     } else {
-      el('log').textContent=JSON.stringify(j,null,2);
+      el('log').textContent = JSON.stringify(j, null, 2);
       // 선정본 요약 성공 토스트 (경로 없음)
       showToast('선정본 요약 완료','ok');
     }
-  }catch(e){
-    el('log').textContent='선정본 요약 실패: '+e;
+  } catch (e) {
+    el('log').textContent = '선정본 요약 실패: ' + e;
     // 선정본 요약 실패 토스트
     showToast('선정본 요약 실패','err');
   }
@@ -618,7 +765,7 @@ async function exportCsv(){
 
   // === HTML 미리보기 보조 ===
   function mdToHtml(md){
-    const esc = s => (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const esc = s => (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); 
     let h = '\n' + String(md||'').replace(/\r\n/g,'\n');
 
     // 코드블록 보존
@@ -750,27 +897,61 @@ let currentJob=null, es=null;
 function appendSseLog(s){ var box=el('taskLog'); box.textContent += (s.endsWith('\n')? s : s+'\n'); box.scrollTop = box.scrollHeight; }
 function stopStream(){ if(es){ es.close(); es=null; } }
 async function startFlow(kind){
+  // 토큰이 없으면 실행을 차단하고 안내합니다.
+  const tok = (localStorage.getItem('ADMIN_TOKEN') || '').trim();
+  if (!tok) {
+    showToast('토큰을 입력해주세요','err');
+    return;
+  }
+  // 기존 스트림을 정지하고 비동기 작업을 시작합니다.
   stopStream();
-  var r = await fetch(API_BASE+'/api/tasks/flow',{ method:'POST',
-    headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
-    body: JSON.stringify({kind:kind})
-  });
-  var j = await r.json(); currentJob=j.job_id;
-  el('q-info').textContent = 'job='+currentJob+' ('+j.kind+')';
-  appendSseLog('> started '+j.kind+' job='+currentJob);
-  openStream(currentJob);
+  try {
+    const r = await fetch(API_BASE + '/api/tasks/flow', {
+      method: 'POST',
+      headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+      body: JSON.stringify({ kind: kind })
+    });
+    const j = await r.json();
+    currentJob = j.job_id;
+    el('q-info').textContent = 'job=' + currentJob + ' (' + j.kind + ')';
+    appendSseLog('> started ' + j.kind + ' job=' + currentJob);
+    openStream(currentJob);
+  } catch (e) {
+    // 실패 시 로그에 기록하고 토스트 표시
+    appendSseLog('[flow error] ' + (e && e.message ? e.message : e));
+    showToast('비동기 작업 시작 실패','err');
+  }
 }
 async function startKeyword(){
-  var kw = el('kwInput').value.trim(); if(!kw){alert('키워드를 입력하세요');return;}
+  var kw = el('kwInput').value.trim();
+  if (!kw) {
+    showToast('키워드를 입력하세요', 'err');
+    return;
+  }
+  // 토큰 체크: 없으면 실행을 막습니다.
+  var tok = (localStorage.getItem('ADMIN_TOKEN') || '').trim();
+  if (!tok) {
+    showToast('토큰을 입력해주세요','err');
+    return;
+  }
   stopStream();
-  var r = await fetch(API_BASE+'/api/tasks/flow',{ method:'POST',
-    headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
-    body: JSON.stringify({kind:'keyword',keyword:kw})
-  });
-  var j = await r.json(); currentJob=j.job_id;
-  el('q-info').textContent = 'job='+currentJob+' (keyword:'+kw+')';
-  appendSseLog('> started keyword='+kw+' job='+currentJob);
-  openStream(currentJob);
+  try {
+    // 외부 RSS 사용 여부를 체크박스에서 읽어옵니다. 없으면 false 처리
+    var useExternal = document.getElementById('chk-ext-rss')?.checked === true;
+    var r = await fetch(API_BASE + '/api/tasks/flow', {
+      method: 'POST',
+      headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+      body: JSON.stringify({ kind: 'keyword', keyword: kw, use_external_rss: useExternal })
+    });
+    var j = await r.json();
+    currentJob = j.job_id;
+    el('q-info').textContent = 'job=' + currentJob + ' (keyword:' + kw + ')';
+    appendSseLog('> started keyword=' + kw + ' job=' + currentJob);
+    openStream(currentJob);
+  } catch (e) {
+    appendSseLog('[keyword flow error] ' + (e && e.message ? e.message : e));
+    showToast('키워드 작업 시작 실패','err');
+  }
 }
 function openStream(job){
   stopStream();
@@ -778,7 +959,16 @@ function openStream(job){
   var url = API_BASE+'/api/tasks/'+job+'/stream' + (token?('?token='+encodeURIComponent(token)):'');
   es = new EventSource(url);
   es.onmessage = ev=>{ if(ev.data) appendSseLog(ev.data); };
-  es.addEventListener('end', ev=>{ appendSseLog('\n<END> '+ev.data); stopStream(); });
+  es.addEventListener('end', ev=>{
+// On end event, append the final status, stop the stream and unlock UI
+    appendSseLog('\n<END> '+ev.data);
+    stopStream();
+    // Re-enable buttons and refresh KPI after completion/cancellation
+    lockButtons(false);
+    refresh();
+  
+    try { if ((ev && ev.data) === 'canceled') closeModal(); } catch(_e) {}
+  });
   es.onerror = ()=> appendSseLog('[SSE error] 재시도 중…');
 }
 
@@ -786,7 +976,33 @@ function openStream(job){
 function lockButtons(lock){ document.querySelectorAll('section.card button').forEach(b=>b.disabled=!!lock); el('cancelBtn').disabled=!lock; }
 function openModal(){ el('jobModal').style.display='block'; }
 function closeModal(){ el('jobModal').style.display='none'; stopStream(); currentJob=null; lockButtons(false); }
-async function cancelJob(){ if(!currentJob) return; try{ await fetch(API_BASE+'/api/tasks/'+currentJob+'/cancel',{method:'POST',headers:authHeaders()}); }catch{} }
+async function cancelJob(){
+  // Cancel the currently running task. Provide immediate feedback in the log
+  // and disable the cancel button to prevent repeated clicks.
+  if(!currentJob){
+    showToast('취소할 작업이 없어요','err');
+    return;
+  }
+  try {
+    // Log the cancellation request immediately to the SSE log
+    appendSseLog('! cancel requested (user)');
+    var btn = el('cancelBtn');
+    if(btn) btn.disabled = true;
+    await fetch(API_BASE+'/api/tasks/'+currentJob+'/cancel', {
+      method:'POST',
+      headers: authHeaders()
+    });
+    showToast('취소 요청을 보냈어요','ok');
+    // Immediately stop SSE stream and reset UI so user sees cancellation right away
+    try { stopStream(); } catch(_) {}
+    // Optionally close the modal to reflect cancellation
+    try { closeModal(); } catch(_) { currentJob = null; lockButtons(false); }
+  } catch (e) {
+    showToast('취소 요청 실패','err');
+    var btn2 = el('cancelBtn');
+    if(btn2) btn2.disabled = false;
+  }
+}
 
 function renderSteps(st){
   var box=el('steps'); if(!box) return;
@@ -921,25 +1137,65 @@ async function syncFallback(kind, body){
 }
 
 /* 운영 버튼 */
-async function runDaily(){ if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'daily'}); else await syncFallback('daily'); }
-async function runCommunity(){ if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'community'}); else await syncFallback('community'); }
-async function runKeyword(){
-  var keyword=el('kw').value.trim(); if(!keyword){ alert('키워드를 입력하세요'); return; }
-  if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'keyword', keyword:keyword, use_external_rss:true});
-  else await syncFallback('keyword', {keyword:keyword, use_external_rss:true});
+async function runDaily(){
+  // 토큰이 없으면 동작을 막고 사용자에게 안내합니다.
+  if(!(localStorage.getItem('ADMIN_TOKEN')||'').trim()){
+    showToast('토큰을 입력해주세요','err');
+    return;
+  }
+  if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'daily'}); else await syncFallback('daily');
 }
-async function runMerged(){ await syncFallback('merged'); }
+async function runCommunity(){
+  if(!(localStorage.getItem('ADMIN_TOKEN')||'').trim()){
+    showToast('토큰을 입력해주세요','err');
+    return;
+  }
+  if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'community'}); else await syncFallback('community');
+}
+async function runKeyword(){
+  var keyword=el('kw').value.trim();
+  if(!keyword){ showToast('키워드를 입력하세요','err'); return; }
+  if(!(localStorage.getItem('ADMIN_TOKEN')||'').trim()){
+    showToast('토큰을 입력해주세요','err');
+    return;
+  }
+  // 외부 RSS 사용 여부를 체크박스에서 읽어옵니다. 없으면 false 처리
+  var useExternal = document.getElementById('chk-ext-rss')?.checked === true;
+  if(HAS_TASKS) await startJob(API_BASE+'/api/tasks/flow', {kind:'keyword', keyword:keyword, use_external_rss: useExternal});
+  else await syncFallback('keyword', {keyword:keyword, use_external_rss: useExternal});
+}
+async function runMerged(){
+  if(!(localStorage.getItem('ADMIN_TOKEN')||'').trim()){
+    showToast('토큰을 입력해주세요','err');
+    return;
+  }
+  await syncFallback('merged');
+}
 
 /* 승인 UI 열기 */
 async function startApprove(){
+  if(!(localStorage.getItem('ADMIN_TOKEN')||'').trim()){
+    showToast('토큰을 입력해주세요','err');
+    return;
+  }
   lockButtons(true);
   try{
-    var r=await fetch(API_BASE+'/api/approve-ui/start',{method:'POST', headers:authHeaders()});
-    var d=await r.json().catch(()=>({}));
-    var ui=d.ui_url || API_BASE;
-    el('log').textContent=JSON.stringify(d,null,2);
-    window.open(ui,'_blank','noopener');
-  }catch(e){ el('log').textContent='승인 UI 열기 실패: '+e; }
+    const r = await fetch(API_BASE + '/api/approve-ui/start', { method: 'POST', headers: authHeaders() });
+    const d = await r.json().catch(() => ({}));
+    const ui = (d.ui_url && String(d.ui_url).trim() !== '') ? d.ui_url : null;
+    try { el('log').textContent = JSON.stringify(d, null, 2); } catch(e) {}
+    if (ui) {
+      window.open(ui, '_blank', 'noopener');
+    } else {
+      if (typeof showToast === 'function') {
+        showToast('승인 UI 링크를 확인할 수 없습니다', 'err');
+      } else {
+        alert('승인 UI 링크를 확인할 수 없습니다');
+      }
+    }
+  } catch(e) {
+    el('log').textContent = '승인 UI 열기 실패: ' + e;
+  }
   lockButtons(false);
 }
 
@@ -950,16 +1206,41 @@ async function showRecent(){
     el('log').textContent=JSON.stringify(await r.json(),null,2);
   }catch(e){ el('log').textContent='최근 작업 실패: '+e; }
 }
+
 async function loadReady(){
-  var date=el('date')?.value?.trim()||'', keyword=el('kw')?.value?.trim()||'';
+  const date = (document.getElementById('date')?.value || '').trim();
+  const keyword = (document.getElementById('kw')?.value || '').trim();
+
   try{
-    var r=await fetch(API_BASE+'/api/items?state=ready&date='+encodeURIComponent(date)+'&keyword='+encodeURIComponent(keyword), { headers: authHeaders() });
-    var j=await r.json();
-    renderReadyList(j.items||[]);
-    // Ready 목록 갱신 완료 토스트
-    showToast('Ready 목록 갱신 완료','ok');
-  }catch(e){ el('log').textContent='Ready 불러오기 실패: '+e; }
+    // state=ready 필수 + date 옵션, keyword는 비어있으면 제외(서버 SSOT 신뢰)
+    const params = new URLSearchParams({ state: 'ready' });
+    if (date) params.set('date', date);
+    if (keyword) params.set('keyword', keyword);
+
+    const url = `${API_BASE}/api/items?${params.toString()}`;
+
+    const r = await fetch(url, {
+      headers: authHeaders(),
+      cache: 'no-store'
+    });
+
+    // 응답 형태 호환: [ ... ] 또는 { items:[ ... ] }
+    const j = await r.json();
+    const arr = Array.isArray(j) ? j : (Array.isArray(j?.items) ? j.items : []);
+
+    // 안전가드: 혹시 준비되지 않은 항목이 섞여도 ready==true만 표시
+    const readyOnly = arr.filter(it => it && it.ready === true);
+
+    renderReadyList(readyOnly);
+    if (typeof showToast === 'function') showToast('Ready 목록 갱신 완료','ok');
+
+  }catch(e){
+    const log = document.getElementById('log');
+    if (log) log.textContent = 'Ready 불러오기 실패: ' + (e?.message || e);
+    if (typeof showToast === 'function') showToast('Ready 불러오기 실패','err');
+  }
 }
+
 function renderReadyList(items){
   var $=el('readyList'); if(!$) return;
   if(!items.length){ $.innerHTML='<div class="row" style="color:var(--muted)">Ready 항목이 없습니다.</div>'; return; }
@@ -993,7 +1274,12 @@ async function publishItem(id){
     var j=await r.json(); if(!r.ok || j.ok!==true) throw new Error(j.detail||'발행 실패');
     var card=(noteEl && noteEl.closest('.card')); if(card) card.remove();
     refresh().catch(function(){});
-  }catch(e){ alert('발행 실패: '+e); }
+    // 발행 완료 토스트
+    showToast('발행 완료','ok');
+  }catch(e){
+    // 발행 실패 토스트
+    showToast('발행 실패: '+ (e && e.message ? e.message : e),'err');
+  }
 }
 </script>
 
@@ -1092,7 +1378,10 @@ async function publishItem(id){
 
   <button type="button" id="btn-export-md"  style="width:100%; margin-bottom:6px;">Export Markdown</button>
   <button type="button" id="btn-export-csv" style="width:100%;">Export CSV</button>
+  <hr style="margin:10px 0; border:none; border-top:1px solid var(--line);" />
+  <button type="button" id="btn-qa" style="width:100%; margin-top:6px;">QA 자동 점검</button>
 </div>
+
 
 <script>
 /* === Admin Ops: Wiring only (중복 함수 정의 제거, 기존 함수 재사용) === */
@@ -1127,31 +1416,414 @@ async function publishItem(id){
   safeWire('btnEnrichSel',   'enrichSelection');
   safeWire('btn-export-md',  'exportMd');
   safeWire('btn-export-csv', 'exportCsv');
+    // QA 자동 점검 버튼 바인딩: 따옴표 일치 필요
+    safeWire("btn-qa","runQa");
 })();
 </script>
 <script>
-  // (추가) 버튼 바인딩 보강 – 토큰 입력/해제, 새로고침, KPI 새로고침
-  document.addEventListener("DOMContentLoaded", function(){
-    // 상태 새로고침
-    var r = document.getElementById('btnRefresh');
-    if (r) r.onclick = (e)=> runWithUiFeedback(e.currentTarget, refresh);
-    // KPI 새로고침
-    var k = document.getElementById('btnKpiRefresh');
-    if (k) k.onclick = (e)=> runWithUiFeedback(e.currentTarget, refresh);
-    // 토큰 입력: saveAdminTokenJJ() 호출
-    var tSet = document.getElementById('btn-token-set');
-    if (tSet) tSet.onclick = (e)=> {
-      e.preventDefault();
-      runWithUiFeedback(tSet, () => saveAdminTokenJJ());
-    };
-    // 토큰 해제: clearAdminTokenJJ() 호출
-    var tClear = document.getElementById('btn-token-clear');
-    if (tClear) tClear.onclick = (e)=> {
-      e.preventDefault();
-      runWithUiFeedback(tClear, () => clearAdminTokenJJ());
-    };
-  });
+// 첫 화면에서도 바로 KPI/Ready를 한 번 갱신하고 새로고침 버튼을 연결합니다.
+document.addEventListener('DOMContentLoaded', function(){
+  try {
+    if (typeof refresh === 'function') {
+      refresh().catch?.(() => {});
+    }
+  } catch (_) {}
+  try {
+    if (typeof loadReady === 'function') {
+      loadReady().catch?.(() => {});
+    }
+  } catch (_) {}
+  // 상태 패널의 "새로고침" 버튼 연결
+  var refreshBtn = document.getElementById('btnRefresh');
+  if (refreshBtn && !refreshBtn.dataset.wired) {
+    refreshBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      if (typeof refresh === 'function') {
+        refresh().catch?.(() => {});
+      }
+    });
+    refreshBtn.dataset.wired = '1';
+  }
+  // Ready 패널의 "KPI 새로고침" 버튼 연결 (즉시 30초 리셋 추가)
+  var kpiBtn = document.getElementById('btnKpiRefresh');
+  if (kpiBtn && !kpiBtn.dataset.wired) {
+    kpiBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      if (window.__resetKpiCountdown) window.__resetKpiCountdown(); // 클릭 즉시 시각 리셋
+      if (typeof refresh === 'function') {
+        refresh().catch?.(() => {});
+      }
+    });
+    kpiBtn.dataset.wired = '1';
+  }
+});
 </script>
+
+
+<script id="qa-workflow-js">
+/* === QA 자동 점검: 수집 → Ready → 발행 → Export === */
+async function runQa(){
+  // 모달/버튼 상태
+  if (typeof openModal === 'function') openModal();
+  if (typeof lockButtons === 'function') lockButtons(true);
+  const steps = []; function push(ok, name, stdout, stderr){
+    steps.push({ ok: !!ok, cmd: name, stdout: (stdout||''), stderr: (stderr||''), t_start:new Date().toISOString(), t_end:new Date().toISOString() });
+    if (typeof renderSteps === 'function') renderSteps({steps:steps});
+    if (typeof drawTimeline === 'function') drawTimeline({steps:steps});
+  }
+  try{
+    // 0) 토큰 체크
+    var tok=(localStorage.getItem('ADMIN_TOKEN')||'').trim();
+    if(!tok){ push(false,'check-token','','ADMIN_TOKEN 없음'); throw new Error('ADMIN_TOKEN 필요'); }
+
+    // 1) 키워드 플로우 실행 (keyword 입력칸이 비어 있으면 기본값 사용)
+    var kw = (document.getElementById('kw')?.value || '').trim() || 'IPC-A-610';
+    var res = await fetch((window.API_BASE||location.origin) + '/api/flow/keyword', {
+      method:'POST',
+      headers: Object.assign({'Content-Type':'application/json'}, (typeof authHeaders==='function'? authHeaders():{})),
+      body: JSON.stringify({ keyword: kw, use_external_rss: true })
+    });
+    var js  = await res.json().catch(()=>({}));
+    push(res.ok && js && js.ok!==false, 'flow:keyword ' + kw, JSON.stringify(js), res.ok?'':'HTTP '+res.status);
+
+    // 2) Ready 불러오기
+    var date = (document.getElementById('date')?.value || '').trim();
+    var params = new URLSearchParams({ state:'ready' });
+    if(date) params.set('date', date);
+    var r2 = await fetch((window.API_BASE||location.origin) + '/api/items?' + params.toString(), { headers: (typeof authHeaders==='function'? authHeaders():{}) });
+    var j2 = await r2.json().catch(()=>({items:[]}));
+    var arr = Array.isArray(j2.items)? j2.items : [];
+    push(r2.ok, 'items:ready', 'READY=' + arr.length, r2.ok?'':'HTTP '+r2.status);
+
+    // 3) 첫 항목 발행 (있으면)
+    if(arr.length>0 && arr[0].id){
+      var id = arr[0].id;
+      var r3 = await fetch((window.API_BASE||location.origin) + '/api/items/' + encodeURIComponent(id) + '/publish', {
+        method:'POST',
+        headers: Object.assign({'Content-Type':'application/json'}, (typeof authHeaders==='function'? authHeaders():{})),
+        body: JSON.stringify({ approve:true, editor_note:'[QA] auto publish' })
+      });
+      var j3 = await r3.json().catch(()=>({}));
+      push(r3.ok && j3 && j3.ok===true, 'publish one', JSON.stringify(j3), r3.ok?'':'HTTP '+r3.status);
+    }else{
+      push(false, 'publish one', '', 'Ready 비어 있음');
+    }
+
+    // 4) Export 미리보기/다운로드
+    var r4 = await fetch((window.API_BASE||location.origin) + '/api/export/md?preview=1', { headers: (typeof authHeaders==='function'? authHeaders():{}) });
+    var t4 = await r4.text().catch(()=>'');
+    push(r4.ok, 'export md preview', 'len=' + (t4? t4.length : 0), r4.ok?'':'HTTP '+r4.status);
+
+    var r5 = await fetch((window.API_BASE||location.origin) + '/api/export/csv', { headers: (typeof authHeaders==='function'? authHeaders():{}) });
+    push(r5.ok, 'export csv', 'ok=' + (r5 && r5.ok), r5.ok?'':'HTTP '+r5.status);
+
+    // 마무리
+    if (typeof document.getElementById === 'function') {
+      var meta = document.getElementById('jobMeta');
+      if (meta) meta.textContent = 'QA: done (' + new Date().toLocaleTimeString() + ')';
+    }
+    if (typeof lockButtons === 'function') lockButtons(false);
+    if (typeof showToast === 'function') showToast('QA 완료','ok');
+  }catch(e){
+    if (typeof document.getElementById === 'function') {
+      var meta = document.getElementById('jobMeta');
+      if (meta) meta.textContent = 'QA 실패: ' + (e && e.message? e.message : e);
+    }
+    if (typeof lockButtons === 'function') lockButtons(false);
+    if (typeof showToast === 'function') showToast('QA 실패','err');
+  }
+}
+</script>
+<!-- 제거: 중복 QA 버튼 바인딩 스크립트 (safeWire가 이미 처리) -->
+
+<script>
+/* Ready를 ready-slot 자리로 고정(문서 로드시 1회) */
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    var ready = document.getElementById('readyPanel');
+    var slot  = document.getElementById('ready-slot');
+    if (ready && slot && !slot.contains(ready)) {
+      slot.replaceWith(ready);
+      ready.setAttribute('role','region');
+      ready.setAttribute('aria-label','준비완료(Ready) — 보고서/요약/내보내기 아래');
+    }
+  }catch(e){}
+});
+</script>
+<!-- 전역 오류 핸들러: JS 오류를 콘솔에 기록 -->
+<script>
+window.onerror = function(message, source, lineno, colno, error) {
+  try {
+    console.error('Global Error:', message, 'at', source + ':' + lineno + ':' + colno, error);
+  } catch(_e) {}
+};
+</script>
+<script>
+(function(){
+  // ── 공통: 토큰 읽기 + 간단 로딩/토스트
+  function getToken(){
+    return (localStorage.getItem('ADMIN_TOKEN') || '').trim();
+  }
+  const $msg = document.getElementById('qt-msg');
+  function toast(t, ok=true){
+    if(!$msg) return;
+    $msg.style.color = ok ? '#0a7' : '#d33';
+    $msg.textContent = (new Date()).toLocaleTimeString() + ' - ' + t;
+  }
+  async function post(url) {
+    const t = getToken();
+    if(!t){ toast('토큰이 없습니다(상단 토큰 먼저 입력).', false); throw new Error('no token'); }
+    const r = await fetch(url, { method:'POST', headers:{ 'Authorization':'Bearer '+t } });
+    if(!r.ok){ const tx = await r.text(); throw new Error('HTTP '+r.status+' '+tx); }
+    return r.json();
+  }
+
+  // ── 상위 N 자동 승인
+  document.getElementById('btnApproveTop')?.addEventListener('click', async () => {
+    try{
+      const n = Number(prompt('몇 개 승인할까요? (1~100)', '20')) || 20;
+      toast('승인 중…');
+      const j = await post('/api/tools/approve_top?n='+n);
+      toast(j.ok ? `승인 ${j.top} 완료 (동기화:${j.synced?'OK':'X'})` : '실패', !!j.ok);
+    }catch(e){ toast('실패: '+(e.message||e), false); }
+  });
+
+  // ── 선정본 복구(형식 교정 + 승인본 재작성)
+  document.getElementById('btnRepair')?.addEventListener('click', async () => {
+    try{
+      toast('복구 중…');
+      const j = await post('/api/tools/repair');
+      const msg = j.ok ? (j.stdout || 'OK') : (j.stderr || 'FAIL');
+      toast('복구 완료: '+ msg, !!j.ok);
+    }catch(e){ toast('실패: '+(e.message||e), false); }
+  });
+})();
+</script>
+<!-- === Approve UI (MVP) : START === -->
+<section id="approve-section" style="margin-top:24px;">
+  <h2>📝 기사 승인(Approve)</h2>
+
+  <div style="margin:8px 0;">
+    <input id="appr-search" placeholder="제목/출처 검색" style="width:240px;">
+    <button id="appr-reload">불러오기</button>
+    <button id="appr-approve-selected">선택 승인</button>
+    <button id="appr-unapprove-selected">선택 해제</button>
+    <button id="appr-save">저장 + 동기화</button>
+    <span id="appr-summary" style="margin-left:12px;color:#666;"></span>
+  </div>
+
+  <div style="max-height:460px; overflow:auto; border:1px solid #ddd;">
+    <table id="appr-table" style="width:100%; border-collapse:collapse;">
+      <thead style="position:sticky;top:0;background:#fafafa;">
+        <tr>
+          <th style="padding:6px;border-bottom:1px solid #ddd;"><input type="checkbox" id="appr-all"></th>
+          <th style="padding:6px;border-bottom:1px solid #ddd;">제목</th>
+          <th style="padding:6px;border-bottom:1px solid #ddd;">출처</th>
+          <th style="padding:6px;border-bottom:1px solid #ddd;">점수</th>
+          <th style="padding:6px;border-bottom:1px solid #ddd;">날짜</th>
+          <th style="padding:6px;border-bottom:1px solid #ddd;">승인</th>
+          <th style="padding:6px;border-bottom:1px solid #ddd;">메모</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="appr-log" style="margin-top:8px;color:#999;"></div>
+</section>
+
+<script>
+(function(){
+  const $ = (sel) => document.querySelector(sel);
+  const API = location.origin;
+  function token(){ return localStorage.getItem('ADMIN_TOKEN') || ''; }
+  function authHeaders(){ return { 'Authorization': 'Bearer ' + token(), 'Content-Type':'application/json' }; }
+
+  const state = { items: [], filtered: [], changed: new Map() };
+  function setSummary(s){
+    const msg = `총 ${s.total}개 / 승인 ${s.approved}개 / 게이트 ${s.gate_required} → ` + (s.gate_pass? 'PASS ✅':'FAIL ❌');
+    $('#appr-summary').textContent = msg;
+  }
+
+    async function loadSelection(providedKeyword){
+    // 1) 상태 표시
+    $('#appr-log').textContent = '불러오는 중...';
+
+    // 2) 키워드 결정: 인자로 주면 그걸 쓰고, 없으면 입력칸에서 읽음
+    const kwFromInput = (document.getElementById('kw')?.value || '').trim();
+    const kw = (typeof providedKeyword === 'string' && providedKeyword.trim() ? providedKeyword.trim() : kwFromInput);
+
+    // 3) 쿼리 문자열 준비 (키워드가 비어있으면 파라미터 제외)
+    const qs = kw ? ('?keyword=' + encodeURIComponent(kw)) : '';
+
+    // 4) 간단 재시도 로직 (수집 직후 파일 쓰기 지연에 대비)
+    let data = null;
+    for (let attempt = 0; attempt < 3; attempt++){
+      try{
+        const res = await fetch(API + '/api/selection' + qs, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok){
+          $('#appr-log').textContent = '불러오기 실패(' + res.status + ')';
+          // HTTP 401/403 등은 재시도 의미 없음 -> 중단
+          if (res.status >= 400 && res.status < 500) break;
+        } else {
+          data = await res.json().catch(()=>null);
+          // 성공/내용있음이면 중단
+          if (data && ((data.summary && (data.summary.total||0) > 0) || (Array.isArray(data.items) && data.items.length>0))) break;
+        }
+      }catch(e){
+        // 네트워크/일시 오류: 잠깐 대기 후 재시도
+      }
+      // 재시도 대기 (700ms)
+      await new Promise(r => setTimeout(r, 700));
+    }
+
+    // 5) 결과 처리
+    if (!data){
+      $('#appr-log').textContent = '불러오기 실패(응답 없음)';
+      return;
+    }
+    state.items = data.items || [];
+    state.changed.clear();
+    setSummary(data.summary || {total:0,approved:0,gate_required:15,gate_pass:false});
+    filterAndRender();
+    $('#appr-log').textContent = '불러오기 완료';
+
+    // KPI 새로고침 후크(있으면 호출)
+    if(typeof window.refreshKpi==='function'){ window.refreshKpi(); }
+  }
+
+  // 전역에서 호출 가능하도록 노출(다른 스크립트에서 사용하기 위함)
+  window.loadSelection = loadSelection;
+
+
+  function filterAndRender(){
+    const q = ($('#appr-search').value || '').toLowerCase();
+    state.filtered = state.items.filter(it => {
+      const t = (it.title||'') + ' ' + (it.source||'');
+      return t.toLowerCase().includes(q);
+    });
+    const tbody = $('#appr-table tbody');
+    tbody.innerHTML = '';
+    state.filtered.forEach((it, rowIdx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="padding:4px;border-bottom:1px solid #eee;"><input type="checkbox" data-row="${rowIdx}" class="appr-row"></td>
+        <td style="padding:4px;border-bottom:1px solid #eee;"><a href="${it.url||'#'}" target="_blank">${it.title||'(제목없음)'}</a></td>
+        <td style="padding:4px;border-bottom:1px solid #eee;">${it.source||''}</td>
+        <td style="padding:4px;border-bottom:1px solid #eee;">${it.score??''}</td>
+        <td style="padding:4px;border-bottom:1px solid #eee;">${it.date||''}</td>
+        <td style="padding:4px;border-bottom:1px solid #eee;">
+          <input type="checkbox" class="appr-flag" data-idx="${it.idx}" ${it.approved?'checked':''}>
+        </td>
+        <td style="padding:4px;border-bottom:1px solid #eee;">
+          <input type="text" class="appr-note" data-idx="${it.idx}" value="${(it.editor_note||'').replace(/"/g,'&quot;')}" style="width:98%;">
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+    tbody.querySelectorAll('.appr-flag').forEach(el=>{
+      el.addEventListener('change', e=>{
+        const idx = parseInt(e.target.dataset.idx,10);
+        const patch = state.changed.get(idx) || {};
+        patch.idx = idx; patch.approved = e.target.checked;
+        state.changed.set(idx, patch);
+      });
+    });
+    tbody.querySelectorAll('.appr-note').forEach(el=>{
+      el.addEventListener('change', e=>{
+        const idx = parseInt(e.target.dataset.idx,10);
+        const patch = state.changed.get(idx) || {};
+        patch.idx = idx; patch.editor_note = e.target.value;
+        state.changed.set(idx, patch);
+      });
+    });
+  }
+
+  async function saveAndSync(){
+    if(state.changed.size===0){ $('#appr-log').textContent = '변경 없음'; return; }
+    $('#appr-log').textContent = '저장 중...';
+    const updates = Array.from(state.changed.values());
+    const res = await fetch(API + '/api/selection', {
+      method:'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ updates, autosync: true })
+    });
+    if(!res.ok){ $('#appr-log').textContent = '저장 실패(' + res.status + ')'; return; }
+    const out = await res.json();
+    $('#appr-log').textContent = `저장 완료 / 승인 ${out.approved} / 게이트 ${out.gate_required} → ${out.gate_pass?'PASS ✅':'FAIL ❌'}`;
+    await loadSelection();
+  }
+
+  $('#appr-all').addEventListener('change', e=>{
+    document.querySelectorAll('.appr-row').forEach(cb=>cb.checked = e.target.checked);
+  });
+  $('#appr-reload').addEventListener('click', loadSelection);
+  $('#appr-save').addEventListener('click', saveAndSync);
+  $('#appr-search').addEventListener('input', filterAndRender);
+  $('#appr-approve-selected').addEventListener('click', ()=>{
+    document.querySelectorAll('.appr-row:checked').forEach(cb=>{
+      const row = parseInt(cb.getAttribute('data-row'),10);
+      const item = state.filtered[row];
+      const flag = document.querySelector(`.appr-flag[data-idx="${item.idx}"]`);
+      if(flag && !flag.checked){ flag.checked = true; flag.dispatchEvent(new Event('change')); }
+    });
+  });
+  $('#appr-unapprove-selected').addEventListener('click', ()=>{
+    document.querySelectorAll('.appr-row:checked').forEach(cb=>{
+      const row = parseInt(cb.getAttribute('data-row'),10);
+      const item = state.filtered[row];
+      const flag = document.querySelector(`.appr-flag[data-idx="${item.idx}"]`);
+      if(flag && flag.checked){ flag.checked = false; flag.dispatchEvent(new Event('change')); }
+    });
+  });
+
+  // 페이지 진입 시 자동 로드 (토큰이 저장되어 있다는 전제)
+  loadSelection().catch(()=>{});
+})();
+</script>
+<!-- === Approve UI : END === -->
+<script>
+(function(){
+  const btn = document.getElementById('btn-collect-only');
+  if(!btn) return;
+
+  btn.addEventListener('click', async () => {
+    const kw  = (document.getElementById('kw')?.value || '').trim();
+    if(!kw){ alert('키워드를 입력하세요'); return; }
+
+    const tok = (localStorage.getItem('ADMIN_TOKEN') || '').trim();
+    if(!tok){ alert('토큰을 입력해주세요'); return; }
+
+    const API = (window.API_BASE || location.origin);
+    try{
+      const r = await fetch(API + '/api/enrich/keyword', {
+        method: 'POST',
+        headers: { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' },
+        body: JSON.stringify({ keyword: kw })
+      });
+      if(!r.ok){ alert('수집 실패: '+r.status); return; }
+      alert('수집 완료! 아래 승인(Approve) 섹션에서 [불러오기]를 눌러 확인하세요.');
+      // 자동으로 승인 목록을 1.2초 뒤 불러옵니다 (파일 쓰기 지연 방지)
+      setTimeout(function(){
+        try{
+          if (typeof window.loadSelection === 'function'){
+            window.loadSelection(); // 전역 노출된 함수 호출
+          } else {
+            // 안전 폴백: 기존의 "불러오기" 버튼 클릭 트리거
+            var btn = document.getElementById('appr-reload');
+            if(btn) btn.click();
+          }
+        }catch(_){}
+      }, 1200);
+
+    }catch(e){
+      alert('수집 오류');
+    }
+  });
+})();
+</script>
+<script src="assets/app.js"></script>
 
 </body>
 </html>
+

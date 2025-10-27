@@ -1,0 +1,59 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-northeast3    # 예: 서울
+  SERVICE: quali-admin       # Cloud Run 서비스명
+  APP_ENV: prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps (optional)
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}  # JSON key
+          export_default_credentials: true
+
+      - name: Enable APIs (idempotent)
+        run: |
+          gcloud services enable run.googleapis.com cloudbuild.googleapis.com
+
+      # 배포 (소스 빌드). Dockerfile을 사용해도 되고, --source . 로도 가능
+      - name: Deploy to Cloud Run (latest=100)
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --region "$REGION" \
+            --source . \
+            --allow-unauthenticated \
+            --set-env-vars "QUALI_DB_MODE=local" \
+            --set-env-vars "GATE_REQUIRED=15" \
+            --set-env-vars "PYTHONUNBUFFERED=1" \
+            --traffic latest=100
+
+      # 안전망: 혹시 위 단계에서 트래픽이 안 올라갔을 때 보강
+      - name: Force traffic to latest
+        run: |
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest
+
+      - name: Show runtime info
+        run: |
+          echo "Deployed $SERVICE in $REGION"

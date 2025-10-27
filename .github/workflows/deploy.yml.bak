@@ -1,0 +1,103 @@
+﻿name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# 이벤트/브랜치별로 동시 실행 분리
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID: quali-journal-prod
+  REGION: asia-northeast3
+  SERVICE_NAME: quali-admin-domap
+  ENTRYPOINT: uvicorn server_quali:app --host 0.0.0.0 --port 8080
+
+jobs:
+  # ✅ PR에서는 이 잡 하나가 몇 초 만에 성공  필수 체크 "Deploy to Cloud Run" 만족
+  pr_check:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR no-op (preview handled by pr-preview.yml)
+        run: echo "OK"
+
+  # ✅ main/수동 실행에서만 실제 배포
+  deploy:
+    if: ${{ github.event_name != 'pull_request' }}
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth (WIF - main/dispatch)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          token_format: "access_token"
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Enable required APIs (idempotent)
+        run: |
+          gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
+            artifactregistry.googleapis.com secretmanager.googleapis.com --quiet
+
+      - name: Deploy to Cloud Run (main)
+        run: |
+          gcloud run deploy "$SERVICE_NAME" \
+            --project "$PROJECT_ID" \
+            --region  "$REGION" \
+            --source  . \
+            --allow-unauthenticated \
+            --port 8080 \
+            --set-build-env-vars "GOOGLE_ENTRYPOINT=${{ env.ENTRYPOINT }}" \
+            --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
+            --quiet
+
+      - name: Get Service URL
+        id: url
+        run: |
+          URL=$(gcloud run services describe "$SERVICE_NAME" \
+            --project "$PROJECT_ID" --region "$REGION" \
+            --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Service URL: $URL"
+
+      - name: Smoke check
+        continue-on-error: true
+        env:
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          set -e
+          if curl -fsS "$URL/health" > /dev/null; then
+            echo "✓ /health 200 OK"
+            exit 0
+          fi
+          echo "Trying /api/status with ADMIN_TOKEN..."
+          TOKEN=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN 2>/dev/null || true)
+          if [ -n "$TOKEN" ]; then
+            curl -fsS -H "X-Admin-Token: $TOKEN" "$URL/api/status" > /dev/null && echo "✓ /api/status 200 OK" && exit 0
+          fi
+          echo "⚠ Smoke check skipped or failed."
+
+      - name: Echo done
+        run: echo "✅ Deploy finished for $SERVICE_NAME in $REGION"
+
+

@@ -1,15 +1,18 @@
-
-openai_new.txt
-*.env
-*.key
-
-
-.env
-
+# python
 __pycache__/
 *.pyc
-logs/
-*.log
-.env
-*.env
+*.pyo
+.venv/
 
+# env / secrets
+.env
+*.key
+*.creds.json
+
+# logs / temp
+*.log
+tmp/
+.cache/
+
+# DO NOT ignore source/assets
+# (admin/, tools/, orchestrator.py 등은 추적 대상)

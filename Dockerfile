@@ -1,26 +1,39 @@
-﻿# syntax=docker/dockerfile:1
+﻿# ---- base runtime ----
 FROM python:3.11-slim
 
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# OS deps (필요시 보강 가능)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl \
-    && rm -rf /var/lib/apt/lists/*
+# ---- install deps ----
+# requirements.txt가 있으면 먼저 복사/설치
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt || true
 
-# deps 설치
-COPY admin/requirements.txt /app/admin/requirements.txt
-RUN pip install --no-cache-dir -r /app/admin/requirements.txt
-
-# 앱 소스(루트 기준으로 묶기)
+# ---- copy app code (핵심: orchestrator/ admin/ tools/ 포함) ----
+COPY orchestrator.py /app/orchestrator.py
 COPY admin/ /app/admin/
 COPY tools/ /app/tools/
-COPY feeds/ /app/feeds/
+# 선택: 설정 파일/피드가 있다면 함께
 COPY config.json /app/config.json
-# (옵션) 오케스트레이터 사용 시
-COPY orchestrator.py /app/orchestrator.py
+# 선택: 정적 seed 데이터(없어도 런타임에 생성됨)
+# COPY data/ /app/data/
 
-ENV PYTHONPATH=/app
-ENV PORT=8080
+# 런타임용 작업/아카이브 디렉터리 확보
+RUN mkdir -p /app/archive /app/logs
+
+# Cloud Run은 $PORT를 주입; uvicorn은 server_quali.py 안에서 실행
+# (server_quali.py __main__ 에서 uvicorn.run 호출) :contentReference[oaicite:6]{index=6}
 EXPOSE 8080
+ENV PORT=8080
 
-CMD ["sh","-c","uvicorn admin.server_quali:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# ---- run ----
+# server_quali.py는 admin 폴더에 있음
+CMD ["python", "-u", "admin/server_quali.py"]

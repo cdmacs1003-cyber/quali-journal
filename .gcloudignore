@@ -1,7 +1,15 @@
-!.gcloudignore
-!index_lite_black.html
-!*.py
-!**/*.py
+# 기본 제외(대용량/민감)
+**/.git/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+.env
 
-!index.html
-!**/*.html
+# ---- 강제 포함(부모가 ignore 되어도 살려냄) ----
+!orchestrator.py
+!admin/**
+!tools/**
+!config.json
+!requirements.txt
+!Dockerfile
+!scripts/**

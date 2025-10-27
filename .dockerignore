@@ -1,19 +1,17 @@
-﻿.git
-__pycache__/
+﻿# --- OK to exclude these ---
+**/__pycache__/
+**/.pytest_cache/
+**/.git/
+**/.venv/
 *.pyc
 *.pyo
-*.pyd
-*.zip
-*.pdf
-*.bak
-*.log
-archive/
-logs/
-days/
-k8s/
-helm/
-tests/
 .env
-.env.*
-venv/
-.venv/
+*.log
+
+# --- DO NOT exclude our app code/assets ---
+# (아래와 같은 라인이 있다면 반드시 제거해야 함)
+# *.py
+# admin/
+# tools/
+# orchestrator.py
+# index.html

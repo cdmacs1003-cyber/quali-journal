@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 # FastAPI / Pydantic
-from fastapi import FastAPI, Query, Response, HTTPException, Depends, Body, Request
+from fastapi import FastAPI, Query, Response, HTTPException, Depends, Body, Request, APIRouter, status as http_status 
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, StreamingResponse, JSONResponse
@@ -60,6 +60,118 @@ except Exception:  # pragma: no cover
 
 # === FastAPI app (define FIRST) ==============================================
 app = FastAPI(title="QualiJournal Admin API")
+
+# === READY/SSOT PATCH START (no conflicts version) ===========================
+# - Prefix '/api/ready'로 충돌 제거
+# - 인가: Depends(authorize) 사용(서버 전역과 통일)
+# - 모델 중복 방지: ReadyGatePatch 사용
+READY_DATA_DIR = os.environ.get("QUALI_DATA_DIR", "data")
+READY_CONFIG   = os.environ.get("QUALI_CONFIG", "config.json")
+READY_FILES = [
+    os.path.join(READY_DATA_DIR, "selected_articles.json"),
+    os.path.join(READY_DATA_DIR, "selected_keyword_articles.json"),
+]
+
+def _ready_load_json(path: str):
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def _ready_all_items() -> List[Dict]:
+    """지원 형태: list 또는 {"articles":[…]} / {"items":[…]}"""
+    acc: List[Dict] = []
+    for p in READY_FILES:
+        obj = _ready_load_json(p)
+        if isinstance(obj, list):
+            acc.extend([x for x in obj if isinstance(x, dict)])
+        elif isinstance(obj, dict):
+            arr = obj.get("articles") or obj.get("items") or []
+            if isinstance(arr, list):
+                acc.extend([x for x in arr if isinstance(x, dict)])
+    return acc
+
+def _ready_load_cfg() -> Dict:
+    cfg = {"gate_required": 70}
+    if os.path.exists(READY_CONFIG):
+        try:
+            with open(READY_CONFIG, "r", encoding="utf-8") as f:
+                file_cfg = json.load(f)
+                if isinstance(file_cfg, dict):
+                    cfg.update(file_cfg)
+        except Exception:
+            pass
+    return cfg
+
+ready_router = APIRouter(prefix="/api/ready", tags=["ready-ssot"])
+
+@ready_router.get("/items")
+def ready_items(
+    state: str = Query("ready"),
+    date: str | None = None,
+    keyword: str | None = None,
+    authorized: bool = Depends(lambda request: authorize(request))  # reuse global auth
+):
+    """
+    SSOT 기반 Ready 전용 아이템 뷰:
+    - 기본 state=ready → ready==true 항목만 반환
+    - date/keyword 지정 시 해당 필드가 같은 항목만 반환(필드 없으면 필터 미적용)
+    반환: List[dict]
+    """
+    def _match(it: dict) -> bool:
+        if date and str(it.get("date","")) != str(date):
+            return False
+        if keyword:
+            if str(it.get("keyword","")).strip() != str(keyword).strip():
+                return False
+        return True
+
+    items = _ready_all_items()
+    s = (state or "").lower().strip()
+    if s == "ready":
+        items = [i for i in items if i.get("ready") is True]
+    else:
+        # 다른 state가 들어오더라도, SSOT 원칙상 ready 재판정은 금지 → 그대로 통과 + date/keyword만 필터
+        pass
+    return [i for i in items if _match(i)]
+
+@ready_router.get("/status")
+def ready_status(authorized: bool = Depends(lambda request: authorize(request))):
+    """
+    SSOT 기반 상태: ready_count/ready_rate는 파일에 저장된 파생값(ready) 기준
+    """
+    items = _ready_all_items()
+    total = len(items)
+    ready_true = sum(1 for i in items if i.get("ready") is True)
+    cfg = _ready_load_cfg()
+    return {
+        "total": total,
+        "ready_count": ready_true,
+        "ready_rate": (ready_true / total) if total else 0.0,
+        "gate_required": int(cfg.get("gate_required", 70)),
+    }
+
+@ready_router.get("/config/gate_required")
+def ready_gate_get(authorized: bool = Depends(lambda request: authorize(request))):
+    return {"gate_required": int(_ready_load_cfg().get("gate_required", 70))}
+
+class ReadyGatePatch(BaseModel):
+    gate_required: int
+
+@ready_router.patch("/config/gate_required")
+def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(lambda request: authorize(request))):
+    cfg = _ready_load_cfg()
+    cfg["gate_required"] = int(p.gate_required)
+    with open(READY_CONFIG, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    return {"ok": True, "gate_required": cfg["gate_required"]}
+
+app.include_router(ready_router)
+# === READY/SSOT PATCH END ===================================================
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -91,6 +203,8 @@ class ReportReq(BaseModel):
 class FlowReq(BaseModel):
     kind: str            # daily|community|keyword
     keyword: str | None = None
+    # Flag to indicate whether external RSS sources should be used for keyword collection
+    use_external_rss: bool = False
 
 class PublishReq(BaseModel):
     keyword: str
@@ -199,6 +313,13 @@ CONFIG_FILE = ROOT / "config.json"
 # Cloud Run support
 ARCHIVE_CLOUD = Path(os.getenv("ARCHIVE_DIR", "/tmp/archive"))
 IS_CLOUD = bool(os.getenv("K_SERVICE"))
+# (여기) 작업본 검색 후보(로컬/클라우드 모두 커버)
+CAND_WORK = [
+    SEL_WORK,                                           # 기본: repo/data/selected_keyword_articles.json
+    ARCHIVE_CLOUD / "selected_keyword_articles.json",   # Cloud Run: /tmp/archive/selected_keyword_articles.json
+    ROOT / "selected_keyword_articles.json",            # 루트에 떨어질 수도 있음
+    BASE / "data_selected_articles.json",               # 구버전/대체명 호환
+]
 
 REPORT_DIR = (ARCHIVE_CLOUD / "reports") if IS_CLOUD else (BASE / "archive" / "reports")
 ENRICH_DIR = (ARCHIVE_CLOUD / "enriched") if IS_CLOUD else (ARCHIVE / "enriched")
@@ -239,7 +360,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in (os.getenv("ALLOWED_ORIGINS","").split(",")) if o.strip()] or ["https://admin.example.com"],
     allow_methods=["GET","POST","PATCH","OPTIONS"],
-    allow_headers=["Authorization","Content-Type"],
+    allow_headers=["Authorization","Content-Type","X-Admin-Token"],
     allow_credentials=True,
 )
 
@@ -266,6 +387,35 @@ try:
         app.mount("/archive", StaticFiles(directory=str(root_for_browse)), name="archive-root")
 except Exception:
     pass
+# === UI Static & Cache Headers (dist 우선) ====================================
+
+# admin/ 기준
+_UI_BASE = BASE              # admin/
+_UI_DIST = BASE / "dist"     # admin/dist
+# dist/index.html이 존재하면 dist를, 아니면 개발중 원본(admin/)을 사용
+_UI_ACTIVE = _UI_DIST if (_UI_DIST / "index.html").exists() else _UI_BASE
+_ASSETS_DIR = _UI_ACTIVE / "assets"
+
+# /assets 정적 서빙 (dist/assets 또는 admin/assets)
+try:
+    if _ASSETS_DIR.exists():
+        app.mount("/assets", StaticFiles(directory=str(_ASSETS_DIR)), name="assets")
+except Exception:
+    pass
+
+# 해시 자산: 1년 + immutable / 루트 HTML: no-cache
+@app.middleware("http")
+async def _cache_headers_ui(request: Request, call_next):
+    resp = await call_next(request)
+    p = request.url.path
+    if re.match(r"^/assets/.+\.[0-9a-f]{8,}\.(js|css|png|jpg|svg|woff2?)$", p, re.I):
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif p in ("/", "/index.html"):
+        # HTML은 재검증 허용
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+# ============================================================================ 
 
 # === 보호 다운로드 엔드포인트 (/api/archive/...) ===
 @app.get("/api/archive/{path:path}")
@@ -304,7 +454,8 @@ def approve_ui_start(request: Request, authorized: bool = Depends(authorize)):
     - UI는 반환된 ui_url을 새 창으로 open (index.html의 startApprove 사용).
     """
     snap = _get_work_snapshot()  # {"date","keyword","articles":[...]}
-    ui_url = (os.getenv("APPROVE_UI_URL") or str(request.base_url).rstrip("/"))
+    ui_url_env = (os.getenv("APPROVE_UI_URL") or "").strip()
+    ui_url = ui_url_env if ui_url_env else None
     return _ok(
         "approve_ui_start",
         ui_url=ui_url,
@@ -333,17 +484,27 @@ def devtools_config():
 def favicon_blank():
     return Response(status_code=204)
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 def index():
-    p = INDEX_HTML if INDEX_HTML.exists() else (INDEX_LITE if INDEX_LITE.exists() else None)
-    if p:
-        # 캐시 무시 헤더로 구판 캐시 완전 차단
-        return HTMLResponse(
-            p.read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate"}
-        )
+    """
+    dist/index.html이 있으면 dist를, 없으면 admin/index.html(또는 라이트 버전)로 폴백.
+    HTML은 no-cache(재검증), 자산(.hash.*)은 미들웨어에서 1년+immutable.
+    """
+    # admin/ 기준 경로
+    base_dir = Path(__file__).resolve().parent            # admin
+    dist_dir = base_dir / "dist"                          # admin/dist
+    index_dist = dist_dir / "index.html"
+    index_src  = base_dir / "index.html"
+    index_lite = base_dir / "index_lite_black.html" if (base_dir / "index_lite_black.html").exists() else None
+
+    # dist 우선
+    target = index_dist if index_dist.exists() else (index_src if index_src.exists() else index_lite)
+    if target and target.exists():
+        return HTMLResponse(target.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-cache"})
     return HTMLResponse("<h1>QualiJournal Admin</h1><p>index.html이 없습니다.</p>",
                         headers={"Cache-Control": "no-store"})
+
 
 # 디버그: Cloud Run 런타임/리비전/커밋 표시
 @app.get("/api/debug/runtime")
@@ -591,16 +752,37 @@ def _get_community_snapshot() -> dict:
 
 def _get_work_snapshot() -> dict:
     """Load selected_keyword_articles.json as work snapshot."""
-    obj = _read_json(SEL_WORK) or {}
-    arts = obj.get("articles", []) or []
+    # (변경) 여러 후보 경로에서 최초로 발견되는 것을 사용
+    obj = {}
+    for p in CAND_WORK:
+        if p.exists():
+            obj = _read_json(p) or {}
+            # 허용 구조: {"articles":[...]}, {"items":[...]}, [ ... ]
+            if (isinstance(obj, dict) and (obj.get("articles") or obj.get("items"))) or isinstance(obj, list):
+                break
+
+    # articles 추출 (dict/items/list 호환)
+    if isinstance(obj, dict):
+        arts = obj.get("articles") or obj.get("items") or []
+        date = obj.get("date") or _dt.date.today().isoformat()
+        keyword = obj.get("keyword", "")
+    elif isinstance(obj, list):
+        arts = obj
+        date = _dt.date.today().isoformat()
+        keyword = ""
+    else:
+        arts = []
+        date = _dt.date.today().isoformat()
+        keyword = ""
+
     for a in arts:
         _ensure_id(a)
         a.setdefault("approved", False)
         a.setdefault("editor_note", "")
         a.setdefault("state", (a.get("state") or "").lower() or "candidate")
-    date = obj.get("date") or _dt.date.today().isoformat()
-    keyword = obj.get("keyword", "")
+
     return {"date": date, "keyword": keyword, "articles": arts}
+
 
 def _sync_after_save() -> dict:
     """Sync selected -> publish (tools/sync_selected_for_publish.py if exists; else safe merge)."""
@@ -614,7 +796,12 @@ def _sync_after_save() -> dict:
         except Exception as e:
             return {"ok": False, "stderr": str(e)}
     # fallback merge (work -> publish only approved)
-    work = _read_json(SEL_WORK) or {}
+    work = {}
+    for p in CAND_WORK:
+        if p.exists():
+            work = _read_json(p) or {}
+            if work: break
+
     pub  = _read_json(SEL_PUB)  or {}
     merged: Dict[str, dict] = {}
     for art in pub.get("articles", []) or []:
@@ -717,7 +904,8 @@ class Task:
             try:
                 if self.log_file:
                     with self.log_file.open("a", encoding="utf-8") as fp:
-                        fp.write(msg + "\n")
+                        write_line = msg + "\n"
+                        fp.write(write_line)
             except Exception:
                 pass
 
@@ -743,45 +931,101 @@ def _run_task(task: Task):
     task.status = "running"; task.started_at = time.time()
 
     def run_cmd(cmd: list[str]) -> int:
+        """
+        Run a subprocess command and stream its output into the task log.
+        If task._cancel is set, kill the process and return a non-zero
+        exit code. This helper ensures long‑running commands can be
+        interrupted cleanly.
+        """
         task.append(f"$ {' '.join(cmd)}")
         p = subprocess.Popen(
-            cmd, cwd=str(ROOT),
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8"
+            cmd,
+            cwd=str(ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
         )
         while True:
+            # Check for cancel during execution
             if task._cancel:
-                p.kill(); task.append("! canceled"); return 1
+                # Kill the subprocess and mark cancellation
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+                task.append("! canceled")
+                # return a non-zero code to indicate failure so that later
+                # logic can detect cancellation
+                return 1
+            # Read line by line until the process finishes
             line = p.stdout.readline()
-            if not line and p.poll() is not None: break
-            if line: task.append(line.rstrip())
+            if not line and p.poll() is not None:
+                break
+            if line:
+                task.append(line.rstrip())
+        # Return the subprocess's exit code, defaulting to 0 if None
         return p.returncode if p.returncode is not None else 0
 
     try:
         py = PYEXE
+        rc = 0
+        # Run commands based on the task kind. After each command,
+        # check whether the task has been canceled; if so, skip
+        # remaining steps.
         if task.kind == "daily":
-            rc1 = run_cmd([py, str(ORCH), "--collect-community"])
-            rc2 = run_cmd([py, str(ORCH), "--publish-community", "--format", "all"])
-            rc3 = run_cmd([py, str(ORCH), "--publish", "--format", "all"])
-            rc = max(rc1, rc2, rc3)
+            # 1. collect community
+            rc = run_cmd([py, str(ORCH), "--collect-community"])
+            # If canceled, skip remaining steps
+            if not task._cancel:
+                # 2. publish community
+                rc2 = run_cmd([py, str(ORCH), "--publish-community", "--format", "all"])
+                rc = max(rc, rc2)
+            if not task._cancel:
+                # 3. publish all
+                rc3 = run_cmd([py, str(ORCH), "--publish", "--format", "all"])
+                rc = max(rc, rc3)
         elif task.kind == "community":
-            rc1 = run_cmd([py, str(ORCH), "--collect-community"])
-            rc2 = run_cmd([py, str(ORCH), "--publish-community", "--format", "all"])
-            rc = max(rc1, rc2)
+            # 1. collect community
+            rc = run_cmd([py, str(ORCH), "--collect-community"])
+            if not task._cancel:
+                # 2. publish community
+                rc2 = run_cmd([py, str(ORCH), "--publish-community", "--format", "all"])
+                rc = max(rc, rc2)
         elif task.kind == "keyword":
             kw = task.args[0] if task.args else ""
+            ext = task.args[1] if len(task.args) > 1 else ""
             if not kw:
                 raise RuntimeError("keyword required")
-            rc1 = run_cmd([py, str(ORCH), "--collect-keyword", kw])
-            rc2 = run_cmd([py, str(ORCH), "--approve-keyword", kw, "--approve-keyword-top", "15"])
-            rc3 = run_cmd([py, str(ORCH), "--publish-keyword", kw])
-            rc = max(rc1, rc2, rc3)
+            # collect keyword (with optional external rss flag)
+            if str(ext).strip() == "--use-external-rss":
+                rc = run_cmd([py, str(ORCH), "--collect-keyword", kw, "--use-external-rss"])
+            else:
+                rc = run_cmd([py, str(ORCH), "--collect-keyword", kw])
+            # approve keyword top 15
+            if not task._cancel:
+                rc2 = run_cmd([py, str(ORCH), "--approve-keyword", kw, "--approve-keyword-top", "15"])
+                rc = max(rc, rc2)
+            # publish keyword
+            if not task._cancel:
+                rc3 = run_cmd([py, str(ORCH), "--publish-keyword", kw])
+                rc = max(rc, rc3)
         else:
             raise RuntimeError(f"unknown kind: {task.kind}")
+
+        # Set exit code and status. If the task was canceled, reflect that
+        # in the status so the SSE stream can signal cancellation.
         task.exit_code = rc
-        task.status = "done" if rc == 0 else "error"
-        if rc != 0:
-            task.append(f"! exit={rc}")
+        if task._cancel:
+            # Mark canceled; set a non-zero exit code if none
+            task.status = "canceled"
+            # Optionally set exit_code for cancellation to a distinct value
+            if task.exit_code in (0, None):
+                task.exit_code = 130
+        else:
+            task.status = "done" if rc == 0 else "error"
+            if rc != 0:
+                task.append(f"! exit={rc}")
     except Exception as e:
         task.status = "error"
         task.append(f"! error: {e}")
@@ -794,7 +1038,15 @@ def _run_task(task: Task):
 @app.post("/api/tasks/flow")
 def create_flow(req: FlowReq, authorized: bool = Depends(authorize)):
     kind = (req.kind or "").lower().strip()
-    args = [req.keyword] if kind == "keyword" else []
+    # Build argument list for Task; for keyword flows, include the keyword and optional external RSS flag
+    if kind == "keyword":
+        # Ensure keyword is non-null; add external RSS flag when requested
+        if req.use_external_rss:
+            args = [req.keyword or "", "--use-external-rss"]
+        else:
+            args = [req.keyword or ""]
+    else:
+        args = []
     t = Task(kind, args)
     TM.add(t)
     th = threading.Thread(target=_run_task, args=(t,), daemon=True)
@@ -834,7 +1086,13 @@ def cancel_task(job_id: str, authorized: bool = Depends(authorize)):
     t = TM.get(job_id)
     if not t:
         raise HTTPException(404, "job not found")
+    # Mark the task as canceled and log the request. SSE will pick up
+    # the cancellation when status changes.
     t._cancel = True
+    try:
+        t.append("! cancel requested by user")
+    except Exception:
+        pass
     return {"ok": True}
 
 @app.get("/api/tasks/{job_id}/stream")
@@ -1077,6 +1335,240 @@ def export_md_alias(preview: bool = Query(False), authorized: bool = Depends(aut
 def export_csv_alias(authorized: bool = Depends(authorize)):
     return export_fmt(fmt="csv", authorized=authorized)
 
+# ---------------------------------------------------------------------------
+# Tools runner (repair / approve_top) — protected
+# ---------------------------------------------------------------------------
+
+@app.post("/api/tools/repair")
+def api_tools_repair(authorized: bool = Depends(authorize)):
+    """
+    repair_selection_files.py 실행:
+    - 작업본/발행본 JSON 구조 교정 + 승인본 재작성
+    - 실행 로그와 성공 여부를 반환
+    """
+    rc, out, err = _run_py("repair_selection_files.py", [])
+    ok = (rc == 0)
+    # 실행 후 발행본 싱크 보강(있으면 내부 스크립트가 수행하지만, 안전하게 한 번 더)
+    sync = _sync_after_save()
+    return {
+        "ok": ok,
+        "rc": rc,
+        "stdout": out.strip(),
+        "stderr": err.strip(),
+        "synced": bool(sync.get("ok")),
+        "sync_log": sync,
+    }
+
+@app.post("/api/tools/approve_top")
+def api_tools_approve_top(n: int = Query(20, ge=1, le=100), authorized: bool = Depends(authorize)):
+    """
+    force_approve_top20.py 실행:
+    - 상위 n개 승인(approved=True) 처리
+    - 처리 후 발행본을 동기화
+    """
+    rc, out, err = _run_py("force_approve_top20.py", ["--top", str(n)])
+    ok = (rc == 0)
+    sync = _sync_after_save()  # 스크립트가 싱크하더라도 안전하게 최종 보정
+    return {
+        "ok": ok,
+        "rc": rc,
+        "stdout": out.strip(),
+        "stderr": err.strip(),
+        "synced": bool(sync.get("ok")),
+        "sync_log": sync,
+        "top": n,
+    }
+# ---------------------------------------------------------------------------
+# Selection Approvals — protected (work JSON <-> publish JSON)
+# ---------------------------------------------------------------------------
+_SEL_LOCK = threading.Lock()
+
+class SelectionItemPatch(BaseModel):
+    idx: Optional[int] = Field(default=None, description="작업본 articles[] 인덱스(권장)")
+    id: Optional[str] = Field(default=None, description="기사 고유 id(_ensure_id 결과)")
+    approved: Optional[bool] = None
+    editor_note: Optional[str] = None
+
+class SelectionPatchRequest(BaseModel):
+    updates: List[SelectionItemPatch]
+    autosync: bool = True  # 저장 후 selected_articles.json 자동 동기화
+
+@app.get("/api/selection")
+def api_selection_list(
+    authorized: bool = Depends(authorize),
+    keyword: Optional[str] = None,
+    date: Optional[str] = None
+):
+    """
+    기사 승인 표용 데이터.
+    1) 스냅샷(_get_work_snapshot) 시도
+    2) 폴백: 작업본(SEL_WORK) 직접 읽기
+    ※ keyword/date 필터가 있어도 'idx'는 항상 '원본 파일 인덱스'를 보존.
+    """
+    def _match_kw(a: Dict[str, Any], kw: Optional[str]) -> bool:
+        # 키워드가 없으면 필터 미적용
+        if not kw: 
+            return True
+        kw = kw.strip().lower()
+
+        # 제목/출처/URL/keyword 필드 모두에서 찾아본다
+        bag = " ".join([
+            str(a.get("keyword") or a.get("kw") or ""),
+            str(a.get("title") or ""),
+            str(a.get("source") or a.get("publisher") or ""),
+            str(a.get("url") or a.get("link") or "")
+        ]).lower()
+
+        # 매칭 재료가 전혀 없으면 '걸러내지 말고 통과' (수집형식 다양성 보호)
+        if bag.strip() == "":
+            return True
+        return (kw in bag)
+
+    def _match_date(a: Dict[str, Any], d: Optional[str]) -> bool:
+        if not d: 
+            return True
+        return d in str(a.get("date") or "")
+
+    # 1) 스냅샷 시도
+    try:
+        snap = _get_work_snapshot() or {}
+    except Exception:
+        snap = {}
+
+    arts_full = (snap.get("articles") or [])
+    snap_date = snap.get("date")
+    snap_kw   = snap.get("keyword") or ""
+
+    # 2) 폴백: 스냅샷이 비면 작업본 JSON 직접 읽기
+    if not arts_full:
+        work = {}
+        for p in CAND_WORK:
+            if p.exists():
+                work = _read_json(p) or {}
+                if work: break
+
+        if isinstance(work, dict):
+            arts_full = work.get("articles") or work.get("items") or []
+            snap_date = snap_date or work.get("date")
+            snap_kw   = snap_kw   or work.get("keyword") or work.get("kw") or ""
+        elif isinstance(work, list):
+            arts_full = work
+
+    # 원본 인덱스를 보존한 채로 필터링
+    items: List[Dict[str, Any]] = []
+    approved = 0
+    for i, a in enumerate(arts_full or []):
+        if not _match_date(a, date): 
+            continue
+        if not _match_kw(a, keyword):
+            continue
+        try:
+            aid = _ensure_id(a)
+        except Exception:
+            aid = ""
+        ap = bool(a.get("approved") or a.get("selected") or (str(a.get("state","")).lower() in ("ready","published")))
+        if ap: 
+            approved += 1
+        items.append({
+            "idx": i,  # ← 원본 파일 인덱스(필터 전 인덱스) 유지
+            "id": aid,
+            "title": a.get("title"),
+            "source": a.get("source") or a.get("publisher"),
+            "date": a.get("date"),
+            "score": a.get("score"),
+            "url": a.get("url") or a.get("link"),
+            "approved": ap,
+            "editor_note": a.get("editor_note",""),
+            "keyword": a.get("keyword") or a.get("kw") or ""
+        })
+
+    gate_required = int(GATE.get("gate_required", 15))
+    return {
+        "items": items,
+        "summary": {
+            "total": len(items),
+            "approved": approved,
+            "gate_required": gate_required,
+            "gate_pass": bool(approved >= gate_required),
+            "date": snap_date,
+            "keyword": snap_kw,
+        }
+    }
+
+
+@app.patch("/api/selection")
+def api_selection_patch(req: SelectionPatchRequest, authorized: bool = Depends(authorize)):
+    """
+    승인/메모 배치 저장. req.updates = [{idx|id, approved?, editor_note?}, ...]
+    - 작업본 저장 후 autosync=True면 발행본(selected_articles.json) 동기화.
+    """
+    if not req.updates:
+        return {"updated": 0, "synced": False}
+
+    with _SEL_LOCK:
+        # 읽기는 후보 경로 → 저장은 SEL_WORK(SSOT)
+        work = {}
+        for p in CAND_WORK:
+            if p.exists():
+                work = _read_json(p) or {}
+                if work: break
+
+        arts = work.get("articles", []) or []
+        if not arts:
+            raise HTTPException(status_code=400, detail="no articles in work file")
+
+        # id -> index 매핑
+        id_to_idx: Dict[str, int] = {}
+        for i, a in enumerate(arts):
+            try:
+                id_to_idx[_ensure_id(a)] = i
+            except Exception:
+                continue
+
+        changed = 0
+        for p in req.updates:
+            # 우선순위: idx > id
+            target_idx = p.idx
+            if target_idx is None and p.id:
+                target_idx = id_to_idx.get(p.id)
+            if target_idx is None or target_idx < 0 or target_idx >= len(arts):
+                continue
+            row = arts[target_idx]
+            before_approved = bool(row.get("approved"))
+            before_note = row.get("editor_note","")
+
+            if p.approved is not None:
+                row["approved"] = bool(p.approved)
+                if p.approved:
+                    # 편리성: 승인 시 state도 ready로 끌어올림(발행 파이프라인과 정합)
+                    row["state"] = (row.get("state") or "candidate")
+                    if row["state"].lower() == "candidate":
+                        row["state"] = "ready"
+            if p.editor_note is not None:
+                row["editor_note"] = p.editor_note
+
+            if bool(row.get("approved")) != before_approved or row.get("editor_note","") != before_note:
+                changed += 1
+
+        if changed:
+            work["articles"] = arts
+            _write_json(SEL_WORK, work)
+
+        synced = False
+        if req.autosync:
+            sync = _sync_after_save()
+            synced = bool(sync.get("ok"))
+
+        # 현황 집계 반환
+        approved_cnt = sum(1 for a in arts if a.get("approved"))
+        gate_required = int(GATE.get("gate_required", 15))
+        return {
+            "updated": changed,
+            "synced": synced,
+            "approved": approved_cnt,
+            "gate_required": gate_required,
+            "gate_pass": bool(approved_cnt >= gate_required),
+        }
 
 # ---------------------------------------------------------------------------
 # Community / Items / Publish — protected
@@ -1119,24 +1611,76 @@ def api_save(payload: SavePayload, authorized: bool = Depends(authorize)):
     return {"saved": changed, "synced": sync.get("ok", False), "sync_log": sync}
 
 @app.get("/api/items")
-def api_items(state: str = Query("ready"), date: str | None = None, keyword: str | None = None,
-              authorized: bool = Depends(authorize)):
+def api_items(
+    state: str = Query("ready"),
+    date: str | None = None,
+    keyword: str | None = None,
+    authorized: bool = Depends(authorize),
+):
     """
     state=candidate|ready|rejected|published
-    date/keyword are hints (current file structure mainly uses state filter).
+    - ready: selected_articles.json(items/articles) 또는 work 스냅샷을 자동 탐색
+    - published: selected_articles.json(articles) 사용
+    - candidate/rejected: work 스냅샷(state 필터)
+    - date/keyword가 주어지면 해당 필드가 있는 항목만 추가 필터
     """
-    snap = _get_work_snapshot()
+
+    # 공통 필터 함수
+    def _match(it: dict) -> bool:
+        # state는 상단에서 선별하므로 여기선 date/keyword만 보조 확인
+        if date and str(it.get("date","")) != str(date):
+            return False
+        if keyword:  # 대부분 선정본은 keyword가 없으니, 주면 일치하는 것만 남김
+            if str(it.get("keyword","")).strip() != str(keyword).strip():
+                return False
+        return True
+
     s = (state or "").lower().strip()
-    arts = snap["articles"]
-    if s:
-        if s == "published":
-            pub = _read_json(SEL_PUB) or {}
-            items = pub.get("articles", []) or []
-            return {"date": pub.get("date", snap["date"]), "keyword": snap.get("keyword",""), "state": s, "items": items}
-        items = [a for a in arts if (a.get("state","").lower() == s)]
+
+    # 1) published는 최종본에서만
+    if s == "published":
+        pub = _read_json(SEL_PUB) or {}
+        items = [a for a in (pub.get("articles", []) or []) if _match(a)]
+        return {
+            "date": date or pub.get("date"),
+            "keyword": keyword or "",
+            "state": s,
+            "items": items,
+        }
+
+    # 2) ready는 범용 로더 → 없으면 work 스냅샷에서 state=ready
+    if s == "ready":
+        items_any, d_auto, kw_auto = _read_any_items(BASE)  # items/date/keyword 자동 탐색
+        src_items = items_any or []
+        if not src_items:
+            snap = _get_work_snapshot()
+            src_items = [a for a in (snap.get("articles", []) or []) if (a.get("state","").lower()=="ready")]
+            d_auto = d_auto or snap.get("date")
+            kw_auto = kw_auto or snap.get("keyword","")
+        items = [a for a in src_items if _match(a)]
+        return {
+            "date": date or d_auto,
+            "keyword": keyword or kw_auto or "",
+            "state": s,
+            "items": items,
+        }
+
+    # 3) 그 외(candidate/rejected/all)는 work 스냅샷 기준
+    snap = _get_work_snapshot()
+    arts = snap.get("articles", []) or []
+    if s in ("candidate","rejected"):
+        src_items = [a for a in arts if (a.get("state","").lower()==s)]
     else:
-        items = arts
-    return {"date": snap["date"], "keyword": snap.get("keyword",""), "state": s or "all", "items": items}
+        src_items = arts  # all 또는 빈 state
+
+    items = [a for a in src_items if _match(a)]
+    return {
+        "date": date or snap.get("date"),
+        "keyword": keyword or snap.get("keyword",""),
+        "state": s or "all",
+        "items": items,
+    }
+
 
 @app.post("/api/items/{item_id}/publish")
 def api_items_publish(item_id: str, req: PublishOneReq, authorized: bool = Depends(authorize)):
