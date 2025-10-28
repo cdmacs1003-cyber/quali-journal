@@ -1,17 +1,42 @@
-﻿# --- OK to exclude these ---
-**/__pycache__/
-**/.pytest_cache/
-**/.git/
-**/.venv/
-*.pyc
-*.pyo
-.env
+﻿# === 기본 제외(용량/보안) ===
+.git
+.github
+.gcloudignore
+.dockerignore
 *.log
 
-# --- DO NOT exclude our app code/assets ---
-# (아래와 같은 라인이 있다면 반드시 제거해야 함)
-# *.py
-# admin/
-# tools/
-# orchestrator.py
-# index.html
+# Python 캐시/가상환경
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Node/프론트
+node_modules/
+
+# 테스트/문서(원하면 유지 가능)
+tests/
+docs/
+
+# 아카이브/임시
+*.zip
+*.tar
+*.tar.gz
+*.tmp
+
+# === 아주 중요: HTML/정적 포함 보장 ===
+!index.html
+!**/*.html
+!**/*.htm
+!static/**
+!admin/**/index.html
+!admin/**/*.html
+!admin/static/**
+
+# 서버/필수 파일 포함 보장
+!requirements.txt
+!server_quali.py
+!admin/server_quali.py
+!app/**

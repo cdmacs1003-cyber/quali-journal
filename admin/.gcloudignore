@@ -1,0 +1,12 @@
+﻿.git/
+.gcloudignore
+*.log
+__pycache__/
+node_modules/
+
+!index.html
+!**/*.html
+!**/*.htm
+!app/**
+!server_quali.py
+!requirements.txt

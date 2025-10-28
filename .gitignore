@@ -16,3 +16,4 @@ tmp/
 
 # DO NOT ignore source/assets
 # (admin/, tools/, orchestrator.py 등은 추적 대상)
+openai_new.txt
