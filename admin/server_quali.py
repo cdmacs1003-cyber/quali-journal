@@ -24,6 +24,7 @@ import threading
 import secrets
 import time
 import re
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -34,6 +35,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.staticfiles import StaticFiles
+
+# === DB KPI helpers (optional; safe fallback) ================================
+try:
+    # SQLAlchemy ORM (패치셋에서 제공)
+    from app.qj_db import get_session, get_or_create_edition, kpi_for_edition, approve_top_n  # noqa: E401
+    _DB_READY = True
+except Exception:
+    _DB_READY = False
+# ============================================================================ 
+
 
 # SSOT: 서브프로세스도 이 파이썬으로 실행
 PYEXE = os.getenv("PYTHON_EXE") or sys.executable or "python"
@@ -338,20 +349,37 @@ TASK_LOG_DIR = ROOT / "logs" / "tasks"
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+# 목표: logging_setup 모듈이 없어도 기동에 절대 실패하지 않게(멱등)
+_Path = Path
+
+# 로그 디렉터리 보장
 try:
-    from logging_setup import setup_logger  # type: ignore
-    logger = setup_logger("server", str(ROOT / "logs" / "server.log"))
-except Exception:  # pragma: no cover
-    import logging
-    (ROOT / "logs").mkdir(parents=True, exist_ok=True)
+    (_Path(__file__).resolve().parent.parent / "logs").mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+
+_logger = None
+try:
+    # 프로젝트에 있으면 사용하는 경로 1) setup_logger 2) setup_logging 순으로 시도
+    try:
+        from logging_setup import setup_logger as _setup_any  # type: ignore
+    except Exception:
+        from logging_setup import setup_logging as _setup_any  # type: ignore
+    _logger = _setup_any("server", str((_Path(__file__).resolve().parent.parent / "logs" / "server.log")))
+except Exception:
+    # 모듈이 없거나 에러여도 기본 로깅으로 안전하게 진행
     logging.basicConfig(
-        filename=str(ROOT / "logs" / "server.log"),
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
-        encoding="utf-8",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+        ],
     )
-    logger = logging.getLogger("server")
-    logger.info("fallback logger initialized")
+    _logger = logging.getLogger("server")
+    _logger.info("fallback logger initialized (logging_setup missing)")
+
+logger = _logger
+
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -1119,19 +1147,6 @@ async def stream_task(job_id: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Gate config (GET/PATCH) — protected
-# ---------------------------------------------------------------------------
-@app.get("/api/config/gate_required")
-async def get_gate_required(authorized: bool = Depends(authorize)):
-    return {"gate_required": int(GATE.get("gate_required", 15))}
-
-@app.patch("/api/config/gate_required")
-async def set_gate_required(p: GatePatch, authorized: bool = Depends(authorize)):
-    v = max(1, min(100, int(p.gate_required)))  # 1~100 clamp
-    GATE["gate_required"] = v
-    return {"ok": True, "gate_required": v}
-
-# ---------------------------------------------------------------------------
 # Report / Enrich / Export — protected
 # ---------------------------------------------------------------------------
 @app.get("/api/report")
@@ -1146,6 +1161,28 @@ def get_report(date: str | None = None, authorized: bool = Depends(authorize)):
     for p in ARCHIVE.glob(f"daily_{day}.*"):
         items.append({"name": p.name, "size": p.stat().st_size})
     return {"date": day, "files": items}
+
+
+@app.patch("/api/config/gate_required")
+async def set_gate_required(p: GatePatch, authorized: bool = Depends(authorize)):
+    v = max(1, min(100, int(p.gate_required)))  # 1~100 clamp
+    if _DB_READY:
+        try:
+            snap = _get_work_snapshot() or {}
+            edate = snap.get("date") or _dt.date.today().isoformat()
+            ekw   = (snap.get("keyword") or "").strip()
+            sess = get_session()
+            ed = get_or_create_edition(sess, etype="keyword",
+                                       edate=_dt.date.fromisoformat(str(edate)),
+                                       keyword=ekw or None)
+            ed.gate_required = v
+            sess.commit()
+        except Exception:
+            GATE["gate_required"] = v
+    else:
+        GATE["gate_required"] = v
+    return {"ok": True, "gate_required": v}
+
 
 @app.post("/api/report")
 def post_report(payload: dict | None = Body(default=None), authorized: bool = Depends(authorize)):
@@ -1360,15 +1397,41 @@ def api_tools_repair(authorized: bool = Depends(authorize)):
     }
 
 @app.post("/api/tools/approve_top")
-def api_tools_approve_top(n: int = Query(20, ge=1, le=100), authorized: bool = Depends(authorize)):
+def api_tools_approve_top(
+    n: int = Query(20, ge=1, le=100),
+    authorized: bool = Depends(authorize),
+):
     """
     force_approve_top20.py 실행:
     - 상위 n개 승인(approved=True) 처리
     - 처리 후 발행본을 동기화
     """
+    # (선택) DB 기반 TopN 승인  ← 들여쓰기 바로잡음
+    if _DB_READY:
+        try:
+            snap = _get_work_snapshot() or {}
+            edate = snap.get("date") or _dt.date.today().isoformat()
+            ekw = (snap.get("keyword") or "").strip()
+
+            sess = get_session()
+            ed = get_or_create_edition(
+                sess,
+                etype="keyword",
+                edate=_dt.date.fromisoformat(str(edate)),
+                keyword=ekw or None,
+            )
+            approve_top_n(sess, ed, n=n)
+            sess.commit()
+        except Exception:
+            # DB 경로 에러는 무시하고, 아래 스크립트 경로로 폴백
+            pass
+
     rc, out, err = _run_py("force_approve_top20.py", ["--top", str(n)])
     ok = (rc == 0)
-    sync = _sync_after_save()  # 스크립트가 싱크하더라도 안전하게 최종 보정
+
+    # 스크립트 내부에서 싱크하더라도, 최종 한번 더 보정
+    sync = _sync_after_save()
+
     return {
         "ok": ok,
         "rc": rc,
@@ -1378,6 +1441,7 @@ def api_tools_approve_top(n: int = Query(20, ge=1, le=100), authorized: bool = D
         "sync_log": sync,
         "top": n,
     }
+
 # ---------------------------------------------------------------------------
 # Selection Approvals — protected (work JSON <-> publish JSON)
 # ---------------------------------------------------------------------------
@@ -1796,10 +1860,38 @@ async def get_status(
     authorized: bool = Depends(authorize),
 ):
     """
-    관리자 KPI/상태 조회 (토큰 보호)
-    - selection/community 집계, 게이트 통과 여부, 타임스탬프 포함
-    - date/keyword 쿼리 파라미터는 선택(지정 없으면 스냅샷 값 사용)
+    관리자 KPI/상태 조회 (DB 우선, 실패 시 기존 스냅샷 폴백)
+    - DB 사용 가능(_DB_READY)하면 Edition별 집계(kpi_for_edition)
+    - 아니면 현 스냅샷 로직(_get_work_snapshot 등) 사용
     """
+    # 1) DB 경로(권장)
+    if _DB_READY:
+        try:
+            # date/keyword가 없으면 스냅샷 값으로 폴백
+            snap = _get_work_snapshot() or {}
+            edate = date or snap.get("date") or _dt.date.today().isoformat()
+            ekw   = (keyword or snap.get("keyword") or "").strip()
+            sess = get_session()
+            ed = get_or_create_edition(sess, etype="keyword", edate=_dt.date.fromisoformat(str(edate)), keyword=ekw or None)
+            k = kpi_for_edition(sess, ed)  # {'total','approved','ready','gate_required'}
+            return {
+                "selected": 0, "approved": 0, "published": 0,  # 누적 KPI는 추후 확장
+                "gate_required": int(k.get("gate_required", 15)),
+                "ts": int(time.time()),
+                "selection_total": int(k.get("total", 0)),
+                "selection_approved": int(k.get("approved", 0)),
+                "state_counts": {"candidate": int(k.get("total",0)) - int(k.get("ready",0)), "ready": int(k.get("ready",0)), "rejected": 0},
+                "community_total": 0,            # 필요 시 커뮤니티도 DB화해서 합산
+                "keyword_total": int(k.get("total", 0)),
+                "gate_pass": bool(int(k.get("approved",0)) >= int(k.get("gate_required",15))),
+                "date": str(edate),
+                "keyword": ekw,
+            }
+        except Exception:
+            # 아래 폴백으로 진행
+            pass
+
+    # 2) 스냅샷 폴백(현행 로직 유지)
     try:
         work = _get_work_snapshot()            # {"date","keyword","articles":[...]}
         arts = work.get("articles", []) or []
@@ -1824,44 +1916,30 @@ async def get_status(
         gate_pass = bool(selection_approved >= gate_required)
 
         return {
-            # 누적 KPI(없으면 0)
             "selected": KPI.get("selected", 0) if isinstance(KPI, dict) else 0,
             "approved": KPI.get("approved", 0) if isinstance(KPI, dict) else 0,
             "published": KPI.get("published", 0) if isinstance(KPI, dict) else 0,
-
-            # 현재 스냅샷 집계
             "gate_required": gate_required,
             "ts": int(time.time()),
-
             "selection_total": selection_total,
             "selection_approved": selection_approved,
             "state_counts": state_counts,
-
             "community_total": community_total,
-            "keyword_total": selection_total,   # 선택본 전체를 키워드 총량으로 간주
-
+            "keyword_total": selection_total,
             "gate_pass": gate_pass,
-
-            # 표시용 메타(요청값 우선 → 스냅샷 값 폴백)
             "date": date or work.get("date"),
-            "keyword": keyword or work.get("keyword", ""),
+            "keyword": (keyword or work.get("keyword", "")).strip(),
         }
     except Exception:
-        # 안전 폴백(절대 500 안 내고 최소 정보 제공)
+        # 안전 폴백(절대 500 안 냄)
         return {
-            "selected": KPI.get("selected", 0) if isinstance(KPI, dict) else 0,
-            "approved": KPI.get("approved", 0) if isinstance(KPI, dict) else 0,
-            "published": KPI.get("published", 0) if isinstance(KPI, dict) else 0,
-            "gate_required": int(GATE.get("gate_required", 15)) if isinstance(GATE, dict) else 15,
-            "ts": int(time.time()),
-            "selection_total": 0,
-            "selection_approved": 0,
+            "selected": 0, "approved": 0, "published": 0,
+            "gate_required": 15, "ts": int(time.time()),
+            "selection_total": 0, "selection_approved": 0,
             "state_counts": {"candidate": 0, "ready": 0, "rejected": 0},
-            "community_total": 0,
-            "keyword_total": 0,
+            "community_total": 0, "keyword_total": 0,
             "gate_pass": False,
-            "date": date,
-            "keyword": keyword or "",
+            "date": date, "keyword": keyword or "",
         }
 
 
