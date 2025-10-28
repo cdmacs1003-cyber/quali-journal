@@ -2,29 +2,35 @@ name: Deploy Admin (Dockerfile@admin)
 
 on:
   push:
-    branches: [ "main", "fix/include-html" ]
+    branches: [ "main" ]           # 메인만 자동 배포
     paths:
-      - "admin/**"
+      - "admin/**"                 # admin 변경에만 동작
       - ".github/workflows/deploy-admin.yml"
-  workflow_dispatch:
+  workflow_dispatch:                # 수동 실행 허용
 
 permissions:
   contents: read
   id-token: write
+
+# 같은 브랜치에서 중복 실행되면 이전 작업 취소(안정성)
+concurrency:
+  group: deploy-admin-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   SERVICE: quali-journal-admin
   PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
   REGION: ${{ secrets.GOOGLE_REGION }}
   REPO: ${{ secrets.ARTIFACT_REPO }}
-  IMAGE_TAG: asia-northeast3-docker.pkg.dev/${{ secrets.GOOGLE_PROJECT }}/${{ secrets.ARTIFACT_REPO }}/admin:${{ github.sha }}
+  # 롤백/추적 쉬운 태그: sha-Run번호
+  IMAGE_TAG: asia-northeast3-docker.pkg.dev/${{ secrets.GOOGLE_PROJECT }}/${{ secrets.ARTIFACT_REPO }}/admin:${{ github.sha }}-${{ github.run_number }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: admin   # ★ 반드시 admin에서 빌드
+        working-directory: admin     # ★ 반드시 admin 폴더에서 빌드/배포
 
     steps:
       - name: Checkout
@@ -61,9 +67,17 @@ jobs:
       - name: Route 100% to latest
         run: gcloud run services update-traffic "${SERVICE}" --to-latest --region "${REGION}" --project "${PROJECT_ID}"
 
-      - name: Smoke /health
+      - name: Smoke /health (retry)
+        shell: bash
         run: |
           URL=$(gcloud run services describe "${SERVICE}" --region "${REGION}" --project "${PROJECT_ID}" --format="value(status.url)")
-          code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/health")
-          echo "HEALTH=${code}"
-          test "${code}" = "200"
+          echo "URL=${URL}"
+          for i in {1..10}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/health")
+            echo "try $i: ${code}"
+            if [ "$code" = "200" ]; then
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "health check failed"; exit 1
