@@ -1,0 +1,19 @@
+﻿2025-10-14 15:56:16 [INFO] EXPORT md=200, csv=200
+2025-10-14 15:56:38 [INFO] SUCCESS: export_20251014_155615.md, export_20251014_155615.csv → gs://qualijournal-backup-quali-journal-prod/y=2025/m=10/d=14/
+2025-10-14 15:56:38 [ERROR] NOTIFY ERROR: The remote server returned an error: (404) Not Found.
+2025-10-14 15:56:38 [INFO] 완료: 로컬=C:\Users\user\Desktop\퀄리저널\backup\20251014_155615  GCS=gs://qualijournal-backup-quali-journal-prod/y=2025/m=10/d=14/  (md=200, csv=200)
+2025-10-16 09:00:14 [INFO] EXPORT md=200, csv=200
+2025-10-16 09:00:36 [INFO] SUCCESS: export_20251016_090010.md, export_20251016_090010.csv → gs://qualijournal-backup-quali-journal-prod/y=2025/m=10/d=16/
+2025-10-16 09:00:37 [INFO] 완료: 로컬=C:\Users\user\Desktop\퀄리저널\backup\20251016_090010  GCS=gs://qualijournal-backup-quali-journal-prod/y=2025/m=10/d=16/  (md=200, csv=200)
+2025-10-18 09:00:12 [INFO] EXPORT md=401, csv=401
+2025-10-18 09:00:12 [ERROR] EXPORT FAILED: md=401, csv=401  URL=https://qualijournal-admin-q2cq64ti3a-du.a.run.app
+2025-10-20 09:00:12 [INFO] EXPORT md=401, csv=401
+2025-10-20 09:00:12 [ERROR] EXPORT FAILED: md=401, csv=401  URL=https://qualijournal-admin-q2cq64ti3a-du.a.run.app
+2025-10-21 09:00:09 [INFO] EXPORT md=401, csv=401
+2025-10-21 09:00:09 [ERROR] EXPORT FAILED: md=401, csv=401  URL=https://qualijournal-admin-q2cq64ti3a-du.a.run.app
+2025-10-22 09:00:09 [INFO] EXPORT md=401, csv=401
+2025-10-22 09:00:09 [ERROR] EXPORT FAILED: md=401, csv=401  URL=https://qualijournal-admin-q2cq64ti3a-du.a.run.app
+2025-10-24 09:00:10 [INFO] EXPORT md=401, csv=401
+2025-10-24 09:00:10 [ERROR] EXPORT FAILED: md=401, csv=401  URL=https://qualijournal-admin-q2cq64ti3a-du.a.run.app
+2025-10-25 09:00:12 [INFO] EXPORT md=401, csv=401
+2025-10-25 09:00:12 [ERROR] EXPORT FAILED: md=401, csv=401  URL=https://qualijournal-admin-q2cq64ti3a-du.a.run.app

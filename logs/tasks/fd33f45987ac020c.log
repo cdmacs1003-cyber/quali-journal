@@ -1,0 +1,16 @@
+[23:07:05] $ C:\Users\user\Desktop\퀄리저널\admin\.venv\Scripts\python.exe C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community
+[23:07:05] Traceback (most recent call last):
+[23:07:05]   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>
+[23:07:05]     import requests
+[23:07:05] ModuleNotFoundError: No module named 'requests'
+[23:07:05] $ C:\Users\user\Desktop\퀄리저널\admin\.venv\Scripts\python.exe C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all
+[23:07:05] Traceback (most recent call last):
+[23:07:05]   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>
+[23:07:05]     import requests
+[23:07:05] ModuleNotFoundError: No module named 'requests'
+[23:07:05] $ C:\Users\user\Desktop\퀄리저널\admin\.venv\Scripts\python.exe C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all
+[23:07:05] Traceback (most recent call last):
+[23:07:05]   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>
+[23:07:05]     import requests
+[23:07:05] ModuleNotFoundError: No module named 'requests'
+[23:07:05] ! exit=1
