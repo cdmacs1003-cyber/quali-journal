@@ -2,17 +2,17 @@ name: Deploy Admin (Dockerfile@admin)
 
 on:
   push:
-    branches: [ "main" ]           # 메인만 자동 배포
+    branches: [ "main" ]                  # 메인만 자동 배포
     paths:
-      - "admin/**"                 # admin 변경에만 동작
+      - "admin/**"
       - ".github/workflows/deploy-admin.yml"
-  workflow_dispatch:                # 수동 실행 허용
+  workflow_dispatch: {}                    # 수동 실행 허용
 
 permissions:
   contents: read
   id-token: write
 
-# 같은 브랜치에서 중복 실행되면 이전 작업 취소(안정성)
+# 같은 브랜치에서 겹치면 이전 실행 취소
 concurrency:
   group: deploy-admin-${{ github.ref }}
   cancel-in-progress: true
@@ -22,7 +22,7 @@ env:
   PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
   REGION: ${{ secrets.GOOGLE_REGION }}
   REPO: ${{ secrets.ARTIFACT_REPO }}
-  # 롤백/추적 쉬운 태그: sha-Run번호
+  # 추적 쉬운 태그(sha-Run번호)
   IMAGE_TAG: asia-northeast3-docker.pkg.dev/${{ secrets.GOOGLE_PROJECT }}/${{ secrets.ARTIFACT_REPO }}/admin:${{ github.sha }}-${{ github.run_number }}
 
 jobs:
@@ -30,14 +30,13 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: admin     # ★ 반드시 admin 폴더에서 빌드/배포
+        working-directory: admin          # ★ admin 폴더에서 빌드/배포
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Google Auth (WIF)
-        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
@@ -46,10 +45,13 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          install_components: "gcloud"
+          install_components: gcloud
 
-      - name: Print gcloud info
-        run: gcloud --version
+      - name: Sanity (WIF)
+        run: |
+          gcloud auth list
+          gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)"
+          gcloud services list --enabled --project "${PROJECT_ID}" | grep -E "run|artifact|cloudbuild|iamcredentials|secret" || true
 
       - name: Build & Push (Artifact Registry)
         run: |
@@ -65,7 +67,9 @@ jobs:
             --allow-unauthenticated
 
       - name: Route 100% to latest
-        run: gcloud run services update-traffic "${SERVICE}" --to-latest --region "${REGION}" --project "${PROJECT_ID}"
+        run: |
+          gcloud run services update-traffic "${SERVICE}" --to-latest \
+            --region "${REGION}" --project "${PROJECT_ID}"
 
       - name: Smoke /health (retry)
         shell: bash
@@ -75,9 +79,7 @@ jobs:
           for i in {1..10}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/health")
             echo "try $i: ${code}"
-            if [ "$code" = "200" ]; then
-              exit 0
-            fi
+            if [ "$code" = "200" ]; then exit 0; fi
             sleep 6
           done
           echo "health check failed"; exit 1
