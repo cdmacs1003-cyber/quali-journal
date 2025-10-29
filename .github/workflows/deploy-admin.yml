@@ -1,18 +1,18 @@
-name: Deploy Admin (Dockerfile@admin)
+﻿name: Deploy Admin (Dockerfile@admin)
 
 on:
   push:
-    branches: [ "main" ]                  # 메인만 자동 배포
+    branches: [ "main" ]                  # 硫붿씤留??먮룞 諛고룷
     paths:
       - "admin/**"
       - ".github/workflows/deploy-admin.yml"
-  workflow_dispatch: {}                    # 수동 실행 허용
+  workflow_dispatch: {}                    # ?섎룞 ?ㅽ뻾 ?덉슜
 
 permissions:
   contents: read
   id-token: write
 
-# 같은 브랜치에서 겹치면 이전 실행 취소(안정성)
+# 媛숈? 釉뚮옖移섏뿉??寃뱀튂硫??댁쟾 ?ㅽ뻾 痍⑥냼(?덉젙??
 concurrency:
   group: deploy-admin-${{ github.ref }}
   cancel-in-progress: true
@@ -22,7 +22,7 @@ env:
   PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
   REGION: ${{ secrets.GOOGLE_REGION }}
   REPO: ${{ secrets.ARTIFACT_REPO }}
-  # 추적 쉬운 태그(sha-Run번호)
+  # 異붿쟻 ?ъ슫 ?쒓렇(sha-Run踰덊샇)
   IMAGE_TAG: asia-northeast3-docker.pkg.dev/${{ secrets.GOOGLE_PROJECT }}/${{ secrets.ARTIFACT_REPO }}/admin:${{ github.sha }}-${{ github.run_number }}
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: admin          # ★ 반드시 admin 폴더에서 빌드/배포
+        working-directory: admin          # ??諛섎뱶??admin ?대뜑?먯꽌 鍮뚮뱶/諛고룷
 
     steps:
       - name: Checkout
@@ -83,4 +83,5 @@ jobs:
             sleep 6
           done
           echo "health check failed"; exit 1
+
 
