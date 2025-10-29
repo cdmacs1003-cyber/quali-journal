@@ -12,7 +12,7 @@ permissions:
   contents: read
   id-token: write
 
-# 같은 브랜치에서 겹치면 이전 실행 취소
+# 같은 브랜치에서 겹치면 이전 실행 취소(안정성)
 concurrency:
   group: deploy-admin-${{ github.ref }}
   cancel-in-progress: true
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: admin          # ★ admin 폴더에서 빌드/배포
+        working-directory: admin          # ★ 반드시 admin 폴더에서 빌드/배포
 
     steps:
       - name: Checkout
@@ -50,31 +50,31 @@ jobs:
       - name: Sanity (WIF)
         run: |
           gcloud auth list
-          gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)"
-          gcloud services list --enabled --project "${PROJECT_ID}" | grep -E "run|artifact|cloudbuild|iamcredentials|secret" || true
+          gcloud projects describe "${{ env.PROJECT_ID }}" --format="value(projectNumber)"
+          gcloud services list --enabled --project "${{ env.PROJECT_ID }}" | grep -E "run|artifact|cloudbuild|iamcredentials|secret" || true
 
       - name: Build & Push (Artifact Registry)
         run: |
           gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
-          gcloud builds submit . --tag "${IMAGE_TAG}" --project "${PROJECT_ID}"
+          gcloud builds submit . --tag "${{ env.IMAGE_TAG }}" --project "${{ env.PROJECT_ID }}"
 
       - name: Deploy to Cloud Run (SRC)
         run: |
-          gcloud run deploy "${SERVICE}" \
-            --image "${IMAGE_TAG}" \
-            --region "${REGION}" \
-            --project "${PROJECT_ID}" \
+          gcloud run deploy "${{ env.SERVICE }}" \
+            --image "${{ env.IMAGE_TAG }}" \
+            --region "${{ env.REGION }}" \
+            --project "${{ env.PROJECT_ID }}" \
             --allow-unauthenticated
 
       - name: Route 100% to latest
         run: |
-          gcloud run services update-traffic "${SERVICE}" --to-latest \
-            --region "${REGION}" --project "${PROJECT_ID}"
+          gcloud run services update-traffic "${{ env.SERVICE }}" --to-latest \
+            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
 
       - name: Smoke /health (retry)
         shell: bash
         run: |
-          URL=$(gcloud run services describe "${SERVICE}" --region "${REGION}" --project "${PROJECT_ID}" --format="value(status.url)")
+          URL=$(gcloud run services describe "${{ env.SERVICE }}" --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" --format="value(status.url)")
           echo "URL=${URL}"
           for i in {1..10}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/health")
@@ -83,3 +83,4 @@ jobs:
             sleep 6
           done
           echo "health check failed"; exit 1
+
