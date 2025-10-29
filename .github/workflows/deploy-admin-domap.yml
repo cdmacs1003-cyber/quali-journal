@@ -6,12 +6,13 @@ on:
     paths:
       - "admin/**"
       - ".github/workflows/deploy-admin-domap.yml"
-  workflow_dispatch: {}
+  workflow_dispatch: {}                        # 수동 실행 허용
 
 permissions:
   contents: read
   id-token: write
 
+# 같은 브랜치에서 겹치면 이전 실행 취소(안정성)
 concurrency:
   group: deploy-admin-domap-${{ github.ref }}
   cancel-in-progress: true
@@ -21,6 +22,7 @@ env:
   PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
   REGION: ${{ secrets.GOOGLE_REGION }}
   REPO: ${{ secrets.ARTIFACT_REPO }}
+  # 추적 쉬운 태그(sha-Run번호)
   IMAGE_TAG: asia-northeast3-docker.pkg.dev/${{ secrets.GOOGLE_PROJECT }}/${{ secrets.ARTIFACT_REPO }}/admin:${{ github.sha }}-${{ github.run_number }}
 
 jobs:
@@ -28,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: admin
+        working-directory: admin              # ★ 반드시 admin/에서 빌드
 
     steps:
       - name: Checkout
@@ -48,32 +50,32 @@ jobs:
       - name: Sanity (WIF)
         run: |
           gcloud auth list
-          gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)"
-          gcloud services list --enabled --project "${PROJECT_ID}" | grep -E "run|artifact|cloudbuild|iamcredentials|secret" || true
+          gcloud projects describe "${{ env.PROJECT_ID }}" --format="value(projectNumber)"
+          gcloud services list --enabled --project "${{ env.PROJECT_ID }}" | grep -E "run|artifact|cloudbuild|iamcredentials|secret" || true
 
       - name: Build & Push (Artifact Registry)
         run: |
           gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
-          gcloud builds submit . --tag "${IMAGE_TAG}" --project "${PROJECT_ID}"
+          gcloud builds submit . --tag "${{ env.IMAGE_TAG }}" --project "${{ env.PROJECT_ID }}"
 
       - name: Deploy to Cloud Run (LIVE/domap)
         run: |
-          gcloud run deploy "${SERVICE_LIVE}" \
-            --image "${IMAGE_TAG}" \
-            --region "${REGION}" \
-            --project "${PROJECT_ID}" \
+          gcloud run deploy "${{ env.SERVICE_LIVE }}" \
+            --image "${{ env.IMAGE_TAG }}" \
+            --region "${{ env.REGION }}" \
+            --project "${{ env.PROJECT_ID }}" \
             --allow-unauthenticated \
             --set-secrets ADMIN_TOKEN=ADMIN_TOKEN:latest
 
       - name: Route 100% to latest
         run: |
-          gcloud run services update-traffic "${SERVICE_LIVE}" --to-latest \
-            --region "${REGION}" --project "${PROJECT_ID}"
+          gcloud run services update-traffic "${{ env.SERVICE_LIVE }}" --to-latest \
+            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
 
       - name: Smoke /health (LIVE, retry)
         shell: bash
         run: |
-          URL=$(gcloud run services describe "${SERVICE_LIVE}" --region "${REGION}" --project "${PROJECT_ID}" --format="value(status.url)")
+          URL=$(gcloud run services describe "${{ env.SERVICE_LIVE }}" --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" --format="value(status.url)")
           echo "URL=${URL}"
           for i in {1..10}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/health")
@@ -82,4 +84,3 @@ jobs:
             sleep 6
           done
           echo "health check failed"; exit 1
-
