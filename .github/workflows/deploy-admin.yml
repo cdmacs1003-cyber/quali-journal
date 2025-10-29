@@ -2,35 +2,34 @@
 
 on:
   push:
-    branches: [ "main" ]                  # 硫붿씤留??먮룞 諛고룷
+    branches: [ "main" ]
     paths:
       - "admin/**"
       - ".github/workflows/deploy-admin.yml"
-  workflow_dispatch: {}                    # ?섎룞 ?ㅽ뻾 ?덉슜
+  workflow_dispatch: {}
 
 permissions:
   contents: read
   id-token: write
 
-# 媛숈? 釉뚮옖移섏뿉??寃뱀튂硫??댁쟾 ?ㅽ뻾 痍⑥냼(?덉젙??
+# 같은 브랜치에서 겹치면 이전 실행 취소
 concurrency:
   group: deploy-admin-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   SERVICE: quali-journal-admin
-  PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
-  REGION: ${{ secrets.GOOGLE_REGION }}
-  REPO: ${{ secrets.ARTIFACT_REPO }}
-  # 異붿쟻 ?ъ슫 ?쒓렇(sha-Run踰덊샇)
-  IMAGE_TAG: asia-northeast3-docker.pkg.dev/${{ secrets.GOOGLE_PROJECT }}/${{ secrets.ARTIFACT_REPO }}/admin:${{ github.sha }}-${{ github.run_number }}
+  PROJECT_ID: ${{ secrets.GOOGLE_PROJECT || 'quali-journal-prod' }}
+  REGION:     ${{ secrets.GOOGLE_REGION  || 'asia-northeast3' }}
+  REPO:       ${{ secrets.ARTIFACT_REPO || 'quali-repo' }}
+  IMAGE_TAG:  asia-northeast3-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/admin:${{ github.sha }}-${{ github.run_number }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: admin          # ??諛섎뱶??admin ?대뜑?먯꽌 鍮뚮뱶/諛고룷
+        working-directory: admin
 
     steps:
       - name: Checkout
@@ -41,6 +40,14 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
           service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
+      # 필수 env 누락 가드
+      - name: Guard env (PROJECT_ID/REGION)
+        if: ${{ env.PROJECT_ID == '' || env.REGION == '' }}
+        run: |
+          echo "PROJECT_ID='${{ env.PROJECT_ID }}'  REGION='${{ env.REGION }}'"
+          echo "::error::Missing GA secrets GOOGLE_PROJECT/GOOGLE_REGION"
+          exit 1
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -56,7 +63,10 @@ jobs:
       - name: Build & Push (Artifact Registry)
         run: |
           gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
-          gcloud builds submit . --tag "${{ env.IMAGE_TAG }}" --project "${{ env.PROJECT_ID }}"
+          gcloud builds submit . \
+            --gcs-source-staging-dir=gs://${{ env.PROJECT_ID }}-cloudbuild/source \
+            --tag "${{ env.IMAGE_TAG }}" \
+            --project "${{ env.PROJECT_ID }}"
 
       - name: Deploy to Cloud Run (SRC)
         run: |
@@ -83,5 +93,20 @@ jobs:
             sleep 6
           done
           echo "health check failed"; exit 1
+
+      # ⬇︎ 요청하신 /api/status(토큰) 스모크 — 앵커 바로 아래 삽입
+      - name: Smoke /api/status (token)
+        shell: bash
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          URL=$(gcloud run services describe "${{ env.SERVICE }}" \
+                --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" \
+                --format="value(status.url)")
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+                 -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                 "${URL}/api/status")
+          echo "STATUS=${code}"
+          test "${code}" = "200"
 
 
