@@ -1,7 +1,14 @@
-﻿name: Deploy Admin API (WIF harden)
+name: Deploy Admin API (WIF harden)
 
 on:
   push:
+    branches: [ main ]
+    paths:
+      - 'admin/**'
+      - '*.py'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-admin.yml'
+  pull_request:
     branches: [ main ]
     paths:
       - 'admin/**'
@@ -65,6 +72,7 @@ jobs:
 
       - name: Snapshot previous revision
         id: prev
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           PREV=$(gcloud run services describe "$SERVICE" --region "$REGION" \
                  --format='value(status.latestCreatedRevisionName)')
@@ -73,12 +81,12 @@ jobs:
       - name: Build image (Cloud Build)
         run: |
           TAG="$(date +%Y%m%d_%H%M%S)-${GIT_SHA::7}"
-          # 레지스트리는 도쿄(asia-northeast1) 공용 사용
           IMG="asia-northeast1-docker.pkg.dev/${PROJECT_ID}/qualijournal/qj-admin:${TAG}"
           echo "IMG=$IMG" >> "$GITHUB_ENV"
           gcloud builds submit --tag "$IMG" .
 
       - name: Deploy (no-traffic)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           gcloud run deploy "$SERVICE" --image "$IMG" --region "$REGION" \
             --no-traffic --labels=commit-sha="${GIT_SHA}",env=prod --quiet
@@ -86,17 +94,20 @@ jobs:
             --format='value(status.latestCreatedRevisionName)'
 
       - name: "Smoke /health (run.app)"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
           curl -fsS "$URL/health" >/dev/null
 
       - name: Shift traffic to latest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest --quiet
           gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.traffic)'
 
       - name: Assert revision updated
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           NEW=$(gcloud run services describe "$SERVICE" --region "$REGION" \
                 --format='value(status.latestCreatedRevisionName)')
