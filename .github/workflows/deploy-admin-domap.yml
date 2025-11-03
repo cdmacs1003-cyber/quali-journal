@@ -1,0 +1,137 @@
+﻿name: Deploy Admin LIVE (safe rollout)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "admin/**"
+      - ".github/workflows/deploy-admin-domap.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-admin-live
+  cancel-in-progress: true
+
+env:
+  # LIVE 서비스(도메인 연결)
+  SERVICE_LIVE: quali-admin-domap
+  # 런타임 리전(도메인 붙은 Cloud Run 서비스 리전)
+  REGION: ${{ secrets.GOOGLE_REGION }}          # 예: asia-northeast1
+  # 프로젝트/레지스트리
+  PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
+  REPO: ${{ secrets.ARTIFACT_REPO }}
+  # 아티팩트 레지스트리 리전(이미지 빌드/푸시 위치) — 필요 시 변경
+  AR_REGION: asia-northeast3
+
+jobs:
+  deploy-live:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin   # admin/ 디렉터리에서 빌드
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Google Auth (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          install_components: gcloud
+          
+
+      - name: Sanity (whoami)
+        run: |
+          gcloud auth list
+          gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)"
+
+      # --- build & push image -------------------------------------------------
+      - name: Build & Push (Cloud Build)
+        run: |
+          set -e
+          IMAGE_TAG="${AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/admin:${GITHUB_SHA}-${GITHUB_RUN_NUMBER}"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          gcloud builds submit . --tag "$IMAGE_TAG"
+
+      # --- 1) 배포 = 무트래픽 + 라벨(commit-sha) -----------------------------
+      - name: Deploy (no-traffic, labeled)
+        run: |
+          gcloud run deploy "${SERVICE_LIVE}" \
+            --image "${IMAGE_TAG}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --labels commit-sha=${GITHUB_SHA},env=prod \
+            --no-traffic \
+            --allow-unauthenticated \
+            --set-secrets ADMIN_TOKEN=ADMIN_TOKEN:latest
+
+      # --- 2) 전환 전 스모크(/health) ----------------------------------------
+      - name: Smoke /health (PRE-TRAFFIC)
+        shell: bash
+        run: |
+          set -e
+          URL=$(gcloud run services describe "${SERVICE_LIVE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format='value(status.url)')
+          echo "URL=${URL}"
+          curl -fsSL "${URL}/health"
+
+      # --- 3) 5% → 20% → 50% → 100% 단계 전환 + 실패 시 자동 롤백 -----------
+      - name: Traffic split 5% → 20% → 50% → 100% (with rollback)
+        shell: bash
+        run: |
+          set -e
+          svc="${SERVICE_LIVE}"
+          region="${REGION}"
+          proj="${PROJECT_ID}"
+          URL=$(gcloud run services describe "$svc" --region "$region" --project "$proj" --format='value(status.url)')
+
+          # 현재 트래픽 받는 리비전(OLD)과 방금 배포된 최신 리비전(NEW) 식별
+          OLD_REV=$(gcloud run services describe "$svc" --region "$region" --project "$proj" \
+                    --format='value(status.traffic[0].revisionName)')
+          NEW_REV=$(gcloud run revisions list --service "$svc" --region "$region" --project "$proj" \
+                    --sort-by="~createTime" --limit=1 --format='value(METADATA.name)')
+
+          echo "OLD=$OLD_REV"
+          echo "NEW=$NEW_REV"
+          echo "URL=$URL"
+
+          for PCT in 5 20 50; do
+            echo "→ shift NEW=${PCT}%"
+            gcloud run services update-traffic "$svc" --region "$region" --project "$proj" \
+              --to-revisions ${OLD_REV}=$((100-PCT)),${NEW_REV}=${PCT}
+            # 관찰 여유
+            sleep 90
+            echo "health re-check @ ${PCT}%"
+            curl -fsSL "${URL}/health" || {
+              echo "Health failed → rollback to OLD=100%"
+              gcloud run services update-traffic "$svc" --region "$region" --project "$proj" \
+                --to-revisions ${OLD_REV}=100
+              exit 1
+            }
+          done
+
+          echo "→ final shift 100% to NEW"
+          gcloud run services update-traffic "$svc" --region "$region" --project "$proj" \
+            --to-revisions ${NEW_REV}=100
+
+      # --- 4) 라벨/트래픽 증빙 출력 ------------------------------------------
+      - name: Show traffic & labels
+        run: |
+          gcloud run revisions list \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --service "${SERVICE_LIVE}" \
+            --format='table(METADATA.name,metadata.labels.commit-sha,trafficPercent,createTime)'
