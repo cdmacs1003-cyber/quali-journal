@@ -8,6 +8,13 @@ on:
       - '*.py'
       - 'Dockerfile'
       - '.github/workflows/deploy-admin-domap.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'admin/**'
+      - '*.py'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-admin-domap.yml'
   workflow_dispatch: {}
 
 permissions:
@@ -35,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1) WIF 인증 (Google용)
+      # 1) WIF 인증 (Google)
       - name: Auth via WIF (OIDC)
         id: auth
         uses: google-github-actions/auth@v2
@@ -50,7 +57,7 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      # 2) GitHub OIDC 클레임 검증 (repo/ref) — GitHub에서 직접 발급
+      # 2) GitHub OIDC 클레임(리포/브랜치) 검증
       - name: Verify OIDC claims (repo/ref)
         env:
           AUDIENCE: https://sts.googleapis.com
@@ -65,15 +72,16 @@ jobs:
           test "$(jq -r .repository gh-oidc.json)" = "${REPO_NAME}"
           test "$(jq -r .ref         gh-oidc.json)" = "${GIT_REF}"
 
-      # 3) 이전 리비전 스냅샷
+      # 3) 이전 리비전 스냅샷 (prod 배포에서만 의미 → 가드)
       - name: Snapshot previous revision
         id: prev
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           PREV=$(gcloud run services describe "$SERVICE" --region "$REGION" \
                  --format='value(status.latestCreatedRevisionName)')
           echo "prev=$PREV" >> "$GITHUB_OUTPUT"
 
-      # 4) Cloud Build로 이미지 빌드 & 푸시
+      # 4) Cloud Build 이미지 빌드( PR/메인 공통 )
       - name: Build image (Cloud Build)
         run: |
           TAG="$(date +%Y%m%d_%H%M%S)-${GIT_SHA::7}"
@@ -81,29 +89,33 @@ jobs:
           echo "IMG=$IMG" >> "$GITHUB_ENV"
           gcloud builds submit --tag "$IMG" .
 
-      # 5) no-traffic 배포 + 라벨
+      # 5) no-traffic 배포 (메인 push에서만)
       - name: Deploy (no-traffic)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           gcloud run deploy "$SERVICE" --image "$IMG" --region "$REGION" \
             --no-traffic --labels=commit-sha="${GIT_SHA}",env=prod --quiet
           gcloud run services describe "$SERVICE" --region "$REGION" \
             --format='value(status.latestCreatedRevisionName)'
 
-      # 6) /health 스모크
+      # 6) /health 스모크 (메인 push에서만)
       - name: "Smoke /health (run.app)"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
           curl -fsS "$URL/health" >/dev/null
 
-      # 7) 최신 리비전에 100% 트래픽
+      # 7) 최신 리비전에 100% 트래픽 (메인 push에서만)
       - name: Shift traffic to latest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest --quiet
           gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.traffic)'
 
-      # 8) 리비전 변경 보증(미변경이면 실패)
+      # 8) 리비전 변경 확인 (메인 push에서만)
       - name: Assert revision updated
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           NEW=$(gcloud run services describe "$SERVICE" --region "$REGION" \
                 --format='value(status.latestCreatedRevisionName)')
