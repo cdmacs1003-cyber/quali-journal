@@ -14,31 +14,51 @@ env:
   GCP_REGION: asia-northeast1
   SERVICE: quali-admin-domap
   BUILD_CONTEXT: admin
-  REQUIRE_DB: "false"     # DB 필요한 배포만 true
+  REQUIRE_DB: "false"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # --- WIF 사전 점검(비어있으면 즉시 실패) ---
-      - name: Preflight — check WIF secrets
+      # --- 어떤 인증을 쓸지 결정(OIDC 우선, 없으면 키) ---
+      - name: Decide auth strategy
+        id: decide
+        shell: bash
         env:
           WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
-          WIF_SA: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+          WIF_SA:       ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+          SA_KEY:       ${{ secrets.GCP_SA_KEY }}   # 임시 fallback (선택)
+          EVENT:        ${{ github.event_name }}
         run: |
-          test -n "$WIF_PROVIDER" || { echo "::error::Missing secret: GCP_WIF_PROVIDER"; exit 1; }
-          test -n "$WIF_SA"       || { echo "::error::Missing secret: GCP_WIF_SERVICE_ACCOUNT"; exit 1; }
+          set -euo pipefail
+          if [[ -n "$WIF_PROVIDER" && -n "$WIF_SA" ]]; then
+            echo "strategy=oidc" >> $GITHUB_OUTPUT
+            echo "Using OIDC(WIF)"
+          elif [[ -n "$SA_KEY" && "$EVENT" == "workflow_dispatch" ]]; then
+            echo "strategy=json" >> $GITHUB_OUTPUT
+            echo "Using SA key (temporary)"
+          else
+            echo "::error::Missing WIF secrets (GCP_WIF_PROVIDER/GCP_WIF_SERVICE_ACCOUNT)."
+            echo "Set WIF secrets, or temporarily set GCP_SA_KEY and run via workflow_dispatch."
+            exit 1
+          fi
 
-      # --- Auth 먼저(Setup gcloud보다 앞) ---
+      # --- 인증 (선택적 분기) ---
       - name: Authenticate to Google Cloud (WIF)
+        if: steps.decide.outputs.strategy == 'oidc'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Authenticate to Google Cloud (SA key fallback)
+        if: steps.decide.outputs.strategy == 'json'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -89,24 +109,20 @@ jobs:
             echo "Docker unavailable → skipping image gate"
           fi
 
-      # ---------- Cloud SQL STOP 정책(선택) ----------
+      # ---------- 정책/트래픽/도메인 ----------
       - name: Policy — fail if Cloud SQL is STOPPED
         if: env.REQUIRE_DB == 'true'
-        shell: bash
         run: |
           STATE="$(gcloud sql instances describe quali-pg --format='value(state)' || true)"
           [ "$STATE" != "STOPPED" ] || { echo "::error::Cloud SQL is STOPPED; deployment blocked."; exit 1; }
 
-      # ---------- 런타임 라우팅/트래픽 ----------
       - name: Traffic must be 100% to LATEST
-        shell: bash
         run: |
           T="$(gcloud run services describe "${SERVICE}" --region "${GCP_REGION}" --format='value(status.traffic)')"
           echo "$T" | grep -q 'LATEST' || { echo "::error::traffic not pointing to LATEST"; exit 1; }
           echo "$T" | grep -q '100'   || { echo "::error::traffic not 100%"; exit 1; }
 
       - name: Domain mapping route must match service
-        shell: bash
         run: |
           R="$(gcloud beta run domain-mappings describe --domain admin.standardai.co.kr --region "${GCP_REGION}" --format='value(spec.routeName)' || true)"
           test "$R" = "${SERVICE}" || { echo "::error::domain maps to $R (expected ${SERVICE})"; exit 1; }
