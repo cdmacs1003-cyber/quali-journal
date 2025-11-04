@@ -14,8 +14,7 @@ env:
   GCP_REGION: asia-northeast1
   SERVICE: quali-admin-domap
   BUILD_CONTEXT: admin
-  # REQUIRE_DB=true 로 켜면 Cloud SQL STOP 정책 게이트 발동
-  REQUIRE_DB: "false"
+  REQUIRE_DB: "false"     # DB 필요한 배포만 true
 
 jobs:
   deploy:
@@ -25,22 +24,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT }}
-          install_components: "beta"
+      # --- WIF 사전 점검(비어있으면 즉시 실패) ---
+      - name: Preflight — check WIF secrets
+        env:
+          WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
+          WIF_SA: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+        run: |
+          test -n "$WIF_PROVIDER" || { echo "::error::Missing secret: GCP_WIF_PROVIDER"; exit 1; }
+          test -n "$WIF_SA"       || { echo "::error::Missing secret: GCP_WIF_SERVICE_ACCOUNT"; exit 1; }
 
+      # --- Auth 먼저(Setup gcloud보다 앞) ---
       - name: Authenticate to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
 
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+          install_components: "beta"
+
       - name: Configure Docker auth
         run: gcloud auth configure-docker --quiet
 
-      # ---------------- Gate 1: 업로드 목록(사전) ----------------
+      # ---------- Gate 1: 업로드 목록 ----------
       - name: Gate 1 — upload list (admin context)
         working-directory: ${{ env.BUILD_CONTEXT }}
         shell: bash
@@ -50,27 +59,19 @@ jobs:
           req=( 'index.html' 'assets/style.css' 'assets/app.js' 'requirements.txt' 'server_quali.py' )
           ok=1
           for f in "${req[@]}"; do
-            if ! egrep -q "(^|[/\\])${f}$" /tmp/upload.txt; then
-              echo "::error::missing in upload: ${f}"
-              ok=0
-            fi
+            egrep -q "(^|[/\\])${f}$" /tmp/upload.txt || { echo "::error::missing in upload: ${f}"; ok=0; }
           done
           test $ok -eq 1
 
-      # ---------------- 배포 ----------------
+      # ---------- Deploy ----------
       - name: Deploy to Cloud Run (admin context)
         working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
           set -euo pipefail
-          gcloud run deploy "${SERVICE}" \
-            --region "${GCP_REGION}" \
-            --source . \
-            --quiet
-          gcloud run services update-traffic "${SERVICE}" \
-            --region "${GCP_REGION}" \
-            --to-latest
+          gcloud run deploy "${SERVICE}" --region "${GCP_REGION}" --source . --quiet
+          gcloud run services update-traffic "${SERVICE}" --region "${GCP_REGION}" --to-latest
 
-      # ---------------- Gate 2: 이미지 내용(사후) ----------------
+      # ---------- Gate 2: 이미지 내용 ----------
       - name: Gate 2 — image content (skip if Docker unavailable)
         shell: bash
         run: |
@@ -88,35 +89,24 @@ jobs:
             echo "Docker unavailable → skipping image gate"
           fi
 
-      # ---------------- Cloud SQL STOP 정책(선택) ----------------
+      # ---------- Cloud SQL STOP 정책(선택) ----------
       - name: Policy — fail if Cloud SQL is STOPPED
         if: env.REQUIRE_DB == 'true'
         shell: bash
         run: |
-          set -euo pipefail
           STATE="$(gcloud sql instances describe quali-pg --format='value(state)' || true)"
-          if [ "${STATE}" = "STOPPED" ]; then
-            echo "::error::Cloud SQL is STOPPED; deployment blocked."
-            exit 1
-          fi
+          [ "$STATE" != "STOPPED" ] || { echo "::error::Cloud SQL is STOPPED; deployment blocked."; exit 1; }
 
-      # ---------------- 런타임 라우팅/트래픽 검증 ----------------
+      # ---------- 런타임 라우팅/트래픽 ----------
       - name: Traffic must be 100% to LATEST
         shell: bash
         run: |
-          set -euo pipefail
           T="$(gcloud run services describe "${SERVICE}" --region "${GCP_REGION}" --format='value(status.traffic)')"
-          echo "$T"
           echo "$T" | grep -q 'LATEST' || { echo "::error::traffic not pointing to LATEST"; exit 1; }
           echo "$T" | grep -q '100'   || { echo "::error::traffic not 100%"; exit 1; }
 
-      - name: Domain mapping route must match service (if exists)
+      - name: Domain mapping route must match service
         shell: bash
         run: |
-          set -euo pipefail
           R="$(gcloud beta run domain-mappings describe --domain admin.standardai.co.kr --region "${GCP_REGION}" --format='value(spec.routeName)' || true)"
-          if [ -n "$R" ]; then
-            test "$R" = "${SERVICE}" || { echo "::error::domain maps to $R (expected ${SERVICE})"; exit 1; }
-          else
-            echo "No domain mapping found — skipping check"
-          fi
+          test "$R" = "${SERVICE}" || { echo "::error::domain maps to $R (expected ${SERVICE})"; exit 1; }
