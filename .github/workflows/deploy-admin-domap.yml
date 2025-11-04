@@ -30,29 +30,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # gcloud 설치는 PR/Push 모두에서 (Pre-gate가 gcloud를 씀)
+      - name: Setup gcloud (install only)
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      # WIF 인증은 main push에서만 (fork/Dependabot PR 시 비밀 없음)
       - name: Google Auth (WIF/OIDC)
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.GCP_WIF_PROVIDER != '' && secrets.GCP_WIF_SERVICE_ACCOUNT != '' }}
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
           token_format: access_token
 
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-
       - name: Compute image tag
         run: |
           set -euo pipefail
           echo "IMG=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
 
-      # Pre-gate: make sure required files are in gcloud upload list
+      # -------- Pre-gate: 업로드 목록에 필수 파일 확인 (항상 실행) --------
       - name: "Pre-gate: files to be uploaded"
         run: |
           set -euo pipefail
           gcloud meta list-files-for-upload > _upload.txt
-
           missing=0
           require() { grep -Fq -- "$1" _upload.txt || { echo "::error ::Missing in upload (pattern): $1"; missing=1; }; }
 
@@ -62,11 +64,8 @@ jobs:
           require "make_daily_report.py"
           require "config.json"
 
-          if grep -Fq -- "admin/index.html" _upload.txt || grep -Fq -- "index.html" _upload.txt; then
-            :
-          else
-            echo "::error ::Missing in upload (pattern): admin/index.html or index.html"
-            missing=1
+          if grep -Fq -- "admin/index.html" _upload.txt || grep -Fq -- "index.html" _upload.txt; then :; else
+            echo "::error ::Missing in upload (pattern): admin/index.html or index.html"; missing=1
           fi
 
           if [ "$missing" -ne 0 ]; then
@@ -75,16 +74,19 @@ jobs:
             exit 1
           fi
 
+      # -------- 이하 스텝은 main push에서만 실행 --------
       - name: Build image (Cloud Build)
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           gcloud builds submit --tag "$IMG" --project "${{ env.PROJECT_ID }}"
 
-      # Image gate: verify files exist inside the built image
       - name: Docker auth for Artifact Registry
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: gcloud --quiet auth configure-docker ${{ env.AR_HOST }}
 
       - name: Verify image contents (files exist)
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           docker pull "$IMG"
@@ -101,17 +103,18 @@ jobs:
           '
 
       - name: Verify report scripts (optional)
-        if: ${{ env.VERIFY_REPORT_SCRIPTS == 'true' }}
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && env.VERIFY_REPORT_SCRIPTS == 'true' }}
         run: |
           set -euo pipefail
           docker run --rm "$IMG" sh -lc 'test -f /app/orchestrator.py && test -f /app/make_daily_report.py'
 
       - name: "Verify ASGI import (server_quali:app)"
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           docker run --rm "$IMG" python -c "import importlib,sys; m=importlib.import_module('server_quali'); ok=hasattr(m,'app'); print('server_quali.app =', ok); sys.exit(0 if ok else 1)"
 
-      # Deploy only on main
+      # -------- 배포 (main) --------
       - name: Snapshot previous revision
         id: prev
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
