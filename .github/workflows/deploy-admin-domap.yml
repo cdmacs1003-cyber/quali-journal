@@ -48,7 +48,7 @@ jobs:
           echo "IMG=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
 
       # Pre-gate: make sure required files are in gcloud upload list
-      - name: Pre-gate: files to be uploaded
+      - name: "Pre-gate: files to be uploaded"
         run: |
           set -euo pipefail
           gcloud meta list-files-for-upload > _upload.txt
@@ -101,12 +101,12 @@ jobs:
           '
 
       - name: Verify report scripts (optional)
-        if: env.VERIFY_REPORT_SCRIPTS == 'true'
+        if: ${{ env.VERIFY_REPORT_SCRIPTS == 'true' }}
         run: |
           set -euo pipefail
           docker run --rm "$IMG" sh -lc 'test -f /app/orchestrator.py && test -f /app/make_daily_report.py'
 
-      - name: Verify ASGI import (server_quali:app)
+      - name: "Verify ASGI import (server_quali:app)"
         run: |
           set -euo pipefail
           docker run --rm "$IMG" python -c "import importlib,sys; m=importlib.import_module('server_quali'); ok=hasattr(m,'app'); print('server_quali.app =', ok); sys.exit(0 if ok else 1)"
@@ -114,13 +114,13 @@ jobs:
       # Deploy only on main
       - name: Snapshot previous revision
         id: prev
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           echo "prev=$(gcloud run services describe '${{ env.SERVICE }}' --region '${{ env.REGION }}' --format='value(status.latestCreatedRevisionName)')" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Cloud Run (no-traffic)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           gcloud run deploy "${{ env.SERVICE }}" \
@@ -131,20 +131,20 @@ jobs:
             --no-traffic
 
       - name: Smoke /health
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           URL=$(gcloud run services describe "${{ env.SERVICE }}" --region "${{ env.REGION }}" --format='value(status.url)')
           curl -fsS "$URL/health" >/dev/null
 
       - name: Route 100% traffic to latest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           gcloud run services update-traffic "${{ env.SERVICE }}" --region "${{ env.REGION }}" --to-latest
 
       - name: Assert revision updated
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           NEW=$(gcloud run services describe '${{ env.SERVICE }}' --region '${{ env.REGION }}' --format='value(status.latestCreatedRevisionName)')
