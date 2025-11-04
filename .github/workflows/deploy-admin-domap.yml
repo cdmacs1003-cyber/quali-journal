@@ -21,7 +21,6 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         shell: bash
@@ -30,15 +29,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # gcloud 설치는 PR/Push 모두에서 (Pre-gate가 gcloud를 씀)
+      # gcloud 설치는 PR/Push 공통 (Pre-gate에서 사용)
       - name: Setup gcloud (install only)
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      # WIF 인증은 main push에서만 (fork/Dependabot PR 시 비밀 없음)
+      # WIF 인증은 main push 에서만
       - name: Google Auth (WIF/OIDC)
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.GCP_WIF_PROVIDER != '' && secrets.GCP_WIF_SERVICE_ACCOUNT != '' }}
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
@@ -50,31 +49,28 @@ jobs:
           set -euo pipefail
           echo "IMG=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
 
-      # -------- Pre-gate: 업로드 목록에 필수 파일 확인 (항상 실행) --------
+      # -------- Pre-gate: 업로드 목록 필수 파일 확인 (항상 실행) --------
       - name: "Pre-gate: files to be uploaded"
         run: |
           set -euo pipefail
           gcloud meta list-files-for-upload > _upload.txt
           missing=0
           require() { grep -Fq -- "$1" _upload.txt || { echo "::error ::Missing in upload (pattern): $1"; missing=1; }; }
-
           require "server_quali.py"
           require "requirements.txt"
           require "orchestrator.py"
           require "make_daily_report.py"
           require "config.json"
-
           if grep -Fq -- "admin/index.html" _upload.txt || grep -Fq -- "index.html" _upload.txt; then :; else
             echo "::error ::Missing in upload (pattern): admin/index.html or index.html"; missing=1
           fi
-
           if [ "$missing" -ne 0 ]; then
             echo "---- upload list (first 200 lines) ----"
             sed -n '1,200p' _upload.txt
             exit 1
           fi
 
-      # -------- 이하 스텝은 main push에서만 실행 --------
+      # -------- 이하 단계는 main push 에서만 --------
       - name: Build image (Cloud Build)
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
