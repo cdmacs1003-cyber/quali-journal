@@ -31,12 +31,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Google Auth (WIF/OIDC)
-        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
-          token_format: "access_token"
+          token_format: access_token
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -48,42 +47,40 @@ jobs:
           set -euo pipefail
           echo "IMG=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
 
-      # ---------- 업로드 전 게이트(안정판) ----------
+      # Pre-gate: make sure required files are in gcloud upload list
       - name: Pre-gate: files to be uploaded
         run: |
           set -euo pipefail
           gcloud meta list-files-for-upload > _upload.txt
 
-          must_have=(server_quali.py requirements.txt orchestrator.py make_daily_report.py config.json)
           missing=0
+          require() { grep -Fq -- "$1" _upload.txt || { echo "::error ::Missing in upload (pattern): $1"; missing=1; }; }
 
-          for f in "${must_have[@]}"; do
-            if ! grep -Fqx "$f" _upload.txt; then
-              echo "::error ::Missing in upload: $f"
-              missing=1
-            fi
-          done
+          require "server_quali.py"
+          require "requirements.txt"
+          require "orchestrator.py"
+          require "make_daily_report.py"
+          require "config.json"
 
-          if grep -Fqx "admin/index.html" _upload.txt || grep -Fqx "index.html" _upload.txt; then
+          if grep -Fq -- "admin/index.html" _upload.txt || grep -Fq -- "index.html" _upload.txt; then
             :
           else
-            echo "::error ::Missing in upload: admin/index.html (or index.html)"
+            echo "::error ::Missing in upload (pattern): admin/index.html or index.html"
             missing=1
           fi
 
           if [ "$missing" -ne 0 ]; then
-            echo "---- upload list(head) ----"
+            echo "---- upload list (first 200 lines) ----"
             sed -n '1,200p' _upload.txt
             exit 1
           fi
 
-      # ---------- Cloud Build ----------
       - name: Build image (Cloud Build)
         run: |
           set -euo pipefail
           gcloud builds submit --tag "$IMG" --project "${{ env.PROJECT_ID }}"
 
-      # ---------- 이미지 게이트 ----------
+      # Image gate: verify files exist inside the built image
       - name: Docker auth for Artifact Registry
         run: gcloud --quiet auth configure-docker ${{ env.AR_HOST }}
 
@@ -91,14 +88,17 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "$IMG"
-          docker run --rm "$IMG" sh -lc '\
-            set -eu; missing=0; \
-            for f in /app/server_quali.py /app/requirements.txt; do \
-              [ -f "$f" ] || { echo "::error ::Missing $f"; missing=1; }; \
-            done; \
-            if [ -f /app/admin/index.html ] || [ -f /app/index.html ]; then :; \
-            else echo "::error ::Missing /app/admin/index.html (or /app/index.html)"; missing=1; fi; \
-            if [ "$missing" -ne 0 ]; then find /app -maxdepth 2 -type f | sed -n "1,120p"; exit 1; fi'
+          docker run --rm "$IMG" sh -lc '
+            set -eu
+            missing=0
+            for f in /app/server_quali.py /app/requirements.txt; do
+              [ -f "$f" ] || { echo "::error ::Missing $f"; missing=1; }
+            done
+            if [ -f /app/admin/index.html ] || [ -f /app/index.html ]; then :; else
+              echo "::error ::Missing /app/admin/index.html (or /app/index.html)"; missing=1
+            fi
+            if [ "$missing" -ne 0 ]; then find /app -maxdepth 2 -type f | sed -n "1,120p"; exit 1; fi
+          '
 
       - name: Verify report scripts (optional)
         if: env.VERIFY_REPORT_SCRIPTS == 'true'
@@ -109,15 +109,9 @@ jobs:
       - name: Verify ASGI import (server_quali:app)
         run: |
           set -euo pipefail
-          docker run --rm "$IMG" python - <<'PY'
-import importlib, sys
-m = importlib.import_module("server_quali")
-ok = hasattr(m, "app")
-print("server_quali.app =", ok)
-sys.exit(0 if ok else 1)
-PY
+          docker run --rm "$IMG" python -c "import importlib,sys; m=importlib.import_module('server_quali'); ok=hasattr(m,'app'); print('server_quali.app =', ok); sys.exit(0 if ok else 1)"
 
-      # ---------- 배포(메인만) ----------
+      # Deploy only on main
       - name: Snapshot previous revision
         id: prev
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
