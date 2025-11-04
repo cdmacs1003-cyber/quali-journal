@@ -1,112 +1,125 @@
-﻿name: Deploy Admin (Dockerfile@admin)
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+﻿name: Deploy Admin API (WIF harden)
 
 on:
   push:
     branches: [ "main" ]
-    paths:
-      - "admin/**"
-      - ".github/workflows/deploy-admin.yml"
-  workflow_dispatch: {}
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
 
 permissions:
   contents: read
   id-token: write
 
-# 같은 브랜치에서 겹치면 이전 실행 취소
 concurrency:
-  group: deploy-admin-${{ github.ref }}
+  group: deploy-admin-api
   cancel-in-progress: true
 
 env:
+  PROJECT_ID: quali-journal-prod
+  REGION: asia-northeast3
   SERVICE: quali-journal-admin
-  PROJECT_ID: ${{ secrets.GOOGLE_PROJECT || 'quali-journal-prod' }}
-  REGION:     ${{ secrets.GOOGLE_REGION  || 'asia-northeast3' }}
-  REPO:       ${{ secrets.ARTIFACT_REPO || 'quali-repo' }}
-  IMAGE_TAG:  asia-northeast3-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/admin:${{ github.sha }}-${{ github.run_number }}
+  REPO_NAME: ${{ github.repository }}
+  GIT_REF:   ${{ github.ref }}
+  GIT_SHA:   ${{ github.sha }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: admin
-
+        shell: bash
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Google Auth (WIF)
+      - name: Auth via WIF (OIDC)
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
           service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          token_format: 'id_token'
+          id_token_audience: 'https://sts.googleapis.com'
+          id_token_include_email: true
 
-      # 필수 env 누락 가드
-      - name: Guard env (PROJECT_ID/REGION)
-        if: ${{ env.PROJECT_ID == '' || env.REGION == '' }}
-        run: |
-          echo "PROJECT_ID='${{ env.PROJECT_ID }}'  REGION='${{ env.REGION }}'"
-          echo "::error::Missing GA secrets GOOGLE_PROJECT/GOOGLE_REGION"
-          exit 1
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v2
         with:
-          install_components: gcloud
+          project_id: ${{ env.PROJECT_ID }}
 
-      - name: Sanity (WIF)
-        run: |
-          gcloud auth list
-          gcloud projects describe "${{ env.PROJECT_ID }}" --format="value(projectNumber)"
-          gcloud services list --enabled --project "${{ env.PROJECT_ID }}" | grep -E "run|artifact|cloudbuild|iamcredentials|secret" || true
-
-      - name: Build & Push (Artifact Registry)
-        run: |
-          gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
-          gcloud builds submit . \
-            --gcs-source-staging-dir=gs://${{ env.PROJECT_ID }}-cloudbuild/source \
-            --tag "${{ env.IMAGE_TAG }}" \
-            --project "${{ env.PROJECT_ID }}"
-
-      - name: Deploy to Cloud Run (SRC)
-        run: |
-          gcloud run deploy "${{ env.SERVICE }}" \
-            --image "${{ env.IMAGE_TAG }}" \
-            --region "${{ env.REGION }}" \
-            --project "${{ env.PROJECT_ID }}" \
-            --allow-unauthenticated
-
-      - name: Route 100% to latest
-        run: |
-          gcloud run services update-traffic "${{ env.SERVICE }}" --to-latest \
-            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
-
-      - name: Smoke /health (retry)
-        shell: bash
-        run: |
-          URL=$(gcloud run services describe "${{ env.SERVICE }}" --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" --format="value(status.url)")
-          echo "URL=${URL}"
-          for i in {1..10}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/health")
-            echo "try $i: ${code}"
-            if [ "$code" = "200" ]; then exit 0; fi
-            sleep 6
-          done
-          echo "health check failed"; exit 1
-
-      # ⬇︎ 요청하신 /api/status(토큰) 스모크 — 앵커 바로 아래 삽입
-      - name: Smoke /api/status (token)
-        shell: bash
+      - name: Verify OIDC claims (repo/ref)
         env:
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          AUDIENCE: https://sts.googleapis.com
+          REPO_NAME: ${{ env.REPO_NAME }}
+          GIT_REF:   ${{ env.GIT_REF }}
         run: |
-          URL=$(gcloud run services describe "${{ env.SERVICE }}" \
-                --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" \
-                --format="value(status.url)")
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-                 -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-                 "${URL}/api/status")
-          echo "STATUS=${code}"
-          test "${code}" = "200"
+          set -euo pipefail
+          GH_OIDC_JWT=$(curl -s -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" | jq -r .value)
+          echo "$GH_OIDC_JWT" | cut -d'.' -f2 | tr '_-' '/+' | base64 -d > gh-oidc.json || true
+          echo "OIDC claims:"; cat gh-oidc.json || true
+          test "$(jq -r .repository gh-oidc.json)" = "${REPO_NAME}"
+          test "$(jq -r .ref         gh-oidc.json)" = "${GIT_REF}"
 
+      # Pre-gate: ensure required files in admin/ context (prevent build without required files)
+      - name: 'Pre-gate: files to be uploaded (admin/)'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # admin 컨텍스트에서 필수 파일이 있는지 확인
+          pushd admin >/dev/null
+          LIST="$(gcloud meta list-files-for-upload || true)"
+          for f in server_quali.py requirements.txt index.html; do
+            echo "$LIST" | grep -qx "$f" || { echo "Error: Missing in upload (admin/$f)" && exit 1; }
+          done
+          echo "---- upload list (first 100 lines) ----"
+          echo "$LIST" | head -n 100
+          popd >/dev/null
 
+      - name: Snapshot previous revision
+        id: prev
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          PREV=$(gcloud run services describe "$SERVICE" --region "$REGION" \
+                 --format='value(status.latestCreatedRevisionName)')
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+
+      - name: Build image (Cloud Build)
+        run: |
+          TAG="$(date +%Y%m%d_%H%M%S)-${GIT_SHA::7}"
+          IMG="asia-northeast1-docker.pkg.dev/${PROJECT_ID}/qualijournal/qj-admin:${TAG}"
+          echo "IMG=$IMG" >> "$GITHUB_ENV"
+          gcloud builds submit --tag "$IMG" .
+
+      - name: Deploy (no-traffic)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          gcloud run deploy "$SERVICE" --image "$IMG" --region "$REGION" \
+            --no-traffic --labels=commit-sha="${GIT_SHA}",env=prod --quiet
+          gcloud run services describe "$SERVICE" --region "$REGION" \
+            --format='value(status.latestCreatedRevisionName)'
+
+      - name: "Smoke /health (run.app)"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
+          curl -fsS "$URL/health" >/dev/null
+
+      - name: Shift traffic to latest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest --quiet
+          gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.traffic)'
+
+      - name: Assert revision updated
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          NEW=$(gcloud run services describe "$SERVICE" --region "$REGION" \
+                --format='value(status.latestCreatedRevisionName)')
+          echo "prev=${{ steps.prev.outputs.prev }} | new=${NEW}"
+          if [ "$NEW" = "${{ steps.prev.outputs.prev }}" ]; then
+            echo "::error ::Revision not updated. WIF/OIDC cache or policy mismatch suspected."
+            exit 1
+          fi
