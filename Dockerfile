@@ -1,22 +1,37 @@
-﻿# --- Base image ---
+# ===========================
+# QualiJournal Admin Dockerfile
+# ===========================
 FROM python:3.11-slim
 
-# 환경 변수(버퍼링 끄기 / .pyc 방지)
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
-# 작업 경로
+# (선택) 빌드 툴킷 설치 후 제거 — 일부 패키지가 wheel이 없을 때 대비
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# 의존성 설치
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 종속성 레이어 캐시 최적화
+COPY requirements.txt /app/requirements.txt
+RUN python -m pip install --upgrade pip && \
+    pip install -r /app/requirements.txt && \
+    pip install "fastapi" "uvicorn[standard]" "gunicorn" "python-dotenv"
 
-# 애플리케이션 복사 (server_quali.py, index.html, tools/, config.json 등)
-COPY . .
+# 애플리케이션 복사
+COPY . /app
 
-# Cloud Run은 $PORT를 주입(기본 8080)
-ENV PORT=8080
+# (옵션) 빌드툴 제거로 경량화
+RUN apt-get purge -y build-essential || true && apt-get autoremove -y || true
 
-# 컨테이너 시작 커맨드
-CMD ["uvicorn", "server_quali:app", "--host", "0.0.0.0", "--port", "8080"]
+# 권장: 비루트 사용자
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8080
+
+# Cloud Run 표준: $PORT 사용 + ASGI 엔트리 = server_quali:app
+CMD ["bash","-lc","exec gunicorn -k uvicorn.workers.UvicornWorker -b :$PORT server_quali:app"]
