@@ -1,126 +1,158 @@
-name: Deploy Admin DOMAP (WIF harden)
+name: Deploy Admin DOMAP (Cloud Run)
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'admin/**'
-      - '*.py'
-      - 'Dockerfile'
-      - '.github/workflows/deploy-admin-domap.yml'
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
-    paths:
-      - 'admin/**'
-      - '*.py'
-      - 'Dockerfile'
-      - '.github/workflows/deploy-admin-domap.yml'
-  workflow_dispatch: {}
+    branches: [ "main" ]
 
 permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: deploy-admin-domap
-  cancel-in-progress: true
-
 env:
   PROJECT_ID: quali-journal-prod
   REGION: asia-northeast1
   SERVICE: quali-admin-domap
-  REPO_NAME: ${{ github.repository }}
-  GIT_REF:   ${{ github.ref }}
-  GIT_SHA:   ${{ github.sha }}
+  AR_HOST: asia-northeast1-docker.pkg.dev
+  AR_REPO: qualijournal/qj-admin
+  VERIFY_REPORT_SCRIPTS: "true"
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     defaults:
       run:
         shell: bash
-    steps:
-      - uses: actions/checkout@v4
 
-      # 1) WIF 인증 (Google)
-      - name: Auth via WIF (OIDC)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Google Auth (WIF/OIDC)
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
-          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-          token_format: 'id_token'
-          id_token_audience: 'https://sts.googleapis.com'
-          id_token_include_email: true
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+          token_format: "access_token"
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      # 2) GitHub OIDC 클레임(리포/브랜치) 검증
-      - name: Verify OIDC claims (repo/ref)
-        env:
-          AUDIENCE: https://sts.googleapis.com
-          REPO_NAME: ${{ env.REPO_NAME }}
-          GIT_REF:   ${{ env.GIT_REF }}
+      - name: Compute image tag
         run: |
           set -euo pipefail
-          GH_OIDC_JWT=$(curl -s -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" | jq -r .value)
-          echo "$GH_OIDC_JWT" | cut -d'.' -f2 | tr '_-' '/+' | base64 -d > gh-oidc.json || true
-          echo "OIDC claims:"; cat gh-oidc.json || true
-          test "$(jq -r .repository gh-oidc.json)" = "${REPO_NAME}"
-          test "$(jq -r .ref         gh-oidc.json)" = "${GIT_REF}"
+          echo "IMG=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
 
-      # 3) 이전 리비전 스냅샷 (prod 배포에서만 의미 → 가드)
+      # ---------- 업로드 전 게이트(안정판) ----------
+      - name: Pre-gate: files to be uploaded
+        run: |
+          set -euo pipefail
+          gcloud meta list-files-for-upload > _upload.txt
+
+          must_have=(server_quali.py requirements.txt orchestrator.py make_daily_report.py config.json)
+          missing=0
+
+          for f in "${must_have[@]}"; do
+            if ! grep -Fqx "$f" _upload.txt; then
+              echo "::error ::Missing in upload: $f"
+              missing=1
+            fi
+          done
+
+          if grep -Fqx "admin/index.html" _upload.txt || grep -Fqx "index.html" _upload.txt; then
+            :
+          else
+            echo "::error ::Missing in upload: admin/index.html (or index.html)"
+            missing=1
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            echo "---- upload list(head) ----"
+            sed -n '1,200p' _upload.txt
+            exit 1
+          fi
+
+      # ---------- Cloud Build ----------
+      - name: Build image (Cloud Build)
+        run: |
+          set -euo pipefail
+          gcloud builds submit --tag "$IMG" --project "${{ env.PROJECT_ID }}"
+
+      # ---------- 이미지 게이트 ----------
+      - name: Docker auth for Artifact Registry
+        run: gcloud --quiet auth configure-docker ${{ env.AR_HOST }}
+
+      - name: Verify image contents (files exist)
+        run: |
+          set -euo pipefail
+          docker pull "$IMG"
+          docker run --rm "$IMG" sh -lc '\
+            set -eu; missing=0; \
+            for f in /app/server_quali.py /app/requirements.txt; do \
+              [ -f "$f" ] || { echo "::error ::Missing $f"; missing=1; }; \
+            done; \
+            if [ -f /app/admin/index.html ] || [ -f /app/index.html ]; then :; \
+            else echo "::error ::Missing /app/admin/index.html (or /app/index.html)"; missing=1; fi; \
+            if [ "$missing" -ne 0 ]; then find /app -maxdepth 2 -type f | sed -n "1,120p"; exit 1; fi'
+
+      - name: Verify report scripts (optional)
+        if: env.VERIFY_REPORT_SCRIPTS == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm "$IMG" sh -lc 'test -f /app/orchestrator.py && test -f /app/make_daily_report.py'
+
+      - name: Verify ASGI import (server_quali:app)
+        run: |
+          set -euo pipefail
+          docker run --rm "$IMG" python - <<'PY'
+import importlib, sys
+m = importlib.import_module("server_quali")
+ok = hasattr(m, "app")
+print("server_quali.app =", ok)
+sys.exit(0 if ok else 1)
+PY
+
+      # ---------- 배포(메인만) ----------
       - name: Snapshot previous revision
         id: prev
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          PREV=$(gcloud run services describe "$SERVICE" --region "$REGION" \
-                 --format='value(status.latestCreatedRevisionName)')
-          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          echo "prev=$(gcloud run services describe '${{ env.SERVICE }}' --region '${{ env.REGION }}' --format='value(status.latestCreatedRevisionName)')" >> "$GITHUB_OUTPUT"
 
-      # 4) Cloud Build 이미지 빌드( PR/메인 공통 )
-      - name: Build image (Cloud Build)
-        run: |
-          TAG="$(date +%Y%m%d_%H%M%S)-${GIT_SHA::7}"
-          IMG="${REGION}-docker.pkg.dev/${PROJECT_ID}/qualijournal/qj-admin:${TAG}"
-          echo "IMG=$IMG" >> "$GITHUB_ENV"
-          gcloud builds submit --tag "$IMG" .
-
-      # 5) no-traffic 배포 (메인 push에서만)
-      - name: Deploy (no-traffic)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          gcloud run deploy "$SERVICE" --image "$IMG" --region "$REGION" \
-            --no-traffic --labels=commit-sha="${GIT_SHA}",env=prod --quiet
-          gcloud run services describe "$SERVICE" --region "$REGION" \
-            --format='value(status.latestCreatedRevisionName)'
-
-      # 6) /health 스모크 (메인 push에서만)
-      - name: "Smoke /health (run.app)"
+      - name: Deploy to Cloud Run (no-traffic)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
-          curl -fsS "$URL/health" >/dev/null
+          gcloud run deploy "${{ env.SERVICE }}" \
+            --image "$IMG" \
+            --region "${{ env.REGION }}" \
+            --project "${{ env.PROJECT_ID }}" \
+            --quiet \
+            --no-traffic
 
-      # 7) 최신 리비전에 100% 트래픽 (메인 push에서만)
-      - name: Shift traffic to latest
+      - name: Smoke /health
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest --quiet
-          gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.traffic)'
+          set -euo pipefail
+          URL=$(gcloud run services describe "${{ env.SERVICE }}" --region "${{ env.REGION }}" --format='value(status.url)')
+          curl -fsS "$URL/health" >/dev/null
 
-      # 8) 리비전 변경 확인 (메인 push에서만)
+      - name: Route 100% traffic to latest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "${{ env.SERVICE }}" --region "${{ env.REGION }}" --to-latest
+
       - name: Assert revision updated
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          NEW=$(gcloud run services describe "$SERVICE" --region "$REGION" \
-                --format='value(status.latestCreatedRevisionName)')
+          set -euo pipefail
+          NEW=$(gcloud run services describe '${{ env.SERVICE }}' --region '${{ env.REGION }}' --format='value(status.latestCreatedRevisionName)')
           echo "prev=${{ steps.prev.outputs.prev }} | new=${NEW}"
-          if [ "$NEW" = "${{ steps.prev.outputs.prev }}" ]; then
-            echo "::error ::Revision not updated. WIF/OIDC cache or policy mismatch suspected."
-            exit 1
-          fi
+          [ "$NEW" != "${{ steps.prev.outputs.prev }}" ] || (echo "::error ::Revision not updated" && exit 1)
