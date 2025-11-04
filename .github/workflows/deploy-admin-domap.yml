@@ -161,3 +161,4 @@ jobs:
           TRAF=$(gcloud run services describe "${SERVICE}" --region "${REGION}" --format='value(status.traffic)')
           echo "$TRAF" | grep -q "latestRevision': True" || (echo "::error ::latestRevision not live" && exit 1)
           echo "$TRAF"
+
