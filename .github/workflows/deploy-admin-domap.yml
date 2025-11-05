@@ -34,31 +34,30 @@ jobs:
         shell: bash
         env:
           SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
-          WIF_SA: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+          WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          WIF_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           AUTH_INPUT: ${{ github.event.inputs.auth }}
         run: |
           set -euo pipefail
-          if [[ -n "$SA_KEY" ]]; then
-            echo "strategy=json" >> $GITHUB_OUTPUT
-            echo "Using SA key (forced)"
-          elif [[ "${AUTH_INPUT:-json}" == "json" ]]; then
-            echo "::error::GCP_SA_KEY secret missing."
-            exit 1
-          elif [[ -n "$WIF_PROVIDER" && -n "$WIF_SA" ]]; then
-            echo "strategy=oidc" >> $GITHUB_OUTPUT
-            echo "Using OIDC(WIF)"
-          else
-            echo "::error::No valid auth secrets. Set GCP_SA_KEY or WIF secrets."
-            exit 1
+          # ✅ WIF가 있으면 무조건 WIF 사용
+          if [[ -n "${WIF_PROVIDER:-}" && -n "${WIF_SA:-}" ]]; then
+            echo "strategy=oidc" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # ↘️ WIF가 없고, SA 키가 있을 때만 json 사용
+          if [[ -n "${SA_KEY:-}" ]]; then
+            echo "strategy=json" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::No valid auth secrets. Set GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT (preferred), or GCP_SA_KEY."
+          exit 1
 
-      - name: Authenticate to Google Cloud (SA key)
-        if: steps.decide.outputs.strategy == 'json'
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: ${{ env.GCP_PROJECT }}
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+    # - name: Authenticate to Google Cloud (SA key)
+    #   if: steps.decide.outputs.strategy == 'json'
+    #   uses: google-github-actions/auth@v3
+    #   with:
+    #     project_id: ${{ env.GCP_PROJECT }}
+    #     credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Authenticate to Google Cloud (WIF)
         if: steps.decide.outputs.strategy == 'oidc'
@@ -134,4 +133,5 @@ jobs:
         run: |
           R="$(gcloud beta run domain-mappings describe --domain admin.standardai.co.kr --region "${GCP_REGION}" --format='value(spec.routeName)' || true)"
           test "$R" = "${SERVICE}" || { echo "::error::domain maps to $R (expected ${SERVICE})"; exit 1; }
+
 
