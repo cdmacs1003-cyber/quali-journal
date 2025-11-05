@@ -8,7 +8,7 @@ on:
       auth:
         description: "auth mode (json|oidc). default=json"
         required: false
-        default: "json"
+        default: "oidc"
 
 permissions:
   contents: read
@@ -133,5 +133,6 @@ jobs:
         run: |
           R="$(gcloud beta run domain-mappings describe --domain admin.standardai.co.kr --region "${GCP_REGION}" --format='value(spec.routeName)' || true)"
           test "$R" = "${SERVICE}" || { echo "::error::domain maps to $R (expected ${SERVICE})"; exit 1; }
+
 
 
