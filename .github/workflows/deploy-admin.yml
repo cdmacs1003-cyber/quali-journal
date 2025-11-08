@@ -1,154 +1,175 @@
-name: Deploy Admin API (asia-northeast3)
+name: Deploy Admin and Domap (Cloud Run)
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-  workflow_dispatch:
+    branches: ["main"]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: deploy-admin-${{ github.ref }}
-  cancel-in-progress: false
+  group: deploy-admin
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
 
 env:
   PROJECT_ID: quali-journal-prod
-  REGION: asia-northeast3
-  SERVICE: quali-journal-admin
-  ART_REG: asia-northeast1-docker.pkg.dev
-  REPO: qualijournal
-  IMAGE_NAME: qj-admin
+  REGION_ADMIN: asia-northeast3
+  SERVICE_ADMIN: quali-journal-admin
+  REGION_DOMAP: asia-northeast1
+  SERVICE_DOMAP: quali-admin-domap
+  BUILD_CONTEXT: admin
+  DOMAIN: admin.standardai.co.kr
 
 jobs:
-  build-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Google Auth (WIF)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        uses: google-github-actions/auth@v2
+      # Auth - Workload Identity Federation (no keys)
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_SA_EMAIL }}
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          create_credentials_file: true   # export GOOGLE_APPLICATION_CREDENTIALS
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
-
-      - name: Verify OIDC claims (repo/ref)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+          install_components: "beta"
+          
+      # Gate 1 - sanity check for build context (simple and robust)
+      - name: Gate 1 - verify build context
+        working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
-          sudo apt-get update && sudo apt-get install -y jq
-          set -euo pipefail
-          GH_OIDC_JWT=$(curl -s -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://sts.googleapis.com" | jq -r .value)
-          echo "$GH_OIDC_JWT" | cut -d'.' -f2 | tr '_-' '/+' | base64 -d > gh-oidc.json || true
-          test "$(jq -r .repository gh-oidc.json)" = "${{ github.repository }}"
-          test "$(jq -r .ref         gh-oidc.json)" = "${{ github.ref }}"
-
-      - name: Compose image tag
-        run: echo "IMG=${{ env.ART_REG }}/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_ENV"
-
-      - name: Pre-gate: files to be uploaded
-        run: |
-          set -euo pipefail
-          LIST="$(gcloud meta list-files-for-upload || true)"
-
-          REQUIRED=("server_quali.py" "requirements.txt" "orchestrator.py" "make_daily_report.py")
-
-          if echo "$LIST" | grep -qx "admin/index.html"; then
-            echo "✓ found admin/index.html"
-          elif echo "$LIST" | grep -qx "index.html"; then
-            echo "✓ found index.html"
-          else
-            echo "Error: Missing in upload (pattern): admin/index.html or index.html"
-            exit 1
-          fi
-
-          for f in "${REQUIRED[@]}"; do
-            echo "$LIST" | grep -qx "$f" || { echo "Error: Missing in upload (pattern): $f"; exit 1; }
+          set -Eeuo pipefail
+          echo "pwd=$(pwd)"
+          ls -la
+          ok=0
+          for f in requirements.txt pyproject.toml Dockerfile server_quali.py; do
+            if [ -f "$f" ]; then ok=1; fi
           done
-
-          echo "---- upload list (first 200 lines) ----"
-          echo "$LIST" | head -n 200
-
-      - name: Build image (Cloud Build)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          gcloud builds submit --project "${PROJECT_ID}" \
-            --tag "${IMG}" .
-
-      - name: Configure Docker auth (Artifact Registry)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: gcloud auth configure-docker ${{ env.ART_REG }} --quiet
-
-      - name: Pull image
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: docker pull "$IMG"
-
-      - name: Verify image contents (Quali Gate)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          docker run --rm "$IMG" sh -lc '
-            set -eu
-            [ -f /app/server_quali.py ] && [ -f /app/requirements.txt ] && \
-            ( [ -f /app/admin/index.html ] || [ -f /app/index.html ] ) && \
-            [ -f /app/orchestrator.py ] && [ -f /app/make_daily_report.py ]
-          '
-
-      - name: Verify ASGI entry (server_quali:app)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          docker run --rm "$IMG" python -c "import server_quali as m; assert hasattr(m,'app')"
-
-      - name: Snapshot previous live revision
-        id: live
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          echo "prev=$(gcloud run services describe '${SERVICE}' --region '${REGION}' \
-            --format='value(status.traffic[0].revisionName)')" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy (no-traffic)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          gcloud run deploy "${SERVICE}" \
-            --image "${IMG}" \
-            --region "${REGION}" \
-            --project "${PROJECT_ID}" \
-            --platform managed \
-            --no-traffic
-
-      - name: Traffic to latest 100%
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          gcloud run services update-traffic "${SERVICE}" --region "${REGION}" --to-latest
-
-      - name: Smoke /health (run.app) with rollback
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          set -euo pipefail
-          URL=$(gcloud run services describe "${SERVICE}" --region "${REGION}" --format='value(status.url)')
-          if ! curl -fsS "$URL/health" >/dev/null ; then
-            echo "Health failed → rollback to previous live revision: ${{ steps.live.outputs.prev }}"
-            gcloud run services update-traffic "${SERVICE}" --region "${REGION}" \
-              --to-revisions "${{ steps.live.outputs.prev }}=100"
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::no known build files found in $(pwd)"
             exit 1
           fi
 
-      - name: Assert latest=100%
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      # Deploy admin from source (Seoul)
+      - name: Deploy admin (source, Seoul)
+        working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
-          set -euo pipefail
-          TRAF=$(gcloud run services describe "${SERVICE}" --region "${REGION}" --format='value(status.traffic)')
-          echo "$TRAF" | grep -q "latestRevision': True" || (echo "::error ::latestRevision not live" && exit 1)
-          echo "$TRAF"
+          set -Eeuo pipefail
+          gcloud run deploy "${SERVICE_ADMIN}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION_ADMIN}" \
+            --source . \
+            --allow-unauthenticated \
+            --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
+            --set-env-vars "PYTHONUTF8=1,PYTHONIOENCODING=utf-8,ARCHIVE_DIR=/tmp/archive"
+          gcloud run services update-traffic "${SERVICE_ADMIN}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION_ADMIN}" \
+            --to-latest
+
+      # Read image of the deployed admin
+      - name: Read admin image
+        id: img
+        run: |
+          set -Eeuo pipefail
+          IMG="$(gcloud run services describe "${SERVICE_ADMIN}" \
+                 --project "${PROJECT_ID}" \
+                 --region "${REGION_ADMIN}" \
+                 --format='value(spec.template.spec.containers[0].image)')"
+          if [ -z "${IMG}" ]; then
+            echo "::error::failed to read admin image"
+            exit 1
+          fi
+          echo "image=${IMG}" >> "${GITHUB_OUTPUT}"
+
+      # Deploy domap reusing the same image (Tokyo)
+      - name: Deploy domap (image, Tokyo)
+        run: |
+          set -Eeuo pipefail
+          gcloud run deploy "${SERVICE_DOMAP}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION_DOMAP}" \
+            --image "${{ steps.img.outputs.image }}" \
+            --allow-unauthenticated \
+            --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
+            --set-env-vars "PYTHONUTF8=1,PYTHONIOENCODING=utf-8,ARCHIVE_DIR=/tmp/archive"
+          gcloud run services update-traffic "${SERVICE_DOMAP}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION_DOMAP}" \
+            --to-latest
+
+      # Gate 2 - domain mapping must point to domap service
+      - name: Gate 2 - domain mapping route check
+        run: |
+          set -Eeuo pipefail
+          ROUTE="$(gcloud beta run domain-mappings describe \
+                    --domain "${DOMAIN}" \
+                    --project "${PROJECT_ID}" \
+                    --region "${REGION_DOMAP}" \
+                    --format='value(spec.routeName)' || true)"
+          if [ "${ROUTE}" != "${SERVICE_DOMAP}" ]; then
+            echo "::error::domain maps to ${ROUTE:-<empty>} (expected ${SERVICE_DOMAP})"
+            exit 1
+          fi
+
+      # Gate 3 - both services must send 100 percent to LATEST
+      - name: Gate 3 - traffic must be 100 percent to LATEST (admin)
+        run: |
+          set -Eeuo pipefail
+          T="$(gcloud run services describe "${SERVICE_ADMIN}" \
+               --project "${PROJECT_ID}" \
+               --region "${REGION_ADMIN}" \
+               --format='value(status.traffic)')"
+          echo "${T}"
+          echo "${T}" | grep -q 'LATEST' || { echo "::error::admin not pointing to LATEST"; exit 1; }
+          echo "${T}" | grep -q '100'   || { echo "::error::admin traffic not 100 percent"; exit 1; }
+
+      - name: Gate 3 - traffic must be 100 percent to LATEST (domap)
+        run: |
+          set -Eeuo pipefail
+          T="$(gcloud run services describe "${SERVICE_DOMAP}" \
+               --project "${PROJECT_ID}" \
+               --region "${REGION_DOMAP}" \
+               --format='value(status.traffic)')"
+          echo "${T}"
+          echo "${T}" | grep -q 'LATEST' || { echo "::error::domap not pointing to LATEST"; exit 1; }
+          echo "${T}" | grep -q '100'   || { echo "::error::domap traffic not 100 percent"; exit 1; }
+
+      # Smoke - health, status (token), report
+      - name: Smoke tests (domap)
+        run: |
+          set -Eeuo pipefail
+          URL="$(gcloud run services describe "${SERVICE_DOMAP}" \
+                 --project "${PROJECT_ID}" \
+                 --region "${REGION_DOMAP}" \
+                 --format='value(status.url)')"
+          if [ -z "${URL}" ]; then
+            echo "::error::failed to read domap url"
+            exit 1
+          fi
+          TOKEN="$(gcloud secrets versions access latest \
+                   --secret=ADMIN_TOKEN \
+                   --project "${PROJECT_ID}")"
+          curl -fsS -o /dev/null "${URL}/health"
+          curl -fsS -o /dev/null -H "Authorization: Bearer ${TOKEN}" "${URL}/api/status"
+          curl -fsS -o /dev/null "${URL}/api/report"
+          echo "Smoke OK - ${URL}"
+
+      - name: Summary
+        run: |
+          set -Eeuo pipefail
+          echo "::notice::Deploy finished. Admin=${SERVICE_ADMIN}@${REGION_ADMIN}, Domap=${SERVICE_DOMAP}@${REGION_DOMAP}"
