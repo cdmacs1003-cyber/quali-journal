@@ -30,41 +30,42 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # step 1 - checkout
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Auth - Workload Identity Federation (no keys)
+      # step 2 - authenticate (keyless, WIF). create ADC file for gcloud
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
-          project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          create_credentials_file: true   # export GOOGLE_APPLICATION_CREDENTIALS
+          create_credentials_file: true
 
+      # step 3 - install gcloud only (no credential exporting here)
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
           install_components: "beta"
-          
-      # Gate 1 - sanity check for build context (simple and robust)
+
+      # gate 1 - verify build context is correct
       - name: Gate 1 - verify build context
         working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
           set -Eeuo pipefail
           echo "pwd=$(pwd)"
           ls -la
-          ok=0
+          need_one=0
           for f in requirements.txt pyproject.toml Dockerfile server_quali.py; do
-            if [ -f "$f" ]; then ok=1; fi
+            if [ -f "$f" ]; then need_one=1; fi
           done
-          if [ "$ok" -ne 1 ]; then
-            echo "::error::no known build files found in $(pwd)"
+          if [ "$need_one" -ne 1 ]; then
+            echo "::error::no known build files in $(pwd)"
             exit 1
           fi
 
-      # Deploy admin from source (Seoul)
+      # step 4 - deploy admin from source (Seoul)
       - name: Deploy admin (source, Seoul)
         working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
@@ -81,7 +82,7 @@ jobs:
             --region "${REGION_ADMIN}" \
             --to-latest
 
-      # Read image of the deployed admin
+      # step 5 - read deployed admin image for domap reuse
       - name: Read admin image
         id: img
         run: |
@@ -96,7 +97,7 @@ jobs:
           fi
           echo "image=${IMG}" >> "${GITHUB_OUTPUT}"
 
-      # Deploy domap reusing the same image (Tokyo)
+      # step 6 - deploy domap using the same image (Tokyo)
       - name: Deploy domap (image, Tokyo)
         run: |
           set -Eeuo pipefail
@@ -112,8 +113,8 @@ jobs:
             --region "${REGION_DOMAP}" \
             --to-latest
 
-      # Gate 2 - domain mapping must point to domap service
-      - name: Gate 2 - domain mapping route check
+      # gate 2 - domain mapping must point to domap service
+      - name: Gate 2 - domain mapping must route to domap
         run: |
           set -Eeuo pipefail
           ROUTE="$(gcloud beta run domain-mappings describe \
@@ -121,35 +122,36 @@ jobs:
                     --project "${PROJECT_ID}" \
                     --region "${REGION_DOMAP}" \
                     --format='value(spec.routeName)' || true)"
+          echo "domain=${DOMAIN} route=${ROUTE}"
           if [ "${ROUTE}" != "${SERVICE_DOMAP}" ]; then
-            echo "::error::domain maps to ${ROUTE:-<empty>} (expected ${SERVICE_DOMAP})"
+            echo "::error::domain mapping route is ${ROUTE:-<empty>} (expected ${SERVICE_DOMAP})"
             exit 1
           fi
 
-      # Gate 3 - both services must send 100 percent to LATEST
-      - name: Gate 3 - traffic must be 100 percent to LATEST (admin)
+      # gate 3 - both services must send 100 percent to LATEST
+      - name: Gate 3 - admin traffic must be 100 percent to LATEST
         run: |
           set -Eeuo pipefail
           T="$(gcloud run services describe "${SERVICE_ADMIN}" \
                --project "${PROJECT_ID}" \
                --region "${REGION_ADMIN}" \
                --format='value(status.traffic)')"
-          echo "${T}"
+          echo "admin traffic=${T}"
           echo "${T}" | grep -q 'LATEST' || { echo "::error::admin not pointing to LATEST"; exit 1; }
           echo "${T}" | grep -q '100'   || { echo "::error::admin traffic not 100 percent"; exit 1; }
 
-      - name: Gate 3 - traffic must be 100 percent to LATEST (domap)
+      - name: Gate 3 - domap traffic must be 100 percent to LATEST
         run: |
           set -Eeuo pipefail
           T="$(gcloud run services describe "${SERVICE_DOMAP}" \
                --project "${PROJECT_ID}" \
                --region "${REGION_DOMAP}" \
                --format='value(status.traffic)')"
-          echo "${T}"
+          echo "domap traffic=${T}"
           echo "${T}" | grep -q 'LATEST' || { echo "::error::domap not pointing to LATEST"; exit 1; }
           echo "${T}" | grep -q '100'   || { echo "::error::domap traffic not 100 percent"; exit 1; }
 
-      # Smoke - health, status (token), report
+      # step 7 - smoke tests for domap (health, status with token, report)
       - name: Smoke tests (domap)
         run: |
           set -Eeuo pipefail
@@ -164,12 +166,16 @@ jobs:
           TOKEN="$(gcloud secrets versions access latest \
                    --secret=ADMIN_TOKEN \
                    --project "${PROJECT_ID}")"
-          curl -fsS -o /dev/null "${URL}/health"
-          curl -fsS -o /dev/null -H "Authorization: Bearer ${TOKEN}" "${URL}/api/status"
-          curl -fsS -o /dev/null "${URL}/api/report"
-          echo "Smoke OK - ${URL}"
+          code=$(curl -fsS -o /dev/null -w "%{http_code}" "${URL}/health") || code=000
+          if [ "$code" -ne 200 ]; then echo "::error::/health=$code"; exit 1; fi
+          code=$(curl -fsS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${URL}/api/status") || code=000
+          if [ "$code" -ne 200 ]; then echo "::error::/api/status=$code"; exit 1; fi
+          code=$(curl -fsS -o /dev/null -w "%{http_code}" "${URL}/api/report") || code=000
+          if [ "$code" -ne 200 ]; then echo "::error::/api/report=$code"; exit 1; fi
+          echo "Smoke OK: ${URL}"
 
+      # step 8 - summary
       - name: Summary
         run: |
           set -Eeuo pipefail
-          echo "::notice::Deploy finished. Admin=${SERVICE_ADMIN}@${REGION_ADMIN}, Domap=${SERVICE_DOMAP}@${REGION_DOMAP}"
+          echo "::notice::Deploy finished: admin=${SERVICE_ADMIN}@${REGION_ADMIN}, domap=${SERVICE_DOMAP}@${REGION_DOMAP}"
