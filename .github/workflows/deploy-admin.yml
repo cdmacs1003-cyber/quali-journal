@@ -35,55 +35,72 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # step 1 - install gcloud (no credentials export here)
+      # step 1 - install gcloud (install only)
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
           install_components: "beta"
 
-      # step 1.5 - WIF sanity check (pre-auth, format only)
-      # avoid invalid_target caused by typo, colon, newline
-      - name: WIF sanity check (format only, pre-auth)
+      # step 1.5 - normalize WIF secret and decide auth inputs
+      # strip hidden chars( CR/LF/TAB/SPACE ) and trailing ':'
+      # validate format and expose sanitized value via outputs
+      - name: Decide auth strategy (sanitize WIF)
+        id: wif
         env:
-          WIF: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          WIF_RAW: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SA_EMAIL: ${{ secrets.GCP_SERVICE_ACCOUNT }}
         run: |
           set -Eeuo pipefail
-          echo "::notice::WIF='${WIF}'"
-          # must be: projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
-          echo "$WIF" | grep -Eq '^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$' || {
-            echo "::error::WIF format invalid: $WIF"
+          printf "::notice::WIF_RAW(len=%s)='%s'\n" "${#WIF_RAW}" "${WIF_RAW}"
+
+          # 1) sanitize: remove CR/LF/TAB/SPACE, then drop trailing ':'
+          WIF_CLEAN="$(printf '%s' "${WIF_RAW}" | tr -d '\r\n\t ' | sed 's/:$//')"
+
+          printf "::notice::WIF_CLEAN(len=%s)='%s'\n" "${#WIF_CLEAN}" "${WIF_CLEAN}"
+
+          # 2) format check: projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+          echo "${WIF_CLEAN}" | grep -Eq '^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$' || {
+            echo "::error::WIF format invalid: ${WIF_CLEAN}"
             exit 1
           }
-          echo "::notice::WIF format OK"
 
-      # step 2 - authenticate (keyless WIF). create ADC file for gcloud
+          # 3) expose outputs
+          {
+            echo "wif=${WIF_CLEAN}"
+            echo "sa=${SA_EMAIL}"
+          } >> "${GITHUB_OUTPUT}"
+
+      # step 2 - authenticate with sanitized audience (keyless WIF)
       - name: Authenticate to Google Cloud (WIF)
         uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ steps.wif.outputs.wif }}
+          service_account: ${{ steps.wif.outputs.sa }}
           create_credentials_file: true
 
-      # step 2.5 - WIF provider verify (post-auth, existence and state)
-      - name: WIF provider verify (post-auth, existence/state)
+      # step 2.5 - verify provider existence/state/issuer (defensive)
+      - name: WIF provider verify (post-auth)
         env:
-          WIF: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          WIF: ${{ steps.wif.outputs.wif }}
         run: |
           set -Eeuo pipefail
           POOL_ID="$(echo "$WIF" | awk -F'/workloadIdentityPools/|/providers/' '{print $2}')"
           PROVIDER_ID="$(basename "$WIF")"
           echo "::notice::POOL_ID=$POOL_ID, PROVIDER_ID=$PROVIDER_ID"
+
           gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
             --location=global --workload-identity-pool="$POOL_ID" \
             --format='yaml(name,oidc.issuerUri,disabled,oidc.attributeCondition)' || {
               echo "::error::Provider not found or no permission for: $WIF"
               exit 1
             }
+
           ISSUER="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
             --location=global --workload-identity-pool="$POOL_ID" --format='value(oidc.issuerUri)')"
           DISABLED="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
             --location=global --workload-identity-pool="$POOL_ID" --format='value(disabled)')"
+
           if [ "$DISABLED" = "True" ] || [ "$DISABLED" = "true" ]; then
             echo "::error::Provider is disabled"
             exit 1
@@ -94,7 +111,7 @@ jobs:
           fi
           echo "::notice::WIF provider verify OK"
 
-      # gate 1 - verify build context (simple and robust)
+      # gate 1 - verify build context
       - name: Gate 1 - verify build context
         working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
@@ -106,7 +123,7 @@ jobs:
             if [ -f "$f" ]; then ok=1; fi
           done
           if [ "$ok" -ne 1 ]; then
-            echo "::error::no known build files found in $(pwd)"
+            echo "::error::no known build files in $(pwd)"
             exit 1
           fi
 
