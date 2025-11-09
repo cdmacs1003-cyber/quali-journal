@@ -78,7 +78,21 @@ def main():
         items = load_json(p) or []
         for it in items:
             _, _, patch = evaluate_ready(it, gate, id_is_unique, url_checker, allow_redirect_hops=hops)
-            it.update(patch)
+            # --- 안전 업데이트: 문자열/기타 타입 방어 ---
+            try:
+                _obj = it
+                if isinstance(_obj, str):
+                    try:
+                        _obj = json.loads(_obj)
+                    except Exception:
+                        _obj = None
+                if isinstance(_obj, dict):
+                    _obj.update(patch)
+                    it = _obj
+                # dict가 아니면 패스(해당 항목은 건너뜀)
+            except Exception:
+                pass
+
         save_json(p, items)
 
     print("Backfill OK.")

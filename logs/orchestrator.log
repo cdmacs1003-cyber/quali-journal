@@ -187,3 +187,27 @@
 2025-10-24 04:32:09,146 INFO: orchestrator start args: --publish-community --format all
 2025-10-24 04:32:10,229 INFO: orchestrator start args: --publish --format all
 2025-10-24 04:32:11,342 INFO: orchestrator start args: --collect-community
+2025-10-29 14:44:59,839 INFO: orchestrator start args: --collect-community
+2025-10-29 15:38:45,035 INFO: orchestrator start args: --collect-keyword IPC-A-610
+2025-10-29 15:38:46,026 INFO: orchestrator start args: --approve-keyword IPC-A-610 --approve-keyword-top 15
+2025-10-29 15:38:46,996 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-29 15:38:47,007 WARNING: approved 0 (<15). 발행은 계속 진행합니다.
+2025-10-29 15:39:12,182 INFO: orchestrator start args: --collect-community
+2025-10-29 15:39:14,422 INFO: orchestrator start args: --collect-community
+2025-10-29 15:39:16,848 INFO: orchestrator start args: --collect-community
+2025-10-29 15:39:21,529 INFO: orchestrator start args: --collect-community
+2025-10-29 15:39:46,118 INFO: orchestrator start args: --publish-community --format all
+2025-10-29 15:39:47,189 INFO: orchestrator start args: --publish --format all
+2025-10-29 15:39:48,258 INFO: orchestrator start args: --collect-community
+2025-10-29 15:53:39,840 INFO: orchestrator start args: --collect-keyword IPC-A-610 --use-external-rss
+2025-10-29 15:53:42,047 INFO: orchestrator start args: --approve-keyword-top 20 --approve-keyword IPC-A-610
+2025-10-29 15:53:43,306 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-29 15:53:43,308 WARNING: approved 0 (<15). 발행은 계속 진행합니다.
+2025-10-29 15:56:43,118 INFO: orchestrator start args: --collect-keyword IPC-A-610 --use-external-rss
+2025-10-29 15:56:44,986 INFO: orchestrator start args: --approve-keyword-top 20 --approve-keyword IPC-A-610
+2025-10-29 15:56:46,154 INFO: orchestrator start args: --publish-keyword IPC-A-610
+2025-10-29 15:56:46,156 WARNING: approved 0 (<15). 발행은 계속 진행합니다.
+2025-10-29 15:57:11,693 INFO: orchestrator start args: --collect-keyword IPC-A-610 --use-external-rss
+2025-10-29 15:57:13,054 INFO: orchestrator start args: --approve-keyword-top 20 --approve-keyword IPC-A-610
+2025-10-29 16:28:22,816 INFO: orchestrator start args: --collect-keyword IPC-A-610 --use-external-rss
+2025-10-29 16:28:25,257 INFO: orchestrator start args: --approve-keyword-top 20 --approve-keyword IPC-A-610

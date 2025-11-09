@@ -1,0 +1,91 @@
+﻿apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  annotations:
+    run.googleapis.com/build-enable-automatic-updates: 'false'
+    run.googleapis.com/build-environment-variables: '{"GOOGLE_ENTRYPOINT":"uvicorn
+      server_quali:app --host 0.0.0.0 --port 8080"}'
+    run.googleapis.com/build-id: fe1d24fa-c5cb-43ed-a845-19d55b72a5af
+    run.googleapis.com/build-image-uri: asia-northeast1-docker.pkg.dev/quali-journal-prod/cloud-run-source-deploy/quali-admin-domap
+    run.googleapis.com/build-name: projects/665693030029/locations/asia-northeast1/builds/fe1d24fa-c5cb-43ed-a845-19d55b72a5af
+    run.googleapis.com/build-source-location: gs://run-sources-quali-journal-prod-asia-northeast1/services/quali-admin-domap/1761899062.642736-895332c425464877a2ddbf269ce6e86c.zip#1761899063119713
+    run.googleapis.com/client-name: gcloud
+    run.googleapis.com/client-version: 542.0.0
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+    run.googleapis.com/operation-id: 95c7ff32-d512-4530-9e85-62cef04422d4
+    run.googleapis.com/urls: '["https://quali-admin-domap-665693030029.asia-northeast1.run.app","https://quali-admin-domap-q2cq64ti3a-an.a.run.app"]'
+    serving.knative.dev/creator: cdmacs1003@gmail.com
+    serving.knative.dev/lastModifier: cdmacs1003@gmail.com
+  creationTimestamp: '2025-10-18T22:45:07.580423Z'
+  generation: 79
+  labels:
+    cloud.googleapis.com/location: asia-northeast1
+  name: quali-admin-domap
+  namespace: '665693030029'
+  resourceVersion: AAZCc4LavPc
+  selfLink: /apis/serving.knative.dev/v1/namespaces/665693030029/services/quali-admin-domap
+  uid: 0ffe17cb-bbbf-4439-b438-19bac1956bdb
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: '20'
+        run.googleapis.com/client-name: gcloud
+        run.googleapis.com/client-version: 542.0.0
+      labels:
+        client.knative.dev/nonce: qwrmpvugtr
+        run.googleapis.com/startupProbeType: Default
+    spec:
+      containerConcurrency: 80
+      containers:
+      - env:
+        - name: PYTHONUTF8
+          value: '1'
+        - name: PYTHONIOENCODING
+          value: utf-8
+        - name: ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: ADMIN_TOKEN
+        image: asia-northeast1-docker.pkg.dev/quali-journal-prod/cloud-run-source-deploy/quali-admin-domap@sha256:90efe300dbd04bc392466d9db5f393aca555d42ff41da4483e6a41901929064a
+        ports:
+        - containerPort: 8080
+          name: http1
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+        startupProbe:
+          failureThreshold: 1
+          periodSeconds: 240
+          tcpSocket:
+            port: 8080
+          timeoutSeconds: 240
+      serviceAccountName: 665693030029-compute@developer.gserviceaccount.com
+      timeoutSeconds: 300
+  traffic:
+  - latestRevision: true
+    percent: 100
+status:
+  address:
+    url: https://quali-admin-domap-q2cq64ti3a-an.a.run.app
+  conditions:
+  - lastTransitionTime: '2025-10-31T08:25:32.887726Z'
+    status: 'True'
+    type: Ready
+  - lastTransitionTime: '2025-10-31T08:25:25.803993Z'
+    status: 'True'
+    type: ConfigurationsReady
+  - lastTransitionTime: '2025-10-31T08:25:32.848600Z'
+    status: 'True'
+    type: RoutesReady
+  latestCreatedRevisionName: quali-admin-domap-00074-c99
+  latestReadyRevisionName: quali-admin-domap-00074-c99
+  observedGeneration: 79
+  traffic:
+  - latestRevision: true
+    percent: 100
+    revisionName: quali-admin-domap-00074-c99
+  url: https://quali-admin-domap-q2cq64ti3a-an.a.run.app

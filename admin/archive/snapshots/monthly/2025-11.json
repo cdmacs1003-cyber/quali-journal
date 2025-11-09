@@ -1,0 +1,10 @@
+{
+  "type": "monthly_snapshot",
+  "month": "2025-11",
+  "generated_at": "2025-11-09T15:57:23+09:00",
+  "sources": {
+    "selected_articles.json": [],
+    "selected_keyword_articles.json": []
+  },
+  "sha256": "3c7454538254113ad82b25cc69ac4b53f991ee8876610058d5fe8495e1f51f99"
+}

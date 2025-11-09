@@ -1,0 +1,19 @@
+{
+  "type": "weekly_diff",
+  "week": "2025-45",
+  "generated_at": "2025-11-09T15:57:23+09:00",
+  "baseline": {
+    "file": "archive\\diffs\\weekly\\2025-45.json",
+    "kind": "weekly_diff"
+  },
+  "summary": {
+    "added": 0,
+    "removed": 0,
+    "modified": 0
+  },
+  "added": [],
+  "removed": [],
+  "modified": [],
+  "current_items": [],
+  "sha256": "0c2dda905dbd674615a2d3cd9e82456361b5ab06f5a358733322a06b5e1ea055"
+}

@@ -1,74 +1,109 @@
-﻿name: Deploy to Cloud Run
+﻿name: Deploy to Cloud Run (safe rollout, generic)
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      service:
+        description: "Cloud Run service name"
+        required: true
+        type: string
+      region:
+        description: "Cloud Run region (e.g., asia-northeast1)"
+        required: true
+        default: "asia-northeast1"
+      context:
+        description: "Build context (admin or .)"
+        required: true
+        default: "."
 
 permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: deploy-generic
+  cancel-in-progress: true
+
 env:
-  PROJECT_ID: ${{ secrets.GCLOUD_PROJECT_ID }}     # 예: quali-journal-prod
-  REGION:     ${{ secrets.GCLOUD_REGION }}         # 예: asia-northeast3
-  SERVICE:    ${{ secrets.CLOUD_RUN_SERVICE }}     # 예: quali-journal-admin
+  PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
+  REPO: ${{ secrets.ARTIFACT_REPO }}
+  AR_REGION: asia-northeast3
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      # 0) 소스 체크아웃
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 1) Python 세팅 (해시 빌드 스크립트 실행용)
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # 2) (중요) 정적 자산 '콘텐츠 해시' 빌드
-      #    -> admin/dist/index.html, admin/dist/assets/*.<hash>.* 생성
-      - name: Build assets with content hash
-        run: |
-          python tools/build_assets_hash.py --clean
+      - name: Resolve context
         shell: bash
+        run: |
+          CTX="${{ inputs.context }}"
+          if [ "$CTX" = "admin" ] && [ ! -d "admin" ]; then CTX="."; fi
+          echo "CTX=$CTX" >> "$GITHUB_ENV"
 
-      # 3) GCP 인증 (WIF)
-      - name: Auth to Google Cloud (WIF)
-        uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
-          service_account:           ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          create_credentials_file: true
 
-      # 4) gcloud 설치
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
+          install_components: gcloud
 
-      # 5) Cloud Run 배포 (소스 기반)
-      #    - 빌드 시 admin/dist가 이미지에 포함되며,
-      #      server_quali.py가 dist 우선 서빙 + 캐시 헤더를 적용합니다.
-      - name: Deploy to Cloud Run
+      - name: Build & Push
         run: |
-          gcloud run deploy "$SERVICE" \
-            --source . \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --quiet
-        shell: bash
+          set -e
+          IMAGE_TAG="${AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${{ inputs.service }}:${GITHUB_SHA}-${GITHUB_RUN_NUMBER}"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          gcloud builds submit "$CTX" --tag "$IMAGE_TAG"
 
-      # 6) (선택) 최신 리비전에 100% 트래픽 전환
-      - name: Shift traffic to latest
+      - name: Deploy (no-traffic, labeled)
         run: |
-          gcloud run services update-traffic "$SERVICE" \
-            --to-latest \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --quiet
+          gcloud run deploy "${{ inputs.service }}" \
+            --image "${IMAGE_TAG}" \
+            --region "${{ inputs.region }}" \
+            --project "${PROJECT_ID}" \
+            --labels=commit-sha=${GITHUB_SHA},env=prod \
+            --no-traffic \
+            --allow-unauthenticated
+
+      - name: Smoke /health
         shell: bash
+        run: |
+          set -e
+          URL=$(gcloud run services describe "${{ inputs.service }}" --region "${{ inputs.region }}" --project "${PROJECT_ID}" --format='value(status.url)')
+          curl -fsSL "${URL}/health"
 
+      - name: Traffic split 5% → 20% → 50% → 100% (with rollback)
+        shell: bash
+        run: |
+          set -e
+          svc="${{ inputs.service }}"; region="${{ inputs.region }}"; proj="${PROJECT_ID}"
+          URL=$(gcloud run services describe "$svc" --region "$region" --project "$proj" --format='value(status.url)')
+          OLD_REV=$(gcloud run services describe "$svc" --region "$region" --project "$proj" --format='value(status.traffic[0].revisionName)')
+          NEW_REV=$(gcloud run revisions list --service "$svc" --region "$region" --project "$proj" --sort-by="~createTime" --limit=1 --format='value(METADATA.name)')
 
+          for PCT in 5 20 50; do
+            gcloud run services update-traffic "$svc" --region "$region" --project "$proj" \
+              --to-revisions ${OLD_REV}=$((100-PCT)),${NEW_REV}=${PCT}
+            sleep 90
+            curl -fsSL "${URL}/health" || {
+              gcloud run services update-traffic "$svc" --region "$region" --project "$proj" \
+                --to-revisions ${OLD_REV}=100
+              exit 1
+            }
+          done
+
+          gcloud run services update-traffic "$svc" --region "$region" --project "$proj" \
+            --to-revisions ${NEW_REV}=100
+
+      - name: Show traffic & labels
+        run: |
+          gcloud run revisions list \
+            --region "${{ inputs.region }}" --project "${PROJECT_ID}" \
+            --service "${{ inputs.service }}" \
+            --sort-by="~createTime" --limit=10 \
+            --format='table(METADATA.name, metadata.labels["commit-sha"]:label=COMMIT_SHA, createTime)'

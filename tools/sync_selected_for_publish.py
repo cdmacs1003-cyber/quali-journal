@@ -71,7 +71,20 @@ def process(items: List[Dict], cfg: Dict, id_unique_check: Callable[[str], bool]
     for it in items:
         ready, reasons, patch = evaluate_ready(it, gate, id_unique_check, url_checker, allow_redirect_hops=hops)
         # persist derived fields
-        it.update(patch)
+        # --- 안전 업데이트: 문자열/기타 타입 방어 ---
+        try:
+            _obj = it
+            if isinstance(_obj, str):
+                try:
+                    _obj = json.loads(_obj)
+                except Exception:
+                    _obj = None
+            if isinstance(_obj, dict):
+                _obj.update(patch)
+                it = _obj
+        except Exception:
+            pass
+
         if ready:
             ready_true += 1
     meta = {

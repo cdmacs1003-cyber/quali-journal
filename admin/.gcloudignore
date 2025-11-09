@@ -1,12 +1,57 @@
-﻿.git/
-.gcloudignore
+##############################
+# 기본 제외(공통 불필요물)
+##############################
+.git
+.gitignore
+**/__pycache__/
+*.py[cod]
 *.log
-__pycache__/
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+.env
+.env.*
+.venv/
+venv/
 node_modules/
+*.sqlite*
+*.db
+*.ipynb_checkpoints/
 
-!index.html
-!**/*.html
-!**/*.htm
-!app/**
+##############################
+# 프로젝트별 제외(대용량/산출물)
+##############################
+archive/**
+logs/**
+exports/**
+db_snapshots/**
+# 루트 dist는 제외(아래에서 admin 쪽은 포함 예외로 재포함)
+dist/**
+
+##############################
+# ⛳ 반드시 포함해야 하는 Admin 정적 리소스
+# (❗ 뒤쪽 규칙이 앞 규칙을 덮어씀)
+##############################
+!admin/index.html
+!admin/service-worker.js
+!admin/**/*.html
+!admin/**/*.js
+!admin/**/*.css
+!admin/**/*.map
+!admin/**/*.png
+!admin/**/*.jpg
+!admin/**/*.svg
+!admin/**/*.ico
+!admin/**/*.webp
+!admin/**/*.woff
+!admin/**/*.woff2
+!admin/dist/**
+
+##############################
+# 백엔드 필수 파일 포함
+##############################
 !server_quali.py
-!requirements.txt
+!requirements*.txt
+!pyproject.toml
+!poetry.lock

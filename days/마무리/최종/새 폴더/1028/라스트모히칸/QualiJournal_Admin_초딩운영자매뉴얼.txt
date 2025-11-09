@@ -1,0 +1,15 @@
+퀄리저널 관리자: 초딩 운영자 관리 매뉴얼 (요약 텍스트)
+- 서버 실행: start_admin_task.ps1 → uvicorn server_quali:app (8080 사용, 충돌 시 8010)
+- 자동 기동: 로그인 시 QualiAdmin 예약 작업
+- 자가 복구: 5분마다 QualiAdmin-Health가 /api/status 확인 후 재가동
+- 로그: admin\logs\server_YYYYMMDD.out/err.log (7일 보관)
+
+[하루 체크 3단계]
+1) 상태: Invoke-WebRequest http://127.0.0.1:8080/api/status -Headers @{ "X-Admin-Token"="devtoken" }
+2) 로그: gc admin\logs\server_날짜.out.log -Tail 50
+3) 헬스: schtasks /Run /TN "QualiAdmin-Health"
+
+[문제 해결]
+- 포트충돌: Get-NetTCPConnection -LocalPort 8080 -State Listen → Stop-Process -Id <PID> -Force
+- 응답없음: schtasks /Run /TN "QualiAdmin-Health"
+- 에러로그: gc admin\logs\server_날짜.err.log -Tail 100

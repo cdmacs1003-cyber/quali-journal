@@ -1,53 +1,49 @@
-# =========================================================
-# QualiJournal Admin — Dockerfile (SSOT: admin/ 컨텍스트 고정)
-# - Cloud Run 이미지 배포용
-# - 엔트리: server_quali:app   (접두사 없음)
-# =========================================================
+﻿# QualiJournal Admin — Dockerfile (Kaniko-safe · dist 해시 빌드 · 8080 고정)
 FROM python:3.11-slim
 
-# 기본 런타임 환경
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONIOENCODING=utf-8 \
-    LANG=C.UTF-8 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_ROOT_USER_ACTION=ignore
+    PYTHONUTF8=1 \
+    PORT=8080 \
+    PIP_NO_CACHE_DIR=1
 
-# (옵션) 일부 패키지 빌드를 위한 최소 빌드 도구
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# 최소 OS 패키지
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    ca-certificates tzdata curl git build-essential \
+ && rm -rf /var/lib/apt/lists/*
 
-# 앱 작업 디렉터리
 WORKDIR /app
-
-# 종속성 캐시 최적화: 먼저 requirements만 복사
-COPY requirements.txt /app/requirements.txt
-
-# 파이썬 의존성 설치 (필요시 프레임워크 기본 패키지도 함께 보강)
-RUN python -m pip install --upgrade pip && \
-    pip install -r /app/requirements.txt && \
-    pip install "fastapi" "uvicorn[standard]" gunicorn python-dotenv
-
-# 애플리케이션 복사 (admin/ 컨텍스트의 모든 파일)
 COPY . /app
 
-# 최신 admin/index.html을 최종 산출물로 강제 + 오래된 dist 제거 (멱등)
+# 1) pip 업그레이드 + requirements(있으면) 설치 + 필수 런타임 보강(누락만 설치)
 RUN set -eux; \
-    if [ -f "/app/admin/index.html" ]; then \
-        cp -f /app/admin/index.html /app/index.html; \
-    fi; \
-    rm -rf /app/dist
+    python -m pip install --no-warn-script-location --upgrade pip; \
+    for f in /app/requirements.txt /app/requirements-prod.txt /app/admin/requirements.txt /app/admin/requirements-prod.txt; do \
+      if [ -f "$f" ]; then python -m pip install -r "$f"; fi; \
+    done; \
+    python -c "import importlib.util as u, subprocess, sys; \
+pkgs='uvicorn fastapi starlette python-multipart jinja2 markdown aiofiles python-dotenv'.split(); \
+miss=[p for p in pkgs if u.find_spec(p) is None]; \
+print('missing:',miss); \
+sys.exit(0) if not miss else subprocess.check_call([sys.executable,'-m','pip','install','--no-warn-script-location',*miss])"
 
-# (선택) 빌드 도구 제거로 경량화
-RUN apt-get purge -y build-essential || true && apt-get autoremove -y || true
+# 2) UI 해시 빌드(dist 생성) — tools 경로 자동 탐지 (없으면 skip)
+RUN set -eux; \
+    if command -v python >/dev/null 2>&1; then \
+      if   [ -f /app/tools/build_assets_hash.py ]; then python /app/tools/build_assets_hash.py --clean; \
+      elif [ -f /app/admin/tools/build_assets_hash.py ]; then python /app/admin/tools/build_assets_hash.py --clean; \
+      elif [ -f /app/build_assets_hash.py ]; then python /app/build_assets_hash.py --clean; \
+      else echo 'skip: build_assets_hash.py not found in context'; fi; \
+    else echo 'skip: python not found'; fi
 
-# 보안상 비루트 사용자로 실행
-RUN useradd -m appuser && chown -R appuser:appuser /app
+# 비루트 사용자(선택)
+RUN useradd -m -u 10001 appuser || true
 USER appuser
 
-# Cloud Run 포트
+# /app/admin이 있으면 그 디렉터리에서 실행(컨텍스트에 무관하게 일관성)
+WORKDIR /app/admin
 EXPOSE 8080
 
-# ✅ ASGI 엔트리 고정: server_quali:app (admin 컨텍스트이므로 접두사 없음)
-CMD ["bash","-lc","exec gunicorn -k uvicorn.workers.UvicornWorker -b :$PORT server_quali:app"]
+# $PORT 준수(Cloud Run)
+CMD ["sh","-c","python -m uvicorn server_quali:app --host 0.0.0.0 --port ${PORT:-8080}"]

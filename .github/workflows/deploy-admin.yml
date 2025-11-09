@@ -1,125 +1,243 @@
-# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
-﻿name: Deploy Admin API (WIF harden)
+name: Deploy Admin and Domap (Cloud Run)
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
-
+    branches: ["main"]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: deploy-admin-api
+  group: deploy-admin
   cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
 
 env:
   PROJECT_ID: quali-journal-prod
-  REGION: asia-northeast3
-  SERVICE: quali-journal-admin
-  REPO_NAME: ${{ github.repository }}
-  GIT_REF:   ${{ github.ref }}
-  GIT_SHA:   ${{ github.sha }}
+  REGION_ADMIN: asia-northeast3
+  SERVICE_ADMIN: quali-journal-admin
+  REGION_DOMAP: asia-northeast1
+  SERVICE_DOMAP: quali-admin-domap
+  BUILD_CONTEXT: admin
+  DOMAIN: admin.standardai.co.kr
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
+
     steps:
-      - uses: actions/checkout@v4
+      # step 0 - source
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Auth via WIF (OIDC)
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
-          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-          token_format: 'id_token'
-          id_token_audience: 'https://sts.googleapis.com'
-          id_token_include_email: true
-
-      - uses: google-github-actions/setup-gcloud@v2
+      # step 1 - install gcloud (install only)
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
+          install_components: "beta"
 
-      - name: Verify OIDC claims (repo/ref)
+      # step 1.5 - normalize WIF secret and decide auth inputs
+      # strip hidden chars( CR/LF/TAB/SPACE ) and trailing ':'
+      # validate format and expose sanitized value via outputs
+      - name: Decide auth strategy (sanitize WIF)
+        id: wif
         env:
-          AUDIENCE: https://sts.googleapis.com
-          REPO_NAME: ${{ env.REPO_NAME }}
-          GIT_REF:   ${{ env.GIT_REF }}
+          WIF_RAW: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SA_EMAIL: ${{ secrets.GCP_SERVICE_ACCOUNT }}
         run: |
-          set -euo pipefail
-          GH_OIDC_JWT=$(curl -s -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" | jq -r .value)
-          echo "$GH_OIDC_JWT" | cut -d'.' -f2 | tr '_-' '/+' | base64 -d > gh-oidc.json || true
-          echo "OIDC claims:"; cat gh-oidc.json || true
-          test "$(jq -r .repository gh-oidc.json)" = "${REPO_NAME}"
-          test "$(jq -r .ref         gh-oidc.json)" = "${GIT_REF}"
+          set -Eeuo pipefail
+          printf "::notice::WIF_RAW(len=%s)='%s'\n" "${#WIF_RAW}" "${WIF_RAW}"
 
-      # Pre-gate: ensure required files in admin/ context (prevent build without required files)
-      - name: 'Pre-gate: files to be uploaded (admin/)'
-        shell: bash
-        run: |
-          set -euo pipefail
-          # admin 컨텍스트에서 필수 파일이 있는지 확인
-          pushd admin >/dev/null
-          LIST="$(gcloud meta list-files-for-upload || true)"
-          for f in server_quali.py requirements.txt index.html; do
-            echo "$LIST" | grep -qx "$f" || { echo "Error: Missing in upload (admin/$f)" && exit 1; }
-          done
-          echo "---- upload list (first 100 lines) ----"
-          echo "$LIST" | head -n 100
-          popd >/dev/null
+          # 1) sanitize: remove CR/LF/TAB/SPACE, then drop trailing ':'
+          WIF_CLEAN="$(printf '%s' "${WIF_RAW}" | tr -d '\r\n\t ' | sed 's/:$//')"
 
-      - name: Snapshot previous revision
-        id: prev
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          PREV=$(gcloud run services describe "$SERVICE" --region "$REGION" \
-                 --format='value(status.latestCreatedRevisionName)')
-          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+          printf "::notice::WIF_CLEAN(len=%s)='%s'\n" "${#WIF_CLEAN}" "${WIF_CLEAN}"
 
-      - name: Build image (Cloud Build)
-        run: |
-          TAG="$(date +%Y%m%d_%H%M%S)-${GIT_SHA::7}"
-          IMG="asia-northeast1-docker.pkg.dev/${PROJECT_ID}/qualijournal/qj-admin:${TAG}"
-          echo "IMG=$IMG" >> "$GITHUB_ENV"
-          gcloud builds submit --tag "$IMG" .
+          # 2) format check: projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+          echo "${WIF_CLEAN}" | grep -Eq '^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$' || {
+            echo "::error::WIF format invalid: ${WIF_CLEAN}"
+            exit 1
+          }
 
-      - name: Deploy (no-traffic)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          gcloud run deploy "$SERVICE" --image "$IMG" --region "$REGION" \
-            --no-traffic --labels=commit-sha="${GIT_SHA}",env=prod --quiet
-          gcloud run services describe "$SERVICE" --region "$REGION" \
-            --format='value(status.latestCreatedRevisionName)'
+          # 3) expose outputs
+          {
+            echo "wif=${WIF_CLEAN}"
+            echo "sa=${SA_EMAIL}"
+          } >> "${GITHUB_OUTPUT}"
 
-      - name: "Smoke /health (run.app)"
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          set -euo pipefail
-          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
-          curl -fsS "$URL/health" >/dev/null
+      # step 2 - authenticate with sanitized audience (keyless WIF)
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ steps.wif.outputs.wif }}
+          service_account: ${{ steps.wif.outputs.sa }}
+          create_credentials_file: true
 
-      - name: Shift traffic to latest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # step 2.5 - verify provider existence/state/issuer (defensive)
+      - name: WIF provider verify (post-auth)
+        env:
+          WIF: ${{ steps.wif.outputs.wif }}
         run: |
-          gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest --quiet
-          gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.traffic)'
+          set -Eeuo pipefail
+          POOL_ID="$(echo "$WIF" | awk -F'/workloadIdentityPools/|/providers/' '{print $2}')"
+          PROVIDER_ID="$(basename "$WIF")"
+          echo "::notice::POOL_ID=$POOL_ID, PROVIDER_ID=$PROVIDER_ID"
 
-      - name: Assert revision updated
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          NEW=$(gcloud run services describe "$SERVICE" --region "$REGION" \
-                --format='value(status.latestCreatedRevisionName)')
-          echo "prev=${{ steps.prev.outputs.prev }} | new=${NEW}"
-          if [ "$NEW" = "${{ steps.prev.outputs.prev }}" ]; then
-            echo "::error ::Revision not updated. WIF/OIDC cache or policy mismatch suspected."
+          gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+            --location=global --workload-identity-pool="$POOL_ID" \
+            --format='yaml(name,oidc.issuerUri,disabled,oidc.attributeCondition)' || {
+              echo "::error::Provider not found or no permission for: $WIF"
+              exit 1
+            }
+
+          ISSUER="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+            --location=global --workload-identity-pool="$POOL_ID" --format='value(oidc.issuerUri)')"
+          DISABLED="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+            --location=global --workload-identity-pool="$POOL_ID" --format='value(disabled)')"
+
+          if [ "$DISABLED" = "True" ] || [ "$DISABLED" = "true" ]; then
+            echo "::error::Provider is disabled"
             exit 1
           fi
+          if [ "$ISSUER" != "https://token.actions.githubusercontent.com" ]; then
+            echo "::error::Issuer mismatch: $ISSUER"
+            exit 1
+          fi
+          echo "::notice::WIF provider verify OK"
+
+      # gate 1 - verify build context
+      - name: Gate 1 - verify build context
+        working-directory: ${{ env.BUILD_CONTEXT }}
+        run: |
+          set -Eeuo pipefail
+          echo "pwd=$(pwd)"
+          ls -la
+          ok=0
+          for f in requirements.txt pyproject.toml Dockerfile server_quali.py; do
+            if [ -f "$f" ]; then ok=1; fi
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::no known build files in $(pwd)"
+            exit 1
+          fi
+
+      # step 3 - deploy admin from source (Seoul)
+      - name: Deploy admin (source, Seoul)
+        working-directory: ${{ env.BUILD_CONTEXT }}
+        run: |
+          set -Eeuo pipefail
+          gcloud run deploy "${SERVICE_ADMIN}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION_ADMIN}" \
+            --source . \
+            --allow-unauthenticated \
+            --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
+            --set-env-vars "PYTHONUTF8=1,PYTHONIOENCODING=utf-8,ARCHIVE_DIR=/tmp/archive"
+          gcloud run services update-traffic "${SERVICE_ADMIN}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION_ADMIN}" \
+            --to-latest
+
+      # step 4 - read deployed admin image for domap reuse
+      - name: Read admin image
+        id: img
+        run: |
+          set -Eeuo pipefail
+          IMG="$(gcloud run services describe "${SERVICE_ADMIN}" \
+                 --project "${PROJECT_ID}" \
+                 --region "${REGION_ADMIN}" \
+                 --format='value(spec.template.spec.containers[0].image)')"
+          if [ -z "${IMG}" ]; then
+            echo "::error::failed to read admin image"
+            exit 1
+          fi
+          echo "image=${IMG}" >> "${GITHUB_OUTPUT}"
+
+      # step 5 - deploy domap using the same image (Tokyo)
+      - name: Deploy domap (image, Tokyo)
+        run: |
+          set -Eeuo pipefail
+          gcloud run deploy "${SERVICE_DOMAP}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION_DOMAP}" \
+            --image "${{ steps.img.outputs.image }}" \
+            --allow-unauthenticated \
+            --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
+            --set-env-vars "PYTHONUTF8=1,PYTHONIOENCODING=utf-8,ARCHIVE_DIR=/tmp/archive"
+          gcloud run services update-traffic "${SERVICE_DOMAP}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION_DOMAP}" \
+            --to-latest
+
+      # gate 2 - domain mapping must point to domap service
+      - name: Gate 2 - domain mapping route check
+        run: |
+          set -Eeuo pipefail
+          ROUTE="$(gcloud beta run domain-mappings describe \
+                    --domain "${DOMAIN}" \
+                    --project "${PROJECT_ID}" \
+                    --region "${REGION_DOMAP}" \
+                    --format='value(spec.routeName)' || true)"
+          echo "domain=${DOMAIN} route=${ROUTE}"
+          if [ "${ROUTE}" != "${SERVICE_DOMAP}" ]; then
+            echo "::error::domain maps to ${ROUTE:-<empty>} (expected ${SERVICE_DOMAP})"
+            exit 1
+          fi
+
+      # gate 3 - both services must send 100 percent to LATEST
+      - name: Gate 3 - admin traffic must be 100 percent to LATEST
+        run: |
+          set -Eeuo pipefail
+          T="$(gcloud run services describe "${SERVICE_ADMIN}" \
+               --project "${PROJECT_ID}" \
+               --region "${REGION_ADMIN}" \
+               --format='value(status.traffic)')"
+          echo "admin traffic=${T}"
+          echo "${T}" | grep -q 'LATEST' || { echo "::error::admin not pointing to LATEST"; exit 1; }
+          echo "${T}" | grep -q '100'   || { echo "::error::admin traffic not 100 percent"; exit 1; }
+
+      - name: Gate 3 - domap traffic must be 100 percent to LATEST
+        run: |
+          set -Eeuo pipefail
+          T="$(gcloud run services describe "${SERVICE_DOMAP}" \
+               --project "${PROJECT_ID}" \
+               --region "${REGION_DOMAP}" \
+               --format='value(status.traffic)')"
+          echo "domap traffic=${T}"
+          echo "${T}" | grep -q 'LATEST' || { echo "::error::domap not pointing to LATEST"; exit 1; }
+          echo "${T}" | grep -q '100'   || { echo "::error::domap traffic not 100 percent"; exit 1; }
+
+      # step 6 - smoke tests for domap (health, status with token, report)
+      - name: Smoke tests (domap)
+        run: |
+          set -Eeuo pipefail
+          URL="$(gcloud run services describe "${SERVICE_DOMAP}" \
+                 --project "${PROJECT_ID}" \
+                 --region "${REGION_DOMAP}" \
+                 --format='value(status.url)')"
+          if [ -z "${URL}" ]; then
+            echo "::error::failed to read domap url"
+            exit 1
+          fi
+          TOKEN="$(gcloud secrets versions access latest \
+                   --secret=ADMIN_TOKEN \
+                   --project="${PROJECT_ID}")"
+          code=$(curl -fsS -o /dev/null -w "%{http_code}" "${URL}/health") || code=000
+          if [ "$code" -ne 200 ]; then echo "::error::/health=$code"; exit 1; fi
+          code=$(curl -fsS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${URL}/api/status") || code=000
+          if [ "$code" -ne 200 ]; then echo "::error::/api/status=$code"; exit 1; fi
+          code=$(curl -fsS -o /dev/null -w "%{http_code}" "${URL}/api/report") || code=000
+          if [ "$code" -ne 200 ]; then echo "::error::/api/report=$code"; exit 1; fi
+          echo "Smoke OK: ${URL}"
+
+      # step 7 - summary
+      - name: Summary
+        run: |
+          set -Eeuo pipefail
+          echo "::notice::Deploy finished: admin=${SERVICE_ADMIN}@${REGION_ADMIN}, domap=${SERVICE_DOMAP}@${REGION_DOMAP}"

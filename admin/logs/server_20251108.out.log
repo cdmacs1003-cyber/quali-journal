@@ -1,0 +1,2 @@
+2025-11-08 22:48:07,365 [INFO] fallback logger initialized (logging_setup missing)
+INFO:     127.0.0.1:60295 - "GET /api/status HTTP/1.1" 200 OK

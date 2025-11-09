@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>퀄리저널 관리자: 초딩 운영자 관리 매뉴얼</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body{font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", Arial, sans-serif; line-height:1.6; margin:0; padding:2.2rem; color:#0f172a; background:#ffffff;}
+  h1{font-size:1.8rem; margin:0 0 0.8rem;}
+  h2{font-size:1.3rem; margin:1.6rem 0 0.6rem; border-left:6px solid #2563eb; padding-left:10px;}
+  h3{font-size:1.05rem; margin:1rem 0 0.4rem;}
+  p{margin:0.35rem 0;}
+  code, pre{background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:0.35rem 0.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;}
+  pre{white-space:pre-wrap}
+  .card{border:1px solid #e5e7eb; border-radius:14px; padding:1rem; background:#ffffff; box-shadow:0 2px 8px rgba(15,23,42,.05); margin:0.8rem 0;}
+  .badge{display:inline-block; background:#e0f2fe; color:#0369a1; padding:.2rem .5rem; border-radius:999px; font-size:.78rem; font-weight:700; margin-right:.4rem}
+  .steps{counter-reset: step}
+  .steps li{list-style:none; margin:.65rem 0; padding-left:.6rem; position:relative}
+  .steps li:before{counter-increment: step; content: counter(step); position:absolute; left:-.2rem; top:.1rem; background:#2563eb; color:#fff; width:22px; height:22px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:.8rem; box-shadow:0 2px 6px rgba(37,99,235,.4);}
+  .kbd{border:1px solid #cbd5e1; border-bottom-width:2px; padding:.1rem .35rem; border-radius:6px; background:#f8fafc; font-family:ui-monospace, monospace}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px;}
+  .muted{color:#475569}
+  .ok{color:#16a34a; font-weight:700}
+  .warn{color:#ca8a04; font-weight:700}
+  .danger{color:#ef4444; font-weight:700}
+  footer{margin-top:2rem; font-size:.85rem; color:#64748b}
+</style>
+</head>
+<body>
+  <h1>퀄리저널 관리자: 초딩 운영자 관리 매뉴얼</h1>
+  <p class="muted">목표: “손 안 대고 항상 켜지는 관리자 서버”를 쉽게 운영합니다. (도커 없이 PowerShell+작업 스케줄러 방식)</p>
+
+  <div class="card">
+    <span class="badge">핵심 요약</span>
+    <p><b>서버 실행</b>: <code>start_admin_task.ps1</code>가 <code>server_quali:app</code>을 Uvicorn으로 띄웁니다. 기본 포트는 <b>8080</b>, 점유 시 <b>8010</b>으로 자동 전환.</p>
+    <p><b>자동 기동</b>: 로그인 시 <b>QualiAdmin</b> 예약 작업이 자동 실행.</p>
+    <p><b>자가 복구</b>: <b>QualiAdmin-Health</b>가 5분마다 상태를 확인하고 꺼져 있으면 다시 켭니다.</p>
+    <p><b>로그</b>: <code>admin\logs\server_YYYYMMDD.out/err.log</code>에 일자별 저장(7일 보관).</p>
+  </div>
+
+  <h2>하루 운용 체크리스트 (3단계)</h2>
+  <ol class="steps">
+    <li><b>상태 확인</b><br>
+      PowerShell에서 아래 한 줄을 실행합니다.<br>
+      <code>Invoke-WebRequest "http://127.0.0.1:8080/api/status" -Headers @{ "X-Admin-Token"="devtoken" } -UseBasicParsing</code><br>
+      8080이 안 되면 8010으로 다시 시도합니다.
+    </li>
+    <li><b>로그 확인</b><br>
+      <code>gc "C:\Users\user\Desktop\퀄리저널\admin\logs\server_$(Get-Date -Format yyyyMMdd).out.log" -Tail 50</code>
+    </li>
+    <li><b>헬스 수동 실행(선택)</b><br>
+      <code>schtasks /Run /TN "QualiAdmin-Health"</code>
+    </li>
+  </ol>
+
+  <h2>켜기 / 끄기</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>지금 바로 켜기</h3>
+      <pre>powershell -ExecutionPolicy Bypass -File "C:\Users\user\Desktop\퀄리저널\admin\start_admin_task.ps1"</pre>
+      <p class="muted">8080이 바쁘면 자동으로 8010으로 켭니다.</p>
+    </div>
+    <div class="card">
+      <h3>완전히 멈추기</h3>
+      <pre>Stop-ScheduledTask -TaskName "QualiAdmin"
+schtasks /Delete /TN "QualiAdmin-Health" /F</pre>
+      <p class="muted">포트만 비우고 싶으면 <code>Stop-Process -Id &lt;PID&gt; -Force</code>.</p>
+    </div>
+  </div>
+
+  <h2>문제 해결 5분 레시피</h2>
+  <div class="card">
+    <h3>1) 포트 충돌(WinError 10048)</h3>
+    <pre>Get-NetTCPConnection -LocalPort 8080 -State Listen
+Stop-Process -Id &lt;PID&gt; -Force</pre>
+    <p>다시 <code>start_admin_task.ps1</code> 실행.</p>
+    <h3>2) 응답 없음</h3>
+    <pre>schtasks /Run /TN "QualiAdmin-Health"</pre>
+    <p>10초 후 <code>/api/status</code> 재확인.</p>
+    <h3>3) 로그에서 오류 보기</h3>
+    <pre>gc "...\admin\logs\server_YYYYMMDD.err.log" -Tail 100</pre>
+  </div>
+
+  <h2>예약 작업 관리</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>로그온 자동 기동(등록됨)</h3>
+      <p>작업 이름: <b>QualiAdmin</b></p>
+      <pre>Start-ScheduledTask -TaskName "QualiAdmin"</pre>
+    </div>
+    <div class="card">
+      <h3>5분 헬스체크(등록됨)</h3>
+      <p>작업 이름: <b>QualiAdmin-Health</b></p>
+      <pre>schtasks /Run /TN "QualiAdmin-Health"
+schtasks /Query /TN "QualiAdmin-Health" /V /FO LIST</pre>
+    </div>
+  </div>
+
+  <h2>경로 요약</h2>
+  <div class="card">
+    <p><b>실행 스위치</b>: <code>C:\Users\user\Desktop\퀄리저널\admin\start_admin_task.ps1</code></p>
+    <p><b>헬스 스크립트</b>: <code>C:\Users\user\Desktop\퀄리저널\admin\health_quali_admin.ps1</code></p>
+    <p><b>로그</b>: <code>C:\Users\user\Desktop\퀄리저널\admin\logs\server_YYYYMMDD.*.log</code></p>
+    <p><b>서버 앱</b>: <code>server_quali.py</code> → <code>uvicorn server_quali:app</code></p>
+  </div>
+
+  <h2>FAQ</h2>
+  <div class="card">
+    <p><b>Q. 8080 말고 다른 포트로 고정하고 싶어요.</b><br>
+    A. <code>start_admin_task.ps1</code> 실행 시 <code>-Port 8010</code> 처럼 인자를 줄 수 있습니다.</p>
+    <p><b>Q. 토큰을 바꾸려면?</b><br>
+    A. 스크립트 인자 <code>-AdminToken</code>, <code>-ApiToken</code> 또는 사용자 환경변수로 저장하세요.</p>
+    <p><b>Q. 브라우저에서 접속 주소는?</b><br>
+    A. <code>http://127.0.0.1:8080/</code> (우회 시 <code>8010</code>).</p>
+  </div>
+
+  <footer>
+    © QualiJournal Admin — 로컬 운용 매뉴얼. 이 파일은 인쇄/배포용 HTML입니다.
+  </footer>
+</body>
+</html>

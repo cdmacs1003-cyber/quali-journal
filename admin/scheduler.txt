@@ -1,0 +1,20 @@
+﻿attemptDeadline: 180s
+httpTarget:
+  headers:
+    User-Agent: Google-Cloud-Scheduler
+    X-Admin-Token: 32776f034dc84d4ba71613e76feec991
+  httpMethod: POST
+  uri: https://admin.standardai.co.kr/api/report
+lastAttemptTime: '2025-10-31T12:29:19.464822Z'
+name: projects/quali-journal-prod/locations/asia-northeast1/jobs/daily-report
+retryConfig:
+  maxBackoffDuration: 3600s
+  maxDoublings: 5
+  maxRetryDuration: 0s
+  minBackoffDuration: 5s
+schedule: 0 9 * * *
+scheduleTime: '2025-11-01T00:00:00.732054Z'
+state: ENABLED
+status: {}
+timeZone: Asia/Seoul
+userUpdateTime: '2025-10-25T08:39:37Z'
