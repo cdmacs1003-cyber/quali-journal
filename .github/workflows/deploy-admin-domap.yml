@@ -4,67 +4,54 @@ on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
-    inputs:
-      auth:
-        description: "auth mode (json|oidc). default=json"
-        required: false
-        default: "oidc"
 
 permissions:
   contents: read
   id-token: write
 
 env:
+  # 고정값(현재 운영값과 동일하면 그대로 사용)
   GCP_PROJECT: quali-journal-prod
-  GCP_REGION: asia-northeast1
-  SERVICE: quali-admin-domap
-  BUILD_CONTEXT: admin
-  REQUIRE_DB: "false"
+  GCP_REGION:  asia-northeast1
+  SERVICE:     quali-admin-domap
+  BUILD_CONTEXT: admin          # ★ admin 폴더만 컨텍스트
+  REQUIRE_DB: "false"           # Cloud SQL 필수 아니면 false 유지
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
+      # 0) 소스
       - name: Checkout
         uses: actions/checkout@v4
 
-      # --- Auth 전략 결정: GCP_SA_KEY가 있으면 항상 json로 강제 ---
-      - name: Decide auth strategy
-        id: decide
-        shell: bash
-        env:
-          SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          WIF_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          AUTH_INPUT: ${{ github.event.inputs.auth }}
+      # 1) Python 세팅 + 정적자산 해시 빌드(dist 생성)
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build hashed assets (admin context)
+        working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
-          set -euo pipefail
-          # ✅ WIF가 있으면 무조건 WIF 사용
-          if [[ -n "${WIF_PROVIDER:-}" && -n "${WIF_SA:-}" ]]; then
-            echo "strategy=oidc" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # ↘️ WIF가 없고, SA 키가 있을 때만 json 사용
-          if [[ -n "${SA_KEY:-}" ]]; then
-            echo "strategy=json" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "::error::No valid auth secrets. Set GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT (preferred), or GCP_SA_KEY."
-          exit 1
+          python tools/build_assets_hash.py --clean
 
-    # - name: Authenticate to Google Cloud (SA key)
-    #   if: steps.decide.outputs.strategy == 'json'
-    #   uses: google-github-actions/auth@v3
-    #   with:
-    #     project_id: ${{ env.GCP_PROJECT }}
-    #     credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Show built assets
+        working-directory: ${{ env.BUILD_CONTEXT }}
+        run: |
+          echo "::group::dist tree"
+          ls -la dist || true
+          echo "::endgroup::"
 
+      # 2) GCP 인증 (WIF)
       - name: Authenticate to Google Cloud (WIF)
-        if: steps.decide.outputs.strategy == 'oidc'
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.GCP_PROJECT }}
+          # ↓ 운영 환경의 WIF Provider (변경 시 이 라인만 교체)
           workload_identity_provider: "projects/665690300029/locations/global/workloadIdentityPools/github-wif/providers/github-oidc"
+          # ↓ GitHub Actions에서 사용하는 GCP 서비스계정(Secret에 저장)
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
@@ -76,56 +63,46 @@ jobs:
       - name: Configure Docker auth
         run: gcloud auth configure-docker --quiet
 
-      # ---------- Gate 1: 업로드 목록 ----------
-      - name: Gate 1 — upload list (admin context)
+      # 3) BUILD_ID 주입(서비스워커 캐시 키=커밋 해시)
+      - name: Inject BUILD_ID into service-worker.js
         working-directory: ${{ env.BUILD_CONTEXT }}
-        shell: bash
+        run: |
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-12)
+          if [ -f service-worker.js ]; then
+            sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" service-worker.js
+          else
+            echo "service-worker.js not found in $(pwd)"; exit 1
+          fi
+
+      # 4) Gate — 빌드 산출물 존재 확인(dist 우선)
+      - name: Gate — dist outputs must exist
+        working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
           set -euo pipefail
-          gcloud meta list-files-for-upload | tee /tmp/upload.txt
-          req=( 'index.html' 'assets/style.css' 'assets/app.js' 'requirements.txt' 'server_quali.py' )
-          ok=1
-          for f in "${req[@]}"; do
-            egrep -q "(^|[/\\])${f}$" /tmp/upload.txt || { echo "::error::missing in upload: ${f}"; ok=0; }
-          done
-          test $ok -eq 1
+          test -f dist/index.html || (echo "::error::dist/index.html not found"; exit 1)
+          test -d dist/assets     || (echo "::error::dist/assets not found"; exit 1)
+          # 해시 파일 최소 1개 확인(예: app.XXXXXXXX.js)
+          ls dist/assets/app.*.js >/dev/null 2>&1 || (echo "::error::dist/assets/app.*.js missing"; exit 1)
+          ls dist/assets/style.*.css >/dev/null 2>&1 || (echo "::error::dist/assets/style.*.css missing"; exit 1)
 
-      # ---------- Deploy ----------
+      # 5) 배포 (admin 컨텍스트를 소스로)
       - name: Deploy to Cloud Run (admin context)
         working-directory: ${{ env.BUILD_CONTEXT }}
         run: |
           set -euo pipefail
-          gcloud run deploy "${SERVICE}" --region "${GCP_REGION}" --source . --quiet
-          gcloud run services update-traffic "${SERVICE}" --region "${GCP_REGION}" --to-latest
+          gcloud run deploy "${SERVICE}" \
+            --region "${GCP_REGION}" \
+            --source . \
+            --quiet
+          gcloud run services update-traffic "${SERVICE}" \
+            --region "${GCP_REGION}" \
+            --to-latest
 
-      # ---------- Gate 2: 이미지 내용 ----------
-      - name: Gate 2 — image content (skip if Docker unavailable)
-        shell: bash
-        run: |
-          set -euo pipefail
-          IMG="$(gcloud run services describe "${SERVICE}" --region "${GCP_REGION}" --format='value(spec.template.spec.containers[0].image)')"
-          if docker info >/dev/null 2>&1; then
-            docker pull "${IMG}" >/dev/null
-            docker run --rm "${IMG}" sh -lc 'set -e;
-              f(){ find / -maxdepth "$1" -type f -name "$2" 2>/dev/null | head -n1; };
-              test -n "$(f 4 index.html)";
-              test -n "$(f 6 style.css)";
-              test -n "$(f 6 app.js)";
-              test -n "$(f 4 requirements.txt)"'
-          else
-            echo "Docker unavailable → skipping image gate"
-          fi
-
-      # ---------- 정책/트래픽/도메인 ----------
-      - name: Policy — fail if Cloud SQL is STOPPED
-        if: env.REQUIRE_DB == 'true'
-        run: |
-          STATE="$(gcloud sql instances describe quali-pg --format='value(state)' || true)"
-          [ "$STATE" != "STOPPED" ] || { echo "::error::Cloud SQL is STOPPED; deployment blocked."; exit 1; }
-
+      # 6) 운영 점검(필수 트래픽/도메인 확인)
       - name: Traffic must be 100% to LATEST
         run: |
           T="$(gcloud run services describe "${SERVICE}" --region "${GCP_REGION}" --format='value(status.traffic)')"
+          echo "$T"
           echo "$T" | grep -q 'LATEST' || { echo "::error::traffic not pointing to LATEST"; exit 1; }
           echo "$T" | grep -q '100'   || { echo "::error::traffic not 100%"; exit 1; }
 
@@ -134,6 +111,9 @@ jobs:
           R="$(gcloud beta run domain-mappings describe --domain admin.standardai.co.kr --region "${GCP_REGION}" --format='value(spec.routeName)' || true)"
           test "$R" = "${SERVICE}" || { echo "::error::domain maps to $R (expected ${SERVICE})"; exit 1; }
 
-
-
-
+      # 7) (선택) Cloud SQL 필요 시 차단
+      - name: Policy — fail if Cloud SQL is STOPPED
+        if: env.REQUIRE_DB == 'true'
+        run: |
+          STATE="$(gcloud sql instances describe quali-pg --format='value(state)' || true)"
+          [ "$STATE" != "STOPPED" ] || { echo "::error::Cloud SQL is STOPPED; deployment blocked."; exit 1; }
