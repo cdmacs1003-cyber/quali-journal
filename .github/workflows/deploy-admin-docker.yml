@@ -32,7 +32,7 @@ jobs:
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.PROJECT_ID }}
-         workload_identity_provider: "projects/665690300029/locations/global/workloadIdentityPools/github-wif/providers/github-oidc"
+          workload_identity_provider: "projects/665690300029/locations/global/workloadIdentityPools/github-wif/providers/github-oidc"
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
@@ -121,3 +121,4 @@ jobs:
           for EP in status report; do
             code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Admin-Token: $TOKEN" "$URL/api/$EP"); [ "$code" = "200" ]
           done
+

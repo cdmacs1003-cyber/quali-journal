@@ -72,12 +72,18 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       # step 2 - authenticate with sanitized audience (keyless WIF)
+      # 위에서 반드시 이 스텝이 먼저 있어야 해요 (id: wif)
+      # - name: Decide auth strategy (sanitize WIF)
+      #   id: wif
+      #   ...
+      
       - name: Authenticate to Google Cloud (WIF)
         uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ steps.wif.outputs.wif }}
+          workload_identity_provider: ${{ steps.wif.outputs.wif }}   # ← 정규화된 값(길이 93)
           service_account: ${{ steps.wif.outputs.sa }}
           create_credentials_file: true
+
 
       # step 2.5 - verify provider existence/state/issuer (defensive)
       - name: WIF provider verify (post-auth)
@@ -241,3 +247,4 @@ jobs:
         run: |
           set -Eeuo pipefail
           echo "::notice::Deploy finished: admin=${SERVICE_ADMIN}@${REGION_ADMIN}, domap=${SERVICE_DOMAP}@${REGION_DOMAP}"
+
