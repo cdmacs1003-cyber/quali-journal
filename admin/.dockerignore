@@ -1,55 +1,27 @@
-﻿##############################
-# 기본 제외(빌드 컨텍스트 슬림화)
-##############################
-.git
+﻿# 기본 제외
+.git/
 .gitignore
-**/__pycache__/
-*.py[cod]
-*.log
-*.tmp
-*.swp
-.DS_Store
-Thumbs.db
+.github/
 .env
-.env.*
-.venv/
-venv/
+**/__pycache__/
+*.pyc
+*.log
+archive/
+logs/
+*.md
+
+# Cloud/CI 산출물 제외
+dist/
 node_modules/
-*.sqlite*
-*.db
-*.ipynb_checkpoints/
 
-##############################
-# 프로젝트별 제외
-##############################
-archive/**
-logs/**
-exports/**
-db_snapshots/**
-dist/**
-
-##############################
-# ⛳ 반드시 포함해야 하는 Admin 정적 리소스
-##############################
+# 반드시 포함(예외)
 !admin/index.html
 !admin/service-worker.js
-!admin/**/*.html
-!admin/**/*.js
-!admin/**/*.css
-!admin/**/*.map
-!admin/**/*.png
-!admin/**/*.jpg
-!admin/**/*.svg
-!admin/**/*.ico
-!admin/**/*.webp
-!admin/**/*.woff
-!admin/**/*.woff2
+!admin/**.html
+!admin/**.js
+!admin/**.css
 !admin/dist/**
-
-##############################
-# 백엔드 필수 포함
-##############################
-!server_quali.py
-!requirements*.txt
-!pyproject.toml
-!poetry.lock
+!tools/**
+!orchestrator.py
+!selected_articles.json
+!data/selected_keyword_articles.json

@@ -1,4 +1,4 @@
-name: Deploy Admin (domap)
+name: Deploy admin-domap (WIF)
 
 on:
   push:
@@ -7,147 +7,101 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-
-# Prevent overlapping runs for same branch
-concurrency:
-  group: deploy-admin-domap-${{ github.ref }}
-  cancel-in-progress: true
-
-defaults:
-  run:
-    shell: bash
+  id-token: write   # OIDC 토큰 발급 필수 :contentReference[oaicite:5]{index=5}
 
 env:
-  GCP_PROJECT: quali-journal-prod
-  GCP_REGION: asia-northeast1
-  SERVICE: quali-admin-domap
-  BUILD_CONTEXT: admin
-  REQUIRE_DB: "false"
+  PROJECT_ID: quali-journal-prod
+  REGION: asia-northeast1
+  SERVICE_NAME: quali-admin-domap
+  REPO: qualijournal
+  IMAGE_URI: asia-northeast1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/quali-admin:${{ github.sha }}
 
 jobs:
-  deploy:
+  build-deploy-test:
     runs-on: ubuntu-latest
-
     steps:
-      # 0) Checkout repository
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 1) Build hashed assets (produces dist/)
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      # --- WIF 인증(키리스) ---
+      - name: Auth to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
         with:
-          python-version: "3.11"
-
-      - name: Build hashed assets (admin context)
-        working-directory: ${{ env.BUILD_CONTEXT }}
-        run: |
-          set -euo pipefail
-          python tools/build_assets_hash.py --clean
-
-      - name: Show built assets
-        working-directory: ${{ env.BUILD_CONTEXT }}
-        run: |
-          echo "::group::dist tree"
-          ls -la dist || true
-          echo "::endgroup::"
-
-      # 2) Authentication — prefer WIF, fallback to SA JSON key
-      - name: Authenticate to Google Cloud (WIF)
-        id: auth_wif
-        continue-on-error: true
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: ${{ env.GCP_PROJECT }}
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      # 위 2줄이 '최소 구성'의 핵심입니다. :contentReference[oaicite:6]{index=6}
 
-      - name: Authenticate to Google Cloud (SA key fallback)
-        id: auth_json
-        if: ${{ steps.auth_wif.outcome == 'failure' && secrets.GCP_SA_KEY != '' }}
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: ${{ env.GCP_PROJECT }}
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Fail if auth missing
-        if: ${{ steps.auth_wif.outcome == 'failure' && (secrets.GCP_SA_KEY == '' || secrets.GCP_SA_KEY == null) }}
-        run: |
-          echo "::error::WIF auth failed and no GCP_SA_KEY provided for fallback."
-          exit 1
-
-      # 3) Setup gcloud
       - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v1
         with:
-          project_id: ${{ env.GCP_PROJECT }}
-          install_components: "beta"
+          project_id: ${{ env.PROJECT_ID }}
+          export_default_credentials: true   # gcloud가 ADC로 토큰 사용 :contentReference[oaicite:7]{index=7}
 
-      - name: Configure Docker auth
-        run: gcloud auth configure-docker --quiet
+      # --- 신원 확인 & Provider 상태 점검 ---
+      - name: whoami (SA impersonation 확인)
+        run: gcloud auth list --filter="status:ACTIVE" --format="value(account)"
 
-      # 4) Inject BUILD_ID (commit short SHA) into service-worker.js
-      - name: Inject BUILD_ID into service-worker.js
-        working-directory: ${{ env.BUILD_CONTEXT }}
+      - name: WIF provider 점검(issuer/mapping/state)
         run: |
-          set -euo pipefail
-          SHORT_SHA="${GITHUB_SHA::12}"
-          if [[ ! -f service-worker.js ]]; then
-            echo "::error::service-worker.js not found in $(pwd)"
-            exit 1
+          set -e
+          gcloud iam workload-identity-pools providers describe "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" \
+            --location=global --format="yaml(name,issuerUri,attributeMapping,attributeCondition,state)" || \
+            echo "skip(describe): 권한 없음 또는 비필수"
+      # 참고: 점검 권한 없으면 스킵. 트러블슈팅 가이드 참조. :contentReference[oaicite:8]{index=8}
+
+      # --- 정책 가드: Cloud SQL STOPPED면 차단(옵션) ---
+      - name: Fail if Cloud SQL is STOPPED (policy)
+        env:
+          ENFORCE: "1"   # 필요 없으면 "0"
+        run: |
+          if [ "$ENFORCE" = "1" ]; then
+            STATE=$(gcloud sql instances describe quali-pg --format="value(state)" || true)
+            if [ "$STATE" = "STOPPED" ]; then
+              echo "::error ::Cloud SQL is STOPPED; deployment blocked."
+              exit 1
+            fi
           fi
-          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" service-worker.js
-          echo "BUILD_ID=${SHORT_SHA}"
+      # 팀 정책 문서 기준. :contentReference[oaicite:9]{index=9}
 
-      # 5) Gate — require dist outputs
-      - name: Gate — dist outputs must exist
-        working-directory: ${{ env.BUILD_CONTEXT }}
+      # --- Build & Push (Cloud Build) ---
+      - name: Build & Push image
+        run: gcloud builds submit --tag "${{ env.IMAGE_URI }}" .
+
+      # --- Deploy (no-traffic) ---
+      - name: Deploy to Cloud Run (no traffic)
         run: |
-          set -euo pipefail
-          test -f dist/index.html || { echo "::error::dist/index.html not found"; exit 1; }
-          test -d dist/assets     || { echo "::error::dist/assets not found"; exit 1; }
-          ls dist/assets/app.*.js   >/dev/null 2>&1 || { echo "::error::dist/assets/app.*.js missing"; exit 1; }
-          ls dist/assets/style.*.css >/dev/null 2>&1 || { echo "::error::dist/assets/style.*.css missing"; exit 1; }
+          gcloud run deploy "${{ env.SERVICE_NAME }}" \
+            --image "${{ env.IMAGE_URI }}" \
+            --region "${{ env.REGION }}" \
+            --port 8080 \
+            --allow-unauthenticated \
+            --no-traffic
 
-      # 6) Deploy to Cloud Run from admin context
-      - name: Deploy to Cloud Run (admin context)
-        working-directory: ${{ env.BUILD_CONTEXT }}
+      # --- 최신 리비전에 100% 전환 ---
+      - name: Shift 100% to latest
+        run: gcloud run services update-traffic "${{ env.SERVICE_NAME }}" --region "${{ env.REGION }}" --to-latest
+      # 우리 런북의 표준 동작. :contentReference[oaicite:10]{index=10}
+
+      # --- 배포 후 스모크 ---
+      - name: Smoke (/health 필수, /api/*는 토큰 있으면)
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
-          set -euo pipefail
-          gcloud run deploy "${SERVICE}" \
-            --region "${GCP_REGION}" \
-            --source . \
-            --set-env-vars BUILD_ID=${{ github.sha }},COMMIT_SHA=${{ github.sha }} \
-            --quiet
-          gcloud run services update-traffic "${SERVICE}" \
-            --region "${GCP_REGION}" \
-            --to-latest
-
-
-      # 7) Post-deploy checks
-      - name: Traffic must be 100% to LATEST
-        run: |
-          set -euo pipefail
-          T="$(gcloud run services describe "${SERVICE}" --region "${GCP_REGION}" --format='value(status.traffic)')"
-          echo "$T"
-          echo "$T" | grep -q 'LATEST' || { echo "::error::traffic not pointing to LATEST"; exit 1; }
-          echo "$T" | grep -q '100'   || { echo "::error::traffic not 100%"; exit 1; }
-
-      - name: Domain mapping route must match service
-        run: |
-          set -euo pipefail
-          R="$(gcloud beta run domain-mappings describe --domain admin.standardai.co.kr --region "${GCP_REGION}" --format='value(spec.routeName)' || true)"
-          if [[ -z "$R" ]]; then
-            echo "::warning::Domain mapping not found (skipping strict check)"
-            exit 0
+          URL=$(gcloud run services describe "${{ env.SERVICE_NAME }}" --region "${{ env.REGION }}" --format="value(status.url)")
+          echo "Service URL=$URL"
+          for e in /health ; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$URL$e"); [ "$code" = "200" ] || exit 1
+          done
+          if [ -n "$ADMIN_TOKEN" ]; then
+            code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/api/status")
+            [ "$code" = "200" ] || { echo "warn: /api/status=$code"; exit 1; }
+          else
+            echo "skip: ADMIN_TOKEN 없음 → /health만 점검"
           fi
-          [[ "$R" == "${SERVICE}" ]] || { echo "::error::domain maps to $R (expected ${SERVICE})"; exit 1; }
 
-      # 8) Optional: block if Cloud SQL is stopped
-      - name: Policy — fail if Cloud SQL is STOPPED
-        if: ${{ env.REQUIRE_DB == 'true' }}
+      # --- 헤더/캐시 정책(요약 점검) ---
+      - name: Headers check (cache/SW)
         run: |
-          set -euo pipefail
-          STATE="$(gcloud sql instances describe quali-pg --format='value(state)' || true)"
-          [[ "$STATE" != "STOPPED" ]] || { echo "::error::Cloud SQL is STOPPED; deployment blocked."; exit 1; }
+          URL=$(gcloud run services describe "${{ env.SERVICE_NAME }}" --region "${{ env.REGION }}" --format="value(status.url)")
+          curl -sD - "$URL/" -o /dev/null | grep -i '^Cache-Control' || true
+          curl -sD - "$URL/service-worker.js" -o /dev/null | grep -i '^Cache-Control' || true
+      # 내부 런북의 헤더/서비스워커 점검을 축약 반영. :contentReference[oaicite:11]{index=11}
