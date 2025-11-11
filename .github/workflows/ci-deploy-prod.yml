@@ -80,6 +80,7 @@ jobs:
             --allow-unauthenticated
             --service-account=quali-run-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
             --set-secrets=ADMIN_TOKEN=ADMIN_TOKEN:latest
+            --timeout=300
           env_vars: >-
             PYTHONUTF8=1
             COMMIT_SHA=${{ github.sha }}
@@ -101,4 +102,5 @@ jobs:
           R=$(curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-Admin-Token: $TOK" -H "Content-Length: 0" "$URL/api/report")
           echo "health=$H status=$S report=$R"
           test "$H" = "200" -a "$S" = "200" -a "$R" = "200"
+
 
