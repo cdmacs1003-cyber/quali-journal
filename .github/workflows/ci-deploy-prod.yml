@@ -1,0 +1,74 @@
+name: CI/CD – Prod (Cloud Run)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write   # WIF(OIDC) 필수
+
+env:
+  PROJECT_ID: quali-journal-prod
+  REGION: asia-northeast1                 # 도메인 매핑 운영 리전
+  SERVICE_NAME: quali-admin-domap         # 운영 서비스(도메인 연결)
+  AR_REPO: containers                     # Artifact Registry 리포지토리명
+  IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/quali-admin:${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: prod-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth to Google Cloud (WIF/OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Configure Docker auth to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev -q
+
+      - name: Build & Push image
+        run: |
+          docker build -t "${IMAGE}" .
+          docker push "${IMAGE}"
+
+      - name: Deploy to Cloud Run (Admin)
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region:  ${{ env.REGION }}
+          image:   ${{ env.IMAGE }}
+          flags: >-
+            --service-account=run-exec-admin@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+            --set-secrets=ADMIN_TOKEN=ADMIN_TOKEN:latest
+            --allow-unauthenticated
+          env_vars: >-
+            PYTHONUTF8=1
+            PYTHONIOENCODING=utf-8
+
+      - name: Force traffic to latest
+        run: gcloud run services update-traffic "$SERVICE_NAME" --to-latest --region "$REGION" --project "$PROJECT_ID"
+
+      - name: Smoke tests (health/status/report)
+        run: |
+          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')
+          H=$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")
+          TOK=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "$PROJECT_ID")
+          S=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Admin-Token: $TOK" "$URL/api/status")
+          R=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Admin-Token: $TOK" "$URL/api/report")
+          echo "health=$H status=$S report=$R"
+          test "$H" = "200" -a "$S" = "200" -a "$R" = "200"
