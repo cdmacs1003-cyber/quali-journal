@@ -1,68 +1,77 @@
-name: deploy
+name: CI/CD – Prod (Cloud Run)
 
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
-
-# === 배포 대상/리전/엔트리포인트 SSOT ===
-env:
-  PROJECT_ID: quali-journal-prod
-  REGION: asia-northeast1              # 도쿄(도메인 매핑 리전)
-  SERVICE_NAME: quali-admin-domap      # 도메인용 라이브 서비스
-  ENTRYPOINT: uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080
+  workflow_dispatch: {}
 
 permissions:
   contents: read
   id-token: write
 
+# SSOT: 배포 대상/리전/엔트리포인트
+env:
+  PROJECT_ID: quali-journal-prod
+  REGION: asia-northeast1                  # 도쿄(도메인 매핑 리전)
+  SERVICE_NAME: quali-admin-domap          # 라이브 서비스(도메인 매핑)
+  ENTRYPOINT: uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080
+
 concurrency:
-  group: deploy-prod
-  cancel-in-progress: false
+  group: prod-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # (선택) service-worker.js에 빌드ID 주입
-      - name: Inject build id into service-worker.js
+      # (선택) Service Worker 캐시 버전 태깅
+      - name: Inject BUILD_ID into service-worker.js
         shell: bash
         run: |
           if [ -f "admin/service-worker.js" ]; then
             sed -i "s/__BUILD_ID__/${GITHUB_SHA}/g" admin/service-worker.js
           fi
 
-      # Workload Identity Federation 인증 (저장소 Secrets에 구성)
-      - name: Auth to Google Cloud
+      # 1) WIF(OIDC) 인증
+      - name: Auth to Google Cloud (WIF/OIDC)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
           service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
 
-      # (선택) gcloud 사용이 필요한 후속 스텝 대비
+      # 2) gcloud 설치
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      # Cloud Run 소스 배포 (빌드팩) + 엔트리포인트 지정 + Secret 연동
+      # 3) Cloud Run 소스 배포(빌드팩)
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
-          project_id: ${{ env.PROJECT_ID }}
-          service:    ${{ env.SERVICE_NAME }}
-          region:     ${{ env.REGION }}
-          source:     .
-          allow_unauthenticated: true
+          project_id:  ${{ env.PROJECT_ID }}
+          region:      ${{ env.REGION }}
+          service:     ${{ env.SERVICE_NAME }}
+          source:      .
+          # 기본 라벨(managed-by=github-actions)은 유지하고
+          # 우리가 추가할 라벨만 별도로 지정
+          labels: |
+            commit-sha=${{ github.sha }}
+          # 런타임 환경변수(서버 측에서 노출/확인 용)
+          env_vars: |
+            COMMIT_SHA=${{ github.sha }}
+          # 배포 트래픽은 최신 리비전에 100%
+          revision_traffic: latest
+          # Secret Manager → 컨테이너 환경변수
           secrets: |
             ADMIN_TOKEN=ADMIN_TOKEN:latest
+          # gcloud에 넘길 추가 플래그들
           flags: >
+            --allow-unauthenticated
             --set-build-env-vars GOOGLE_ENTRYPOINT="${{ env.ENTRYPOINT }}"
-            --update-labels managed-by=github-actions,commit-sha=${{ github.sha }}
             --timeout 300
 
       # (선택) 배포 결과 요약
