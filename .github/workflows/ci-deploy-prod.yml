@@ -7,13 +7,13 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # WIF(OIDC) 필수
+  id-token: write   # OIDC/WIF 필수
 
 env:
   PROJECT_ID: quali-journal-prod
-  REGION: asia-northeast1                 # 도메인 매핑 운영 리전
-  SERVICE_NAME: quali-admin-domap         # 운영 서비스(도메인 연결)
-  AR_REPO: containers                     # Artifact Registry 리포지토리명
+  REGION: asia-northeast1                 # 🟡 도메인 매핑 리전과 일치 필요
+  SERVICE_NAME: quali-admin-domap         # 운영 도메인 연결용 서비스
+  AR_REPO: containers
   IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/quali-admin:${{ github.sha }}
 
 jobs:
@@ -24,28 +24,34 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      # 1) 코드
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2) WIF(OIDC) 인증 — 반드시 gcloud 세팅보다 먼저!
       - name: Auth to Google Cloud (WIF/OIDC)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
 
-      - name: Setup gcloud
+      # 3) gcloud CLI 세팅
+      - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      # 4) Artifact Registry 로그인
       - name: Configure Docker auth to Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev -q
 
+      # 5) 컨테이너 빌드 & 푸시
       - name: Build & Push image
         run: |
           docker build -t "${IMAGE}" .
           docker push "${IMAGE}"
 
+      # 6) Cloud Run 배포 (+ Secret Manager 주입)
       - name: Deploy to Cloud Run (Admin)
         uses: google-github-actions/deploy-cloudrun@v2
         with:
@@ -60,15 +66,27 @@ jobs:
             PYTHONUTF8=1
             PYTHONIOENCODING=utf-8
 
+      # 7) 최신 리비전에 100% 트래픽 강제(안전망)
       - name: Force traffic to latest
         run: gcloud run services update-traffic "$SERVICE_NAME" --to-latest --region "$REGION" --project "$PROJECT_ID"
 
+      # 8) 스모크 테스트(health/status/report)
       - name: Smoke tests (health/status/report)
         run: |
+          set -e
           URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')
+
+          # /health: 공개 헬스체크 200
           H=$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")
+
+          # Secret Manager에서 관리자 토큰 획득
           TOK=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "$PROJECT_ID")
+
+          # /api/status: 토큰 필요 200
           S=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Admin-Token: $TOK" "$URL/api/status")
-          R=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Admin-Token: $TOK" "$URL/api/report")
+
+          # /api/report: POST + Content-Length: 0 필요(일부 프레임워크에서 411 방지)
+          R=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "X-Admin-Token: $TOK" -H "Content-Length: 0" "$URL/api/report")
+
           echo "health=$H status=$S report=$R"
           test "$H" = "200" -a "$S" = "200" -a "$R" = "200"
