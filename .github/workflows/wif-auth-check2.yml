@@ -1,3 +1,6 @@
+﻿on:
+  workflow_dispatch: {}
+
 name: WIF Auth Check
 on: { workflow_dispatch: {} }
 
@@ -28,3 +31,4 @@ jobs:
         run: |
           echo "== gcloud auth list ==" && gcloud auth list
           echo "== token length ==" && gcloud auth print-access-token | wc -c
+

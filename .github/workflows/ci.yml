@@ -1,3 +1,6 @@
+﻿on:
+  workflow_dispatch: {}
+
 name: Deploy to Cloud Run
 
 on:
@@ -6,8 +9,8 @@ on:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  REGION: asia-northeast3    # 예: 서울
-  SERVICE: quali-admin       # Cloud Run 서비스명
+  REGION: asia-northeast3    # ?? ?쒖슱
+  SERVICE: quali-admin       # Cloud Run ?쒕퉬?ㅻ챸
   APP_ENV: prod
 
 jobs:
@@ -37,7 +40,7 @@ jobs:
         run: |
           gcloud services enable run.googleapis.com cloudbuild.googleapis.com
 
-      # 배포 (소스 빌드). Dockerfile을 사용해도 되고, --source . 로도 가능
+      # 諛고룷 (?뚯뒪 鍮뚮뱶). Dockerfile???ъ슜?대룄 ?섍퀬, --source . 濡쒕룄 媛??
       - name: Deploy to Cloud Run (latest=100)
         run: |
           gcloud run deploy "$SERVICE" \
@@ -49,7 +52,7 @@ jobs:
             --set-env-vars "PYTHONUNBUFFERED=1" \
             --traffic latest=100
 
-      # 안전망: 혹시 위 단계에서 트래픽이 안 올라갔을 때 보강
+      # ?덉쟾留? ?뱀떆 ???④퀎?먯꽌 ?몃옒?쎌씠 ???щ씪媛붿쓣 ??蹂닿컯
       - name: Force traffic to latest
         run: |
           gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest
@@ -57,3 +60,4 @@ jobs:
       - name: Show runtime info
         run: |
           echo "Deployed $SERVICE in $REGION"
+

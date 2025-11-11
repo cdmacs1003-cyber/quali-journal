@@ -1,5 +1,8 @@
+﻿on:
+  workflow_dispatch: {}
+
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
-﻿name: Deploy Admin API (WIF harden)
+癤퓆ame: Deploy Admin API (WIF harden)
 
 on:
   push:
@@ -67,7 +70,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # admin 컨텍스트에서 필수 파일이 있는지 확인
+          # admin 而⑦뀓?ㅽ듃?먯꽌 ?꾩닔 ?뚯씪???덈뒗吏 ?뺤씤
           pushd admin >/dev/null
           LIST="$(gcloud meta list-files-for-upload || true)"
           for f in server_quali.py requirements.txt index.html; do
@@ -123,3 +126,4 @@ jobs:
             echo "::error ::Revision not updated. WIF/OIDC cache or policy mismatch suspected."
             exit 1
           fi
+

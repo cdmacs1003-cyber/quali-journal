@@ -1,4 +1,7 @@
-﻿name: PR Preview (WIF)
+﻿on:
+  workflow_dispatch: {}
+
+name: PR Preview (WIF)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -64,3 +67,4 @@ jobs:
               issue_number: num,
               body: `🚀 Preview deployed: ${url}`
             });
+

@@ -1,4 +1,7 @@
-﻿name: PR Preview Cleanup (WIF)
+﻿on:
+  workflow_dispatch: {}
+
+name: PR Preview Cleanup (WIF)
 on:
   pull_request:
     types: [closed]
@@ -32,3 +35,4 @@ jobs:
           SERVICE: quali-journal-pr-${{ github.event.number }}
         run: |
           gcloud run services delete "${SERVICE}" --region "${REGION}" --quiet || true
+

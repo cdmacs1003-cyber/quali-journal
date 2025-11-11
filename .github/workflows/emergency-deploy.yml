@@ -1,28 +1,30 @@
+﻿on:
+  workflow_dispatch: {}
+
 # .github/workflows/emergency-deploy.yml
-# 최종본: WIF(키 없음) 전용 / Cloud Run 소스 배포 / ADMIN_TOKEN은 Secret Manager로 주입
+# 理쒖쥌蹂? WIF(???놁쓬) ?꾩슜 / Cloud Run ?뚯뒪 諛고룷 / ADMIN_TOKEN? Secret Manager濡?二쇱엯
 
 name: Deploy to Cloud Run
 
 on:
-  workflow_dispatch:          # 수동 실행
+  workflow_dispatch:          # ?섎룞 ?ㅽ뻾
   push:
-    branches: [ "main" ]      # main 푸시 시 자동
-  pull_request:               # PR 체크용
-
+    branches: [ "main" ]      # main ?몄떆 ???먮룞
+  pull_request:               # PR 泥댄겕??
 permissions:
   contents: read
-  id-token: write             # WIF(OIDC) 사용에 필수
+  id-token: write             # WIF(OIDC) ?ъ슜???꾩닔
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 0) 소스 체크아웃
+      # 0) ?뚯뒪 泥댄겕?꾩썐
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 1) WIF 인증 (JSON 키 사용 금지)
+      # 1) WIF ?몄쬆 (JSON ???ъ슜 湲덉?)
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
@@ -30,13 +32,13 @@ jobs:
           workload_identity_provider: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
 
-      # 2) gcloud 설치
+      # 2) gcloud ?ㅼ튂
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      # 3) 필요한 API 보장
+      # 3) ?꾩슂??API 蹂댁옣
       - name: Enable required APIs
         shell: bash
         run: |
@@ -46,18 +48,18 @@ jobs:
             artifactregistry.googleapis.com \
             secretmanager.googleapis.com
 
-      # 4) Cloud Run 배포(소스에서 빌드 → 배포)
-      #    - 실행 SA 지정: GOOGLE_SERVICE_ACCOUNT (선택)
-      #    - ADMIN_TOKEN: Secret Manager에서 최신 버전 연결
-      #    - API_KEY: 있으면 평문 ENV로 주입
+      # 4) Cloud Run 諛고룷(?뚯뒪?먯꽌 鍮뚮뱶 ??諛고룷)
+      #    - ?ㅽ뻾 SA 吏?? GOOGLE_SERVICE_ACCOUNT (?좏깮)
+      #    - ADMIN_TOKEN: Secret Manager?먯꽌 理쒖떊 踰꾩쟾 ?곌껐
+      #    - API_KEY: ?덉쑝硫??됰Ц ENV濡?二쇱엯
       - name: Deploy to Cloud Run
         shell: bash
         env:
           REGION: ${{ secrets.CLOUD_RUN_REGION }}
           SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
-          RUN_SA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}     # 예) quali-run-sa@... (없으면 비워둠)
-          ADMIN_TOKEN_SECRET_NAME: ADMIN_TOKEN              # Secret Manager의 시크릿 이름
-          API_KEY: ${{ secrets.API_KEY }}                   # 선택
+          RUN_SA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}     # ?? quali-run-sa@... (?놁쑝硫?鍮꾩썙??
+          ADMIN_TOKEN_SECRET_NAME: ADMIN_TOKEN              # Secret Manager???쒗겕由??대쫫
+          API_KEY: ${{ secrets.API_KEY }}                   # ?좏깮
         run: |
           set -euo pipefail
 
@@ -66,16 +68,16 @@ jobs:
             SA_OPT="--service-account ${RUN_SA}"
           fi
 
-          # 평문 ENV(선택)
+          # ?됰Ц ENV(?좏깮)
           ENV_OPTS=""
           if [[ -n "${API_KEY:-}" ]]; then
             ENV_OPTS="--update-env-vars API_KEY=${API_KEY}"
           fi
 
-          # Secret Manager → 컨테이너 ENV 매핑
+          # Secret Manager ??而⑦뀒?대꼫 ENV 留ㅽ븨
           SECRET_OPTS="--set-secrets ${ADMIN_TOKEN_SECRET_NAME}=${ADMIN_TOKEN_SECRET_NAME}:latest"
 
-          # 소스에서 빌드하여 배포(Cloud Build 사용)
+          # ?뚯뒪?먯꽌 鍮뚮뱶?섏뿬 諛고룷(Cloud Build ?ъ슜)
           gcloud run deploy "${SERVICE}" \
             --region "${REGION}" \
             --source . \
@@ -85,7 +87,7 @@ jobs:
             --allow-unauthenticated \
             --quiet
 
-      # 5) 서비스 URL 출력
+      # 5) ?쒕퉬??URL 異쒕젰
       - name: Show URL
         id: show-url
         shell: bash
@@ -97,7 +99,7 @@ jobs:
           echo "Service URL: ${URL}"
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
 
-      # 6) 스모크 테스트(200계열 기대)
+      # 6) ?ㅻえ???뚯뒪??200怨꾩뿴 湲곕?)
       - name: Smoke test (health & report)
         if: always()
         shell: bash
@@ -114,3 +116,4 @@ jobs:
           else
             echo "::warning::Smoke test returned HTTP ${CODE}"
           fi
+

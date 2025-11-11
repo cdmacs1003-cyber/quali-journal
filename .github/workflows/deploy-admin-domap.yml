@@ -1,3 +1,6 @@
+﻿on:
+  workflow_dispatch: {}
+
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Deploy Admin DOMAP (WIF harden)
 
@@ -34,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1) WIF 인증 (Google)
+      # 1) WIF ?몄쬆 (Google)
       - name: Auth via WIF (OIDC)
         id: auth
         uses: google-github-actions/auth@v2
@@ -49,8 +52,7 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      # 2) GitHub OIDC 클레임(리포/브랜치) 검증
-      - name: Verify OIDC claims (repo/ref)
+      # 2) GitHub OIDC ?대젅??由ы룷/釉뚮옖移? 寃利?      - name: Verify OIDC claims (repo/ref)
         env:
           AUDIENCE: https://sts.googleapis.com
           REPO_NAME: ${{ env.REPO_NAME }}
@@ -69,7 +71,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # admin 컨텍스트에서 필수 파일이 있는지 확인
+          # admin 而⑦뀓?ㅽ듃?먯꽌 ?꾩닔 ?뚯씪???덈뒗吏 ?뺤씤
           pushd admin >/dev/null
           LIST="$(gcloud meta list-files-for-upload || true)"
           for f in server_quali.py requirements.txt index.html; do
@@ -79,7 +81,7 @@ jobs:
           echo "$LIST" | head -n 100
           popd >/dev/null
 
-      # 3) 이전 리비전 스냅샷 (prod 배포에서만 의미 → 가드)
+      # 3) ?댁쟾 由щ퉬???ㅻ깄??(prod 諛고룷?먯꽌留??섎? ??媛??
       - name: Snapshot previous revision
         id: prev
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -88,7 +90,7 @@ jobs:
                  --format='value(status.latestCreatedRevisionName)')
           echo "prev=$PREV" >> "$GITHUB_OUTPUT"
 
-      # 4) Cloud Build 이미지 빌드( PR/메인 공통 )
+      # 4) Cloud Build ?대?吏 鍮뚮뱶( PR/硫붿씤 怨듯넻 )
       - name: Build image (Cloud Build)
         run: |
           TAG="$(date +%Y%m%d_%H%M%S)-${GIT_SHA::7}"
@@ -96,7 +98,7 @@ jobs:
           echo "IMG=$IMG" >> "$GITHUB_ENV"
           gcloud builds submit --tag "$IMG" .
 
-      # 5) no-traffic 배포 (메인 push에서만)
+      # 5) no-traffic 諛고룷 (硫붿씤 push?먯꽌留?
       - name: Deploy (no-traffic)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -105,7 +107,7 @@ jobs:
           gcloud run services describe "$SERVICE" --region "$REGION" \
             --format='value(status.latestCreatedRevisionName)'
 
-      # 6) /health 스모크 (메인 push에서만)
+      # 6) /health ?ㅻえ??(硫붿씤 push?먯꽌留?
       - name: "Smoke /health (run.app)"
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -113,14 +115,14 @@ jobs:
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
           curl -fsS "$URL/health" >/dev/null
 
-      # 7) 최신 리비전에 100% 트래픽 (메인 push에서만)
+      # 7) 理쒖떊 由щ퉬?꾩뿉 100% ?몃옒??(硫붿씤 push?먯꽌留?
       - name: Shift traffic to latest
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest --quiet
           gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.traffic)'
 
-      # 8) 리비전 변경 확인 (메인 push에서만)
+      # 8) 由щ퉬??蹂寃??뺤씤 (硫붿씤 push?먯꽌留?
       - name: Assert revision updated
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -131,3 +133,4 @@ jobs:
             echo "::error ::Revision not updated. WIF/OIDC cache or policy mismatch suspected."
             exit 1
           fi
+

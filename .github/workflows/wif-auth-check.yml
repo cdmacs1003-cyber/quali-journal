@@ -1,3 +1,6 @@
+﻿on:
+  workflow_dispatch: {}
+
 name: WIF Auth Check
 on:
   workflow_dispatch:
@@ -15,7 +18,7 @@ jobs:
       - name: Auth via WIF
         id: auth
         uses: google-github-actions/auth@v2
-        continue-on-error: true          # ⬅️ 실패해도 다음 스텝 실행(디버그용)
+        continue-on-error: true          # 燧낉툘 ?ㅽ뙣?대룄 ?ㅼ쓬 ?ㅽ뀦 ?ㅽ뻾(?붾쾭洹몄슜)
         with:
           workload_identity_provider: "projects/656593003029/locations/global/workloadIdentityPools/github-pool/providers/gha-actions"
           service_account: "gha-deploy-sa@quali-journal-prod.iam.gserviceaccount.com"
@@ -55,5 +58,6 @@ jobs:
           gcloud auth list
           echo "== token length =="
           gcloud auth print-access-token | wc -c
+
 
 
