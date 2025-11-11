@@ -1,68 +1,104 @@
 ﻿name: CI/CD – Prod (Cloud Run)
+
 on:
-  push:   { branches: [ "main" ] }
+  push:
+    branches: [ "main" ]
   workflow_dispatch: {}
-permissions: { contents: read, id-token: write }
+
+permissions:
+  contents: read
+  id-token: write
+
 env:
   PROJECT_ID: quali-journal-prod
   REGION: asia-northeast1
   SERVICE_NAME: quali-admin-domap
   AR_REPO: containers
-  IMAGE_URI: $\{{ env.REGION }}-docker.pkg.dev/$\{{ env.PROJECT_ID }}/$\{{ env.AR_REPO }}/quali-admin:$\{{ github.sha }}
-concurrency: { group: prod-$\{{ github.ref }}, cancel-in-progress: true }
+
+concurrency:
+  group: prod-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: google-github-actions/auth@v2
-        with: { workload_identity_provider: $\{{ secrets.GOOGLE_WIF_PROVIDER }}, service_account: $\{{ secrets.GCP_DEPLOY_SA_EMAIL }} }
-      - uses: google-github-actions/setup-gcloud@v2
-        with: { project_id: $\{{ env.PROJECT_ID }} }
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 1) WIF(OIDC) 인증 (gcloud 전에)
+      - name: Auth to Google Cloud (WIF/OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      # 2) gcloud 설치/초기화
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      # (선택) 정적 자산 빌드: admin/ 있으면 빌드, 없으면 스킵
       - name: Build hashed assets (auto-detect)
         shell: bash
         run: |
           set -e
           if [ -d "./admin" ]; then
+            echo "[assets] admin/ 감지 → 해시 빌드"
             if [ -f "./tools/build_assets_hash.py" ]; then
               python ./tools/build_assets_hash.py --clean || true
             else
-              echo "[assets] script 없음  스킵"
+              echo "[assets] 스크립트 없음 → 스킵"
             fi
           else
-            echo "[assets] admin/ 없음  스킵(배포 OK)"
+            echo "[assets] admin/ 없음 → 스킵(배포 OK)"
           fi
+
+      # 3) Artifact Registry 로그인
       - name: Configure Docker auth
-        run: gcloud auth configure-docker "$\{{ env.REGION }}-docker.pkg.dev" -q
+        run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" -q
+
+      # 4) 컨테이너 빌드 & 푸시 (헤더 env 참조 없이 런타임에서 조합)
       - name: Build & Push image
+        shell: bash
         run: |
-          docker build -t "$\{{ env.IMAGE_URI }}" .
-          docker push "$\{{ env.IMAGE_URI }}"
+          set -e
+          IMG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/quali-admin:${{ github.sha }}"
+          echo "IMAGE=$IMG"
+          docker build -t "$IMG" .
+          docker push "$IMG"
+
+      # 5) Cloud Run 배포 (이미지는 표현식 직입력)
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
-          service: $\{{ env.SERVICE_NAME }}
-          region:  $\{{ env.REGION }}
-          image:   $\{{ env.IMAGE_URI }}
+          service: ${{ env.SERVICE_NAME }}
+          region:  ${{ env.REGION }}
+          image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/quali-admin:${{ github.sha }}
           flags: >-
             --allow-unauthenticated
-            --service-account=run-exec-admin@$\{{ env.PROJECT_ID }}.iam.gserviceaccount.com
+            --service-account=quali-run-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com`n            --service-account=quali-run-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
             --set-secrets=ADMIN_TOKEN=ADMIN_TOKEN:latest
           env_vars: >-
             PYTHONUTF8=1
-            COMMIT_SHA=$\{{ github.sha }}
+            COMMIT_SHA=${{ github.sha }}
+
+      # 6) 최신 리비전에 100% 트래픽
       - name: Force traffic to latest
-        run: gcloud run services update-traffic "" --to-latest --region "" --project ""
+        run: gcloud run services update-traffic "${{ env.SERVICE_NAME }}" --to-latest --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
+
+      # 7) 스모크 테스트(health/status/report 모두 200 기대)
       - name: Smoke tests
         shell: bash
         run: |
           set -e
-          URL=
-          H=
-          TOK=
-          S=
-          R=
-          echo "health= status=quali-admin-domap report=asia-northeast1"
-          test "" = "200" -a "quali-admin-domap" = "200" -a "asia-northeast1" = "200"
+          URL=$(gcloud run services describe "${{ env.SERVICE_NAME }}" --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" --format='value(status.url)')
+          echo "URL=$URL"
+          H=$(curl -s -o /dev/null -w '%{http_code}\n' "$URL/health")
+          TOK=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "${{ env.PROJECT_ID }}")
+          S=$(curl -s -o /dev/null -w '%{http_code}\n' -H "X-Admin-Token: $TOK" "$URL/api/status")
+          R=$(curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-Admin-Token: $TOK" -H "Content-Length: 0" "$URL/api/report")
+          echo "health=$H status=$S report=$R"
+          test "$H" = "200" -a "$S" = "200" -a "$R" = "200"
+
