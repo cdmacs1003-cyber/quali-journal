@@ -1,0 +1,19 @@
+name: OIDC Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud run services list --region asia-northeast1 --project quali-journal-prod
