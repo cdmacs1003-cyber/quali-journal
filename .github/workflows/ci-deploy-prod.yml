@@ -12,13 +12,10 @@ permissions:
 env:
   # ==== SSOT ====
   PROJECT_ID:        quali-journal-prod
-  REGION:            asia-northeast1          # Cloud Run 서비스 리전(도쿄)
+  REGION:            asia-northeast1
   SERVICE_NAME:      quali-admin-domap
-  AR_REPO:           containers               # Artifact Registry repo 이름
-  RUNTIME_SA:        quali-run-sa             # 런타임 서비스계정(짧은 이름)
-
-  # 이미지 풀 경로
-  IMAGE: asia-northeast1-docker.pkg.dev/quali-journal-prod/containers/quali-admin:${{ github.sha }}
+  AR_REPO:           containers
+  RUNTIME_SA:        quali-run-sa
 
 jobs:
   deploy:
@@ -38,20 +35,9 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      # --- Docker Build & Push (Artifact Registry)
-      - name: Configure Docker auth (AR)
-        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
-      - name: Build image (disabled; using source deploy)
-        if: ${{ false }}
-        run: echo "disabled"
-
-      - name: Push image (disabled; using source deploy)
-        if: ${{ false }}
-        run: echo "disabled"
-
-      # --- Cloud Run Deploy (이미지 모드)
-      - name: Deploy to Cloud Run (source: admin/)
+      # --- Cloud Run Deploy (소스 배포: admin)
+      - name: Deploy to Cloud Run (source admin)
+        id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           project_id:  ${{ env.PROJECT_ID }}
@@ -60,7 +46,7 @@ jobs:
           source:      admin
           allow_unauthenticated: true
           service_account: ${{ env.RUNTIME_SA }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
-          # Cloud Build에서 uvicorn 진입점 지정(WSL/도커 없이 동일하게 구동)
+          # Cloud Build가 컨테이너 실행 진입점을 강제
           build_env_vars: |
             GOOGLE_ENTRYPOINT=uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080
           # 런타임 환경변수
@@ -74,7 +60,6 @@ jobs:
             ADMIN_TOKEN=ADMIN_TOKEN:latest
           update_traffic_flags: --to-latest
 
-
       # --- 서비스 URL 출력
       - name: Show deployed service URL
         id: url
@@ -83,7 +68,7 @@ jobs:
           echo "URL=$URL"
           echo "URL=$URL" >> $GITHUB_OUTPUT
 
-      # --- Warmup: /health 200까지 대기 (최대 ~3분)
+      # --- Warmup: /health 200까지 대기
       - name: Warmup (wait for /health 200)
         run: |
           set -e
@@ -101,7 +86,7 @@ jobs:
           echo "warmup failed: /health not ready"
           exit 1
 
-      # --- Smoke (토큰 필요 엔드포인트 200 확인)
+      # --- Smoke (토큰 필요 엔드포인트 확인)
       - name: Smoke tests (/api/status, /api/report)
         run: |
           set -e
