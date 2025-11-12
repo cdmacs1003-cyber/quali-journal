@@ -3,6 +3,7 @@ name: deploy
 on:
   push:
     branches: [ "main" ]
+    # 스모크 yml만 수정했을 땐 배포 자동실행 방지
     paths-ignore:
       - '.github/workflows/oidc-smoke.yml'
   workflow_dispatch: {}
@@ -11,12 +12,12 @@ permissions:
   contents: read
   id-token: write
 
-# 프로젝트/서비스 SSOT
+# SSOT
 env:
   PROJECT_ID: quali-journal-prod
-  REGION: asia-northeast1             # 도메인 매핑 리전(도쿄)로 직접 배포
-  SERVICE_NAME: quali-admin-domap     # 라이브 서비스(도메인 routeName)
-  ENTRYPOINT: "uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080"
+  REGION: asia-northeast1            # 도메인 매핑 리전
+  SERVICE_NAME: quali-admin-domap    # 라이브 서비스
+  ENTRYPOINT: "uvicorn server_quali:app --host 0.0.0.0 --port 8080"
 
 jobs:
   deploy:
@@ -29,7 +30,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 1) OIDC WIF 인증 (서비스계정 키 파일 불필요)
+      # OIDC(WIF) 인증
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
@@ -38,57 +39,56 @@ jobs:
           project_id:               ${{ env.PROJECT_ID }}
           create_credentials_file:  true
 
-      # 2) gcloud 설치
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      # 3) 소스 배포(빌드팩) + 엔트리포인트 전달 + 시크릿 주입
+      # 소스 배포(빌드팩) — admin 컨텍스트만 빌드
       - name: Deploy to Cloud Run (source)
         uses: google-github-actions/deploy-cloudrun@v2
         with:
-          service: ${{ env.SERVICE_NAME }}
-          region:  ${{ env.REGION }}
-          source:  .
-          # 엔트리포인트: 빌드팩에 전달(포트=8080 청취 보장)
-          build_env_vars: |
-            GOOGLE_ENTRYPOINT=${{ env.ENTRYPOINT }}
+          project_id: ${{ env.PROJECT_ID }}
+          service:    ${{ env.SERVICE_NAME }}
+          region:     ${{ env.REGION }}
+          source:     admin
           # 런타임 환경변수
           env_vars: |
             PYTHONUTF8=1
             PYTHONIOENCODING=utf-8
             COMMIT_SHA=${{ github.sha }}
-          # Secret Manager → 컨테이너 환경변수
+          # Secret Manager → 컨테이너 env
           secrets: |
             ADMIN_TOKEN=ADMIN_TOKEN:latest
-          # 라벨은 액션 입력으로만(중복 충돌 방지)
-          labels: |
-            managed-by=github-actions
-            commit-sha=${{ github.sha }}
-          # 배포 직후 최신 리비전에 트래픽 100%
-          revision_traffic: latest
+          # 기본 라벨 중복 방지
+          skip_default_labels: true
+          # v2 입력 규격: build_env_vars 대신 flags로 전달
+          flags: >
+            --allow-unauthenticated
+            --set-build-env-vars=GOOGLE_ENTRYPOINT="${{ env.ENTRYPOINT }}"
+          # 최신 리비전에 100% 전환 (문법 고정)
+          revision_traffic: "LATEST=100"
 
-      # 4) 서비스 URL 출력(참고)
       - name: Show deployed service URL
-        run: |
-          gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format="value(status.url)"
-        env:
-          SERVICE_NAME: ${{ env.SERVICE_NAME }}
-          REGION:       ${{ env.REGION }}
-
-      # 5) 스모크 테스트(헬스/상태 200 기대)
-      - name: Smoke tests (health/status)
-        run: |
-          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')
-          echo "URL=$URL"
-          H=$(curl -s -o /dev/null -w '%{http_code}\n' "$URL/health")
-          TOK=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "$PROJECT_ID")
-          S=$(curl -s -o /dev/null -w '%{http_code}\n' -H "X-Admin-Token: $TOK" "$URL/api/status")
-          echo "HEALTH=$H STATUS=$S"
-          test "$H" = "200" -a "$S" = "200"
         env:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
           REGION:       ${{ env.REGION }}
           PROJECT_ID:   ${{ env.PROJECT_ID }}
+        run: |
+          gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format="value(status.url)"
 
+      # 배포 스모크(헬스/상태/리포트 200)
+      - name: Smoke tests (health/status/report)
+        env:
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          REGION:       ${{ env.REGION }}
+          PROJECT_ID:   ${{ env.PROJECT_ID }}
+        run: |
+          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')
+          echo "URL=$URL"
+          H=$(curl -s -o /dev/null -w '%{http_code}\n' "$URL/health")
+          TOK=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "$PROJECT_ID")
+          S=$(curl -s -o /dev/null -w '%{http_code}\n' -H "X-Admin-Token: $TOK" "$URL/api/status")
+          R=$(curl -s -o /dev/null -w '%{http_code}\n' -H "X-Admin-Token: $TOK" -X POST "$URL/api/report")
+          echo "HEALTH=$H STATUS=$S REPORT=$R"
+          test "$H" = "200" -a "$S" = "200" -a "$R" = "200"
