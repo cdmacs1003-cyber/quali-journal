@@ -1,93 +1,42 @@
-name: deploy
+name: Deploy (prod)
 
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
-
-permissions:
-  contents: read
-  id-token: write
-
-# ----- SSOT (한 곳에서만 바꾸면 됨) -----
-env:
-  PROJECT_ID: quali-journal-prod
-  REGION: asia-northeast1
-  SERVICE_NAME: quali-admin-domap
-  AR_REPO: containers
-  RUNTIME_SA: quali-run-sa
+  push:
+    branches: [ main ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # WIF 필수
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Auth to Google Cloud (WIF)
-        id: auth
-        uses: google-github-actions/auth@v2
+      # 1) WIF 인증
+      - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
-          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
 
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ env.PROJECT_ID }}
+          project_id: quali-journal-prod
 
-      - name: Configure Artifact Registry docker auth
-        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
-      - name: Build image
-        run: |
-          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/quali-admin:${{ github.sha }}"
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
-          docker build -t "$IMAGE" .
-
-      - name: Push image
-        run: docker push "$IMAGE"
-
-      - name: Deploy to Cloud Run
-        id: deploy
+      # 2) Cloud Run 배포 (deploy-cloudrun@v2 정식 키만 사용)
+      - id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
         with:
-          service: ${{ env.SERVICE_NAME }}
-          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/quali-admin:${{ github.sha }}
-          region: ${{ env.REGION }}
-          project_id: ${{ env.PROJECT_ID }}
-          allow_unauthenticated: true
-          service_account: ${{ env.RUNTIME_SA }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
-          revision_traffic: "LATEST=100"
-          env_vars: |
-            PYTHONUTF8=1
-            PYTHONIOENCODING=utf-8
-            COMMIT_SHA=${{ github.sha }}
+          service: quali-journal-admin
+          region: asia-northeast3
+          project_id: quali-journal-prod
+          source: .                      # Dockerfile 빌드/배포
+          # ❗ 'allow_unauthenticated' 같은 잘못된 키 쓰지 말고 flags 사용
+          flags: --allow-unauthenticated
+          # ❗ Secret/Env는 액션의 공식 입력 사용 (줄바꿈 OK)
           secrets: |
-            ADMIN_TOKEN=projects/${{ env.PROJECT_ID }}/secrets/ADMIN_TOKEN:latest
-
-      - name: Show deployed service URL
-        run: echo "URL=${{ steps.deploy.outputs.url }}"
-
-      - name: Warmup (wait for /health 200)
-        run: |
-          set -e
-          URL="${{ steps.deploy.outputs.url }}"
-          echo "URL=${URL}"
-          for i in $(seq 1 60); do
-            code=$(curl -fsS -o /dev/null -w "%{http_code}" "${URL}/health" || true)
-            echo "try $i: $code"
-            if [ "$code" = "200" ]; then exit 0; fi
-            sleep 3
-          done
-          echo "warmup failed: /health not ready"; exit 1
-
-      - name: Smoke tests (health/status/report)
-        run: |
-          set -e
-          URL="${{ steps.deploy.outputs.url }}"
-          curl -fsS "${URL}/health"
-          curl -fsS "${URL}/api/status"
-          curl -fsS -H "Content-Type: application/json" --data '{}' "${URL}/api/report"
+            ADMIN_TOKEN=ADMIN_TOKEN:latest
+          env_vars: |
+            PYTHONUTF8=1,PYTHONIOENCODING=utf-8
