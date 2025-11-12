@@ -35,6 +35,24 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
       
+      - name: Prepare build context (python buildpacks ready)
+        shell: bash
+        run: |
+          set -e
+          mkdir -p admin
+          # 1) Buildpacks용 요구사항 파일 보장
+          if [ -f requirements.txt ]; then
+            cp -f requirements.txt admin/requirements.txt
+          else
+            printf "fastapi\nuvicorn[standard]\npython-dotenv\n" > admin/requirements.txt
+          fi
+          # 2) Buildpacks용 Procfile(엔트리 고정)
+          printf "web: uvicorn admin.server_quali:app --host 0.0.0.0 --port \${PORT}\n" > admin/Procfile
+          # 3) 점검 출력
+          echo "[admin dir list]"; ls -al admin | sed -n '1,80p'
+          echo "[requirements head]"; head -n 40 admin/requirements.txt || true
+          echo "[procfile]"; cat admin/Procfile
+
       - name: Prepare build context (copy requirements.txt for buildpacks)
         shell: bash
         run: |
@@ -55,8 +73,7 @@ jobs:
 
  
       # --- Cloud Run Deploy (소스 배포: admin)
-      - name: Deploy to Cloud Run (source admin)
-        id: deploy
+      - name: Deploy to Cloud Run (source: admin/)
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           project_id:  ${{ env.PROJECT_ID }}
@@ -65,19 +82,18 @@ jobs:
           source:      admin
           allow_unauthenticated: true
           service_account: ${{ env.RUNTIME_SA }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
-          # Cloud Build가 컨테이너 실행 진입점을 강제
           build_env_vars: |
             GOOGLE_ENTRYPOINT=uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080
-          # 런타임 환경변수
+            BP_CPYTHON_VERSION=3.11.*
           env_vars: |
             PYTHONUTF8=1
             PYTHONIOENCODING=utf-8
             COMMIT_SHA=${{ github.sha }}
             ALLOWED_ORIGINS=https://admin.standardai.co.kr
-          # Secret Manager
           secrets: |
             ADMIN_TOKEN=ADMIN_TOKEN:latest
           update_traffic_flags: --to-latest
+
 
       # --- 서비스 URL 출력
       - name: Show deployed service URL
