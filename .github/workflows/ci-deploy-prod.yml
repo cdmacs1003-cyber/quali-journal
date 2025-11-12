@@ -73,7 +73,8 @@ jobs:
 
  
       # --- Cloud Run Deploy (소스 배포: admin)
-      - name: Deploy to Cloud Run (source: admin/)
+      - name: Deploy to Cloud Run (source admin)
+        id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           project_id:  ${{ env.PROJECT_ID }}
@@ -93,6 +94,7 @@ jobs:
           secrets: |
             ADMIN_TOKEN=ADMIN_TOKEN:latest
           update_traffic_flags: --to-latest
+
 
 
       # --- 서비스 URL 출력
