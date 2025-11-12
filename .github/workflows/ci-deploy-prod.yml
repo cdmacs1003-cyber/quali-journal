@@ -17,7 +17,7 @@ env:
   PROJECT_ID: quali-journal-prod
   REGION: asia-northeast1            # 도메인 매핑 리전
   SERVICE_NAME: quali-admin-domap    # 라이브 서비스
-  ENTRYPOINT: "uvicorn server_quali:app --host 0.0.0.0 --port 8080"
+  ENTRYPOINT: "uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080"
 
 jobs:
   deploy:
@@ -51,7 +51,8 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
           service:    ${{ env.SERVICE_NAME }}
           region:     ${{ env.REGION }}
-          source:     admin
+          source: .
+
           # 런타임 환경변수
           env_vars: |
             PYTHONUTF8=1
