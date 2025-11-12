@@ -1,120 +1,115 @@
-name: Deploy to Cloud Run (prod, direct gcloud)
+name: deploy
 
 on:
   push:
     branches: [ "main" ]
-    paths:
-      - "**/*.py"
-      - "requirements.txt"
-      - "Dockerfile"
-      - "admin/**"
-      - ".github/workflows/ci-deploy-prod.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: deploy-prod
-  cancel-in-progress: true
-
 env:
-  PROJECT_ID: quali-journal-prod
-  REGION_SEO: asia-northeast3            # 소스 서비스 (서울)
-  REGION_TYO: asia-northeast1            # 도메인 서비스(domap, 도쿄)
-  SERVICE_SRC: quali-journal-admin       # 소스 빌드 서비스
-  SERVICE_LIVE: quali-admin-domap        # 도메인 매핑된 라이브 서비스
-  HEALTH_PATH: /health
-  TIMEOUT_SEC: 600
-  SLEEP_SEC: 5
+  # ==== SSOT ====
+  PROJECT_ID:        quali-journal-prod
+  REGION:            asia-northeast1          # Cloud Run 서비스 리전(도쿄)
+  SERVICE_NAME:      quali-admin-domap
+  AR_REPO:           containers               # Artifact Registry repo 이름
+  RUNTIME_SA:        quali-run-sa             # 런타임 서비스계정(짧은 이름)
+
+  # 이미지 풀 경로
+  IMAGE: asia-northeast1-docker.pkg.dev/quali-journal-prod/containers/quali-admin:${{ github.sha }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # 1) GitHub OIDC → GCP WIF
-      - id: auth
+      # --- OIDC 로그인
+      - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}  # ex) projects/xxx/locations/global/workloadIdentityPools/xxx/providers/xxx
-          service_account: ${{ secrets.GCP_SA_EMAIL }}                 # 배포용 SA 이메일
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+          project_id: ${{ env.PROJECT_ID }}
 
-      # 2) gcloud 설치
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
-      - name: Set project
-        run: |
-          gcloud --version
-          gcloud config set project "$PROJECT_ID"
+      # --- Docker Build & Push (Artifact Registry)
+      - name: Configure Docker auth (AR)
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
-      # 3) 소스에서 바로 Cloud Run 배포(서울)
-      - name: Deploy src → ${{ env.SERVICE_SRC }} (${{ env.REGION_SEO }})
-        run: |
-          gcloud run deploy "$SERVICE_SRC" \
-            --source . \
-            --region "$REGION_SEO" \
-            --platform managed \
-            --allow-unauthenticated \
-            --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
-            --set-env-vars "PYTHONUTF8=1,PYTHONIOENCODING=utf-8" \
-            --labels "managed-by=github-actions,commit-sha=${{ github.sha }}" \
-            --quiet
+      - name: Build image (disabled; using source deploy)
+        if: ${{ false }}
+        run: echo "disabled"
 
-      # 4) 방금 배포된 이미지 경로 추출
-      - name: Capture image from ${{ env.SERVICE_SRC }}
-        id: img
-        run: |
-          IMG=$(gcloud run services describe "$SERVICE_SRC" --region "$REGION_SEO" \
-                 --format="value(spec.template.spec.containers[0].image)")
-          echo "img=$IMG" >> "$GITHUB_OUTPUT"
-          echo "Using image: $IMG"
+      - name: Push image (disabled; using source deploy)
+        if: ${{ false }}
+        run: echo "disabled"
 
-      # 5) 같은 이미지를 도쿄(domap) 서비스에 배포(도메인 트래픽 대상)
-      - name: Deploy same image → ${{ env.SERVICE_LIVE }} (${{ env.REGION_TYO }})
-        run: |
-          gcloud run deploy "$SERVICE_LIVE" \
-            --image "${{ steps.img.outputs.img }}" \
-            --region "$REGION_TYO" \
-            --platform managed \
-            --allow-unauthenticated \
-            --set-secrets "ADMIN_TOKEN=ADMIN_TOKEN:latest" \
-            --set-env-vars "PYTHONUTF8=1,PYTHONIOENCODING=utf-8" \
-            --labels "managed-by=github-actions,commit-sha=${{ github.sha }}" \
-            --quiet
+      # --- Cloud Run Deploy (이미지 모드)
+      - name: Deploy to Cloud Run (source: admin/)
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          project_id:  ${{ env.PROJECT_ID }}
+          region:      ${{ env.REGION }}
+          service:     ${{ env.SERVICE_NAME }}
+          source:      admin
+          allow_unauthenticated: true
+          service_account: ${{ env.RUNTIME_SA }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+          # Cloud Build에서 uvicorn 진입점 지정(WSL/도커 없이 동일하게 구동)
+          build_env_vars: |
+            GOOGLE_ENTRYPOINT=uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080
+          # 런타임 환경변수
+          env_vars: |
+            PYTHONUTF8=1
+            PYTHONIOENCODING=utf-8
+            COMMIT_SHA=${{ github.sha }}
+            ALLOWED_ORIGINS=https://admin.standardai.co.kr
+          # Secret Manager
+          secrets: |
+            ADMIN_TOKEN=ADMIN_TOKEN:latest
+          update_traffic_flags: --to-latest
 
-      # 6) 최신 리비전에 100% 트래픽 전환(두 서비스 모두)
-      - name: Shift traffic to latest revisions
-        run: |
-          gcloud run services update-traffic "$SERVICE_SRC"  --to-latest --region "$REGION_SEO"  --quiet
-          gcloud run services update-traffic "$SERVICE_LIVE" --to-latest --region "$REGION_TYO"  --quiet
 
-      # 7) 라이브 URL 확보
-      - name: Get live URL
+      # --- 서비스 URL 출력
+      - name: Show deployed service URL
         id: url
         run: |
-          URL=$(gcloud run services describe "$SERVICE_LIVE" --region "$REGION_TYO" --format="value(status.url)")
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format="value(status.url)")
           echo "URL=$URL"
+          echo "URL=$URL" >> $GITHUB_OUTPUT
 
-      # 8) 헬스 워밍(503 → 200까지 폴링)
-      - name: Warmup /health (503→200)
+      # --- Warmup: /health 200까지 대기 (최대 ~3분)
+      - name: Warmup (wait for /health 200)
         run: |
-          set -euo pipefail
-          URL="${{ steps.url.outputs.url }}${HEALTH_PATH}"
-          echo "Warming: $URL"
-          t=0
-          until curl -sfL "$URL" >/dev/null 2>&1; do
-            t=$((t + SLEEP_SEC))
-            if [ "$t" -ge "$TIMEOUT_SEC" ]; then
-              echo "health not ready (timeout ${TIMEOUT_SEC}s)"; exit 1
+          set -e
+          URL="${{ steps.url.outputs.URL }}"
+          echo "URL=$URL"
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" || true)
+            echo "try $i: $code"
+            if [ "$code" = "200" ]; then
+              echo "health OK"
+              exit 0
             fi
-            echo "… waiting ($t/${TIMEOUT_SEC}s)"; sleep "$SLEEP_SEC"
+            sleep 3
           done
-          echo "OK: $URL"
+          echo "warmup failed: /health not ready"
+          exit 1
 
-      - name: Summary
+      # --- Smoke (토큰 필요 엔드포인트 200 확인)
+      - name: Smoke tests (/api/status, /api/report)
         run: |
-          echo "Live URL: ${{ steps.url.outputs.url }}"
+          set -e
+          URL="${{ steps.url.outputs.URL }}"
+          TOKEN=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "$PROJECT_ID" | tr -d '\r\n')
+          for P in /api/status /api/report; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" -H "X-Admin-Token: $TOKEN" "$URL$P" || true)
+            echo "$P -> $code"
+            [ "$code" = "200" ] || (echo "Smoke failed: $P $code" && exit 1)
+          done
+          echo "Smoke OK"
