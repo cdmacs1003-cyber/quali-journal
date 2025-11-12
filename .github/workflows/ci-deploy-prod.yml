@@ -3,6 +3,8 @@ name: deploy
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - '.github/workflows/oidc-smoke.yml'
   workflow_dispatch: {}
 
 permissions:
@@ -89,3 +91,4 @@ jobs:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
           REGION:       ${{ env.REGION }}
           PROJECT_ID:   ${{ env.PROJECT_ID }}
+
