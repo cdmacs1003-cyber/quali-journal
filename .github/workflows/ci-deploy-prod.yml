@@ -66,6 +66,7 @@ jobs:
           # v2 입력 규격: build_env_vars 대신 flags로 전달
           flags: >
             --allow-unauthenticated
+            --timeout=600
             --set-build-env-vars=GOOGLE_ENTRYPOINT="${{ env.ENTRYPOINT }}"
           # 최신 리비전에 100% 전환 (문법 고정)
           revision_traffic: "LATEST=100"
@@ -77,6 +78,21 @@ jobs:
           PROJECT_ID:   ${{ env.PROJECT_ID }}
         run: |
           gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format="value(status.url)"
+      - name: Warmup (wait for /health 200)
+        env:
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          REGION:       ${{ env.REGION }}
+          PROJECT_ID:   ${{ env.PROJECT_ID }}
+        run: |
+          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')
+          echo "URL=$URL"
+          for i in {1..40}; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")
+            echo "try $i: $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 3
+          done
+          echo "warmup failed: /health not ready"; exit 1
 
       # 배포 스모크(헬스/상태/리포트 200)
       - name: Smoke tests (health/status/report)
