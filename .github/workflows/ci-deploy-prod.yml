@@ -36,9 +36,23 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
       
       - name: Prepare build context (copy requirements.txt for buildpacks)
+        shell: bash
         run: |
-          cp requirements.txt admin/requirements.txt
-          ls -al admin | sed -n '1,50p'
+          set -e
+          # 1) admin 폴더 보장(없으면 생성)
+          mkdir -p admin
+          # 2) 루트 requirements.txt가 있으면 복사, 없으면 최소본 생성
+          if [ -f requirements.txt ]; then
+            cp requirements.txt admin/requirements.txt
+          else
+            printf "fastapi\nuvicorn[standard]\n" > admin/requirements.txt
+          fi
+          # 3) 확인 출력
+          echo "== admin dir =="
+          ls -al admin | sed -n '1,80p'
+          echo "== preview requirements.txt =="
+          head -n 40 admin/requirements.txt || true
+
  
       # --- Cloud Run Deploy (소스 배포: admin)
       - name: Deploy to Cloud Run (source admin)
