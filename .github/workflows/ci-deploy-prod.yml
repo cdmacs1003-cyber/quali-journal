@@ -16,6 +16,8 @@ env:
   SERVICE_NAME:      quali-admin-domap
   AR_REPO:           containers
   RUNTIME_SA:        quali-run-sa
+  IMAGE: asia-northeast1-docker.pkg.dev/quali-journal-prod/containers/quali-admin-domap:${{ github.sha }}
+
 
 jobs:
   deploy:
@@ -101,10 +103,10 @@ jobs:
             ALLOWED_ORIGINS=https://admin.standardai.co.kr
           secrets: |
             ADMIN_TOKEN=ADMIN_TOKEN:latest
+          flags: >
+            --allow-unauthenticated
+            --service-account=${{ env.RUNTIME_SA }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
           update_traffic_flags: --to-latest
-
-
-
 
       # --- 서비스 URL 출력
       - name: Show deployed service URL
