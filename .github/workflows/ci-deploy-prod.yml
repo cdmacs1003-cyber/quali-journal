@@ -48,6 +48,14 @@ jobs:
           fi
           # 2) Buildpacks용 Procfile(엔트리 고정)
           printf "web: uvicorn admin.server_quali:app --host 0.0.0.0 --port \${PORT}\n" > admin/Procfile
+          # 2.5) 앱 본체를 admin/로 복사(소스 루트 일치)
+          if [ -f server_quali.py ]; then cp -f server_quali.py admin/server_quali.py; fi
+          python - <<'PY'
+          import pathlib, sys
+          p = pathlib.Path("admin/server_quali.py")
+          print("[check] server_quali in admin:", p.exists(), "size=", p.stat().st_size if p.exists() else 0)
+          PY
+
           # 3) 점검 출력
           echo "[admin dir list]"; ls -al admin | sed -n '1,80p'
           echo "[requirements head]"; head -n 40 admin/requirements.txt || true
