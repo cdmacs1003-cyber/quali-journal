@@ -34,7 +34,12 @@ jobs:
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
-
+      
+      - name: Prepare build context (copy requirements.txt for buildpacks)
+        run: |
+          cp requirements.txt admin/requirements.txt
+          ls -al admin | sed -n '1,50p'
+ 
       # --- Cloud Run Deploy (소스 배포: admin)
       - name: Deploy to Cloud Run (source admin)
         id: deploy
