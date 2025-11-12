@@ -3,7 +3,7 @@ name: deploy
 on:
   push:
     branches: [ "main" ]
-    # 스모크 yml만 수정했을 땐 배포 자동실행 방지
+    # 스모크 yml만 수정해도 배포 안 돌게 무시
     paths-ignore:
       - '.github/workflows/oidc-smoke.yml'
   workflow_dispatch: {}
@@ -17,7 +17,7 @@ env:
   PROJECT_ID: quali-journal-prod
   REGION: asia-northeast1            # 도메인 매핑 리전
   SERVICE_NAME: quali-admin-domap    # 라이브 서비스
-  ENTRYPOINT: "uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080"
+  ENTRYPOINT: "uvicorn server_quali:app --host 0.0.0.0 --port 8080"
 
 jobs:
   deploy:
@@ -44,31 +44,25 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      # 소스 배포(빌드팩) — admin 컨텍스트만 빌드
+      # 소스 배포(빌드팩) — 루트 컨텍스트 + ENTRYPOINT 전달
       - name: Deploy to Cloud Run (source)
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
           service:    ${{ env.SERVICE_NAME }}
           region:     ${{ env.REGION }}
-          source: .
-
-          # 런타임 환경변수
+          source:     .
           env_vars: |
             PYTHONUTF8=1
             PYTHONIOENCODING=utf-8
             COMMIT_SHA=${{ github.sha }}
-          # Secret Manager → 컨테이너 env
           secrets: |
             ADMIN_TOKEN=ADMIN_TOKEN:latest
-          # 기본 라벨 중복 방지
-          skip_default_labels: true
-          # v2 입력 규격: build_env_vars 대신 flags로 전달
           flags: >
             --allow-unauthenticated
             --timeout=600
             --set-build-env-vars=GOOGLE_ENTRYPOINT="${{ env.ENTRYPOINT }}"
-          # 최신 리비전에 100% 전환 (문법 고정)
+          # 최신 리비전에 100% 전환(문법 확정)
           revision_traffic: "LATEST=100"
 
       - name: Show deployed service URL
@@ -78,6 +72,8 @@ jobs:
           PROJECT_ID:   ${{ env.PROJECT_ID }}
         run: |
           gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format="value(status.url)"
+
+      # 웜업: /health가 준비될 때까지 대기(최대 ~2분)
       - name: Warmup (wait for /health 200)
         env:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
@@ -94,7 +90,7 @@ jobs:
           done
           echo "warmup failed: /health not ready"; exit 1
 
-      # 배포 스모크(헬스/상태/리포트 200)
+      # 배포 스모크(/health, /api/status, /api/report)
       - name: Smoke tests (health/status/report)
         env:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
