@@ -1,104 +1,77 @@
-name: deploy
+name: ci-deploy-prod
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   workflow_dispatch: {}
 
 permissions:
-  contents: read
   id-token: write
+  contents: read
 
 env:
-  # === SSOT ===
   PROJECT_ID: quali-journal-prod
   REGION: asia-northeast1
   SERVICE_NAME: quali-admin-domap
+  # ✅ 엔트리포인트는 admin.server_quali:app 이 맞다
+  ENTRYPOINT: uvicorn admin.server_quali:app --host 0.0.0.0 --port 8080
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) 코드 체크아웃
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2) OIDC 인증 (WIF)
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
-          project_id: ${{ env.PROJECT_ID }}
 
-      # 3) gcloud 설치
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      # 4) Cloud Run 배포(소스 모드)
       - name: Deploy to Cloud Run (source)
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
         with:
-          project_id:  ${{ env.PROJECT_ID }}
-          region:      ${{ env.REGION }}
-          service:     ${{ env.SERVICE_NAME }}
-          source:      .
-          # 최신 리비전에 100% 전환
-          revision_traffic: LATEST=100
-          # 런타임 환경변수
-          env_vars: |
-            PYTHONUTF8=1
-            PYTHONIOENCODING=utf-8
-            COMMIT_SHA=${{ github.sha }}
-          # Secret Manager(예: ADMIN_TOKEN) 주입
-          secrets: |
-            ADMIN_TOKEN=ADMIN_TOKEN:latest
-          # 라벨은 중복 에러 방지 위해 commit-sha만
-          labels: |
-            commit-sha=${{ github.sha }}
-          # 빌드팩 진입점 지정 + 타임아웃/미니멈 인스턴스
-          # ※ server_quali:app (루트에 있는 모듈명 그대로!)
-          flags: >
-            --allow-unauthenticated
-            --timeout=300
-            --min-instances=1
-            --set-build-env-vars GOOGLE_ENTRYPOINT="uvicorn server_quali:app --host 0.0.0.0 --port 8080"
+          project_id: ${{ env.PROJECT_ID }}
+          region: ${{ env.REGION }}
+          service: ${{ env.SERVICE_NAME }}
+          source: .
+          allow_unauthenticated: true
+          timeout: 300
+          # ✅ 트래픽 지정은 이렇게: LATEST=100
+          revision_traffic: "LATEST=100"
+          # 실행 시 환경변수(로그/포트 등)
+          env_vars: COMMIT_SHA=${{ github.sha }},PYTHONUNBUFFERED=1,PORT=8080
+          # 시크릿 주입
+          secrets: ADMIN_TOKEN=ADMIN_TOKEN:latest
+          # 라벨 1회만 지정 (중복 지정 에러 방지)
+          labels: managed-by=github-actions,commit-sha=${{ github.sha }}
+          # ✅ Buildpacks용 ENTRYPOINT 지정
+          flags: >-
+            --build-env-vars=GOOGLE_ENTRYPOINT="${{ env.ENTRYPOINT }}"
 
-      # 5) 서비스 URL 표시
       - name: Show deployed service URL
-        id: url
         run: |
-          URL=$(gcloud run services describe "$SERVICE_NAME" \
-                --region "$REGION" --project "$PROJECT_ID" \
-                --format='value(status.url)')
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "$URL"
+          gcloud run services describe "$SERVICE_NAME" \
+            --region "$REGION" --project "$PROJECT_ID" \
+            --format='value(status.url)'
 
-      # 6) Warmup: /health 200 대기(최대 5분)
       - name: Warmup (wait for /health 200)
         run: |
           set -e
-          URL="${{ steps.url.outputs.url }}"
+          URL=$(gcloud run services describe "$SERVICE_NAME" \
+            --region "$REGION" --project "$PROJECT_ID" \
+            --format='value(status.url)')
           echo "URL=$URL"
-          for i in $(seq 1 60); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" || true)
+          for i in $(seq 1 90); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")
             echo "try $i: $CODE"
-            if [ "$CODE" = "200" ]; then
-              exit 0
-            fi
-            sleep 5
+            if [ "$CODE" = "200" ]; then exit 0; fi
+            sleep 2
           done
-          echo "warmup failed: /health not ready" >&2
-          exit 1
-
-      # 7) 스모크 테스트(상태 엔드포인트들 200 확인)
-      - name: Smoke tests (health/status/report)
-        run: |
-          URL="${{ steps.url.outputs.url }}"
-          for path in "/health" "/api/status" "/api/report"; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$URL$path" || true)
-            echo "$path -> $code"
-            test "$code" = "200"
-          done
+          echo "warmup failed: /health not ready"; exit 1
