@@ -2,12 +2,12 @@ name: deploy
 
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch:
+    branches: [ "main" ]       # main으로 push될 때 자동 배포
+  workflow_dispatch:           # 필요 시 수동 실행
 
 permissions:
   contents: read
-  id-token: write
+  id-token: write              # WIF(OIDC) 토큰용 권한
 
 env:
   # ==== SSOT ====
@@ -18,76 +18,35 @@ env:
   RUNTIME_SA:        quali-run-sa
   IMAGE: asia-northeast1-docker.pkg.dev/quali-journal-prod/containers/quali-admin-domap:${{ github.sha }}
 
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
+      # 0) 코드 체크아웃
       - name: Checkout
         uses: actions/checkout@v4
 
-      # --- OIDC 로그인
+      # 1) WIF(OIDC)로 GCP 인증
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
-          project_id: ${{ env.PROJECT_ID }}
+          service_account:           ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+          project_id:                ${{ env.PROJECT_ID }}
 
+      # 2) gcloud CLI 세팅
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
-      
-      - name: Prepare build context (python buildpacks ready)
-        shell: bash
-        run: |
-          set -e
-          mkdir -p admin
-          # 1) Buildpacks용 요구사항 파일 보장
-          if [ -f requirements.txt ]; then
-            cp -f requirements.txt admin/requirements.txt
-          else
-            printf "fastapi\nuvicorn[standard]\npython-dotenv\n" > admin/requirements.txt
-          fi
-          # 2) Buildpacks용 Procfile(엔트리 고정)
-          printf "web: uvicorn admin.server_quali:app --host 0.0.0.0 --port \${PORT}\n" > admin/Procfile
-          # 2.5) 앱 본체를 admin/로 복사(소스 루트 일치)
-          if [ -f server_quali.py ]; then cp -f server_quali.py admin/server_quali.py; fi
-          python - <<'PY'
-          import pathlib, sys
-          p = pathlib.Path("admin/server_quali.py")
-          print("[check] server_quali in admin:", p.exists(), "size=", p.stat().st_size if p.exists() else 0)
-          PY
 
-          # 3) 점검 출력
-          echo "[admin dir list]"; ls -al admin | sed -n '1,80p'
-          echo "[requirements head]"; head -n 40 admin/requirements.txt || true
-          echo "[procfile]"; cat admin/Procfile
-
-      - name: Prepare build context (copy requirements.txt for buildpacks)
-        shell: bash
-        run: |
-          set -e
-          # 1) admin 폴더 보장(없으면 생성)
-          mkdir -p admin
-          # 2) 루트 requirements.txt가 있으면 복사, 없으면 최소본 생성
-          if [ -f requirements.txt ]; then
-            cp requirements.txt admin/requirements.txt
-          else
-            printf "fastapi\nuvicorn[standard]\n" > admin/requirements.txt
-          fi
-          # 3) 확인 출력
-          echo "== admin dir =="
-          ls -al admin | sed -n '1,80p'
-          echo "== preview requirements.txt =="
-          head -n 40 admin/requirements.txt || true
-
- 
-      # Cloud Build로 이미지 빌드(레포 루트 Dockerfile 사용)
+      # 3) Cloud Build로 루트 Dockerfile 빌드
       - name: Build image with Cloud Build
         run: |
-          gcloud builds submit --tag "${{ env.IMAGE }}" --project "${{ env.PROJECT_ID }}"
+          gcloud builds submit \
+            --tag "${{ env.IMAGE }}" \
+            --project "${{ env.PROJECT_ID }}"
 
-      # Cloud Run 이미지 배포(경고 유발 키 제거 버전)
+      # 4) Cloud Run에 이미지 배포
       - name: Deploy to Cloud Run (image)
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
@@ -108,15 +67,21 @@ jobs:
             --service-account=${{ env.RUNTIME_SA }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
           update_traffic_flags: --to-latest
 
-      # --- 서비스 URL 출력
+      # 5) 배포된 서비스 URL 확인
       - name: Show deployed service URL
         id: url
         run: |
-          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format="value(status.url)")
+          SERVICE_NAME="${{ env.SERVICE_NAME }}"
+          REGION="${{ env.REGION }}"
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+          URL=$(gcloud run services describe "$SERVICE_NAME" \
+                --region "$REGION" \
+                --project "$PROJECT_ID" \
+                --format="value(status.url)")
           echo "URL=$URL"
-          echo "URL=$URL" >> $GITHUB_OUTPUT
+          echo "URL=$URL" >> "$GITHUB_OUTPUT"
 
-      # --- Warmup: /health 200까지 대기
+      # 6) Warmup: /health 200 나올 때까지 대기
       - name: Warmup (wait for /health 200)
         run: |
           set -e
@@ -134,14 +99,20 @@ jobs:
           echo "warmup failed: /health not ready"
           exit 1
 
-      # --- Smoke (토큰 필요 엔드포인트 확인)
+      # 7) Smoke test: /api/status, /api/report 200 확인
       - name: Smoke tests (/api/status, /api/report)
         run: |
           set -e
           URL="${{ steps.url.outputs.URL }}"
-          TOKEN=$(gcloud secrets versions access latest --secret=ADMIN_TOKEN --project "$PROJECT_ID" | tr -d '\r\n')
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+          TOKEN=$(gcloud secrets versions access latest \
+                    --secret=ADMIN_TOKEN \
+                    --project "$PROJECT_ID" | tr -d '\r\n')
           for P in /api/status /api/report; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" -H "X-Admin-Token: $TOKEN" "$URL$P" || true)
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+                    -H "Authorization: Bearer $TOKEN" \
+                    -H "X-Admin-Token: $TOKEN" \
+                    "$URL$P" || true)
             echo "$P -> $code"
             [ "$code" = "200" ] || (echo "Smoke failed: $P $code" && exit 1)
           done
