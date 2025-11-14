@@ -18,9 +18,17 @@ COPY config.json /app/config.json
 COPY archive/ /app/archive/
 COPY feeds/ /app/feeds/
 COPY data/ /app/data/
+
 # 선택 JSON들(있으면 복사)
-COPY selected_articles.json /app/selected_articles.json
-COPY selected_keyword_articles.json /app/selected_keyword_articles.json
+# NOTE:
+# - selected_articles.json / selected_keyword_articles.json 은
+#   배포 이미지 빌드 시점에 항상 존재하지 않는다.
+# - 실제로는 런타임에 /archive 또는 /tmp/archive 아래에서 생성·사용하는 데이터이므로
+#   빌드 단계에서 필수 COPY 대상으로 두면 Cloud Build가 실패한다.
+# - 필요하다면 런타임에서 외부 스토리지(GCS 등)나 볼륨에 있는 파일을 읽도록 처리한다.
+#COPY selected_articles.json /app/selected_articles.json
+#COPY selected_keyword_articles.json /app/selected_keyword_articles.json
+
 
 # Cloud Run 기본 포트
 ENV PORT=8080
