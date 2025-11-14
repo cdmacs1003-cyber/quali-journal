@@ -211,6 +211,35 @@ class ReportReq(BaseModel):
     date: str | None = None
     keyword: str | None = None
 
+class ReportResult(BaseModel):
+    """
+    /api/report 응답 공통 스키마
+    - 성공: ok=True, path/count/duration_ms 세팅
+    - 실패: ok=False, error / error_code 세팅 (path는 비워둘 수 있음)
+    """
+    ok: bool = True
+    op: str = "report"
+    path: Optional[str] = None
+    count: int = 0
+    ts: int = 0
+    duration_ms: int = 0
+    error: Optional[str] = None
+    error_code: Optional[str] = None
+
+
+class ErrorResponse(BaseModel):
+    """
+    에러 응답 공통 형태(참고용).
+    지금은 /api/report 등에서 _err(...)가 같은 구조로 JSON을 내려줌.
+    """
+    ok: bool = False
+    op: str = "report"
+    error: str
+    ts: int = 0
+    error_code: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+
 class FlowReq(BaseModel):
     kind: str            # daily|community|keyword
     keyword: str | None = None
@@ -305,88 +334,72 @@ def _detect_root() -> Path:
     return BASE.parent
 
 ROOT = _detect_root()
-ARCHIVE = ROOT / "archive"
+# 로컬에서만 쓰는 기본 archive 경로(Cloud Run에서는 아래에서 /tmp로 치환)
+ARCHIVE_LOCAL = ROOT / "archive"
 TOOLS   = ROOT / "tools"
 ORCH    = ROOT / "orchestrator.py"
+
 
 SEL_COMM = ROOT / "selected_community.json"
 SEL_WORK = ROOT / "data" / "selected_keyword_articles.json"
 SEL_PUB  = ROOT / "selected_articles.json"
 
-# Enriched summaries output dir
+# define early to avoid import-order NameError
+try:
+    import os as _os_for_cloud  # 로컬 import로 의존성 최소화
+    IS_CLOUD = bool(_os_for_cloud.getenv("K_SERVICE"))
+except Exception:
+    IS_CLOUD = False
+
+ARCHIVE_CLOUD = Path("/tmp/archive")
+
+# Cloud Run에서는 /tmp/archive, 로컬에서는 ROOT/archive 사용
+ARCHIVE = ARCHIVE_CLOUD if IS_CLOUD else ARCHIVE_LOCAL
+
+# /archive 하위 폴더들
 ENRICHED_DIR = ARCHIVE / "enriched"
-CAND_COMM = [SEL_COMM, ROOT / "archive" / "selected_community.json"]
+REPORT_DIR   = ARCHIVE / "reports"
+ENRICH_DIR   = ENRICHED_DIR
+
+# 커뮤니티 스냅샷 후보: 루트 selected_community.json → archive 안 복사본 순서
+CAND_COMM = [SEL_COMM, ARCHIVE / "selected_community.json"]
+
 
 INDEX_HTML = BASE / "index.html"
 INDEX_LITE = BASE / "index_lite_black.html"
 CONFIG_FILE = ROOT / "config.json"
 
-# Cloud Run support
-ARCHIVE_CLOUD = Path(os.getenv("ARCHIVE_DIR", "/tmp/archive"))
-IS_CLOUD = bool(os.getenv("K_SERVICE"))
-# (여기) 작업본 검색 후보(로컬/클라우드 모두 커버)
-CAND_WORK = [
-    SEL_WORK,                                           # 기본: repo/data/selected_keyword_articles.json
-    ARCHIVE_CLOUD / "selected_keyword_articles.json",   # Cloud Run: /tmp/archive/selected_keyword_articles.json
-    ROOT / "selected_keyword_articles.json",            # 루트에 떨어질 수도 있음
-    BASE / "data_selected_articles.json",               # 구버전/대체명 호환
-]
 
-REPORT_DIR = (ARCHIVE_CLOUD / "reports") if IS_CLOUD else (BASE / "archive" / "reports")
-ENRICH_DIR = (ARCHIVE_CLOUD / "enriched") if IS_CLOUD else (ARCHIVE / "enriched")
-REPORT_DIR.mkdir(parents=True, exist_ok=True)
-ENRICH_DIR.mkdir(parents=True, exist_ok=True)
 
-ARCHIVE_ADMIN = BASE / "archive"   # admin\archive (report .md 저장 위치)
+# runtime small stores
+GATE = {"gate_required": 15}
+KPI = {}
+# === SAFE LOGGING (Cloud Run & local) =====================================
+# 여기서는 import를 새로 하지 않고, 파일 상단의
+# os / sys / logging / Path / IS_CLOUD 을 그대로 재사용한다.
 
-# KPI / Gate defaults
-KPI = {"selected": 0, "approved": 0, "published": 0}
-GATE = {"gate_required": int(os.getenv("GATE_REQUIRED", "15"))}
-
-# Directory to persist task logs. Logs are saved as <job_id>.log
-TASK_LOG_DIR = ROOT / "logs" / "tasks"
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-# 목표: logging_setup 모듈이 없어도 기동에 절대 실패하지 않게(멱등)
-_Path = Path
-
-# 로그 디렉터리 보장
+LOGS_DIR = None
 try:
-    (_Path(__file__).resolve().parent.parent / "logs").mkdir(parents=True, exist_ok=True)
+    # Cloud Run이면 /tmp/logs, 로컬이면 프로젝트 루트/logs 사용
+    LOGS_DIR = (Path("/tmp/logs") if IS_CLOUD else (Path(__file__).resolve().parent.parent / "logs"))
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
-    pass
+    # 읽기 전용 컨테이너 등에서는 파일 로그 없이 stdout만 사용
+    LOGS_DIR = None
 
-_logger = None
-try:
-    # 프로젝트에 있으면 사용하는 경로 1) setup_logger 2) setup_logging 순으로 시도
-    try:
-        from logging_setup import setup_logger as _setup_any  # type: ignore
-    except Exception:
-        from logging_setup import setup_logging as _setup_any  # type: ignore
-    _logger = _setup_any("server", str((_Path(__file__).resolve().parent.parent / "logs" / "server.log")))
-except Exception:
-    # 모듈이 없거나 에러여도 기본 로깅으로 안전하게 진행
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-    _logger = logging.getLogger("server")
-    _logger.info("fallback logger initialized (logging_setup missing)")
-
-logger = _logger
-
-
-# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger("server")
+logger.info("server_quali logger initialized (file logging=%s)", bool(LOGS_DIR))
+# =========================================================================
 # FastAPI app
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in (os.getenv("ALLOWED_ORIGINS","").split(",")) if o.strip()] or ["https://admin.example.com"],
+    allow_origins=[o.strip() for o in (os.getenv("ALLOWED_ORIGINS","").split(",")) if o.strip()] or ["https://admin.standardai.co.kr"],
     allow_methods=["GET","POST","PATCH","OPTIONS"],
     allow_headers=["Authorization","Content-Type","X-Admin-Token"],
     allow_credentials=True,
@@ -400,6 +413,20 @@ async def _force_utf8_markdown(request: Request, call_next):
     if ctype.startswith("text/markdown") and "charset=" not in ctype:
         resp.headers["content-type"] = "text/markdown; charset=utf-8"
     return resp
+
+def _detect_media_type(full: Path) -> str:
+    """
+    /api/archive용 간단 MIME 탐지:
+    - .md  → text/markdown; charset=utf-8
+    - .txt → text/plain; charset=utf-8
+    - 그 외 → application/octet-stream
+    """
+    name = full.name.lower()
+    if name.endswith(".md"):
+        return "text/markdown; charset=utf-8"
+    if name.endswith(".txt"):
+        return "text/plain; charset=utf-8"
+    return "application/octet-stream"
 
 
 # Static mounts
@@ -443,32 +470,54 @@ async def _cache_headers_ui(request: Request, call_next):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
-# ============================================================================ 
-
-# === 보호 다운로드 엔드포인트 (/api/archive/...) ===
 @app.get("/api/archive/{path:path}")
 def download_archive(path: str, request: Request):
     """
-    보호된 다운로드(헤더 Bearer 또는 ?token= 허용).
-    공개 정적 브라우징(/archive)은 유지하되, 실사용 링크는 이 경로 권장.
+    보호된 다운로드 엔드포인트.
+    - Cloud Run: ARCHIVE_CLOUD(/tmp/archive) 기준
+    - path 인자는 ARCHIVE 기준 상대경로를 기대하지만,
+      관용적으로 'archive/...' 접두어도 허용한다.
     """
-    _auth_header_or_qs_ok(request)  # 헤더 우선, ?token 허용
+    # 1) 인증 확인 (헤더 우선, ?token 허용)
+    _auth_header_or_qs_ok(request)
 
-    base = (ARCHIVE_CLOUD if IS_CLOUD else (BASE / "archive")).resolve()
-    full = (base / path).resolve()
+    # 2) path 정규화
+    #    - 선행 '/' 제거
+    #    - 'archive/' 로 시작하면 관용적으로 한 번 잘라냄
+    raw = path.lstrip("/")
+    if raw.startswith("archive/"):
+        raw = raw[len("archive/"):]  # 'archive/' 접두어 제거
 
-    # 경로 이탈 방지(../../ 차단)
+    # Path 객체로 변환 (여기까지는 아직 상대경로)
+    safe_rel = Path(raw)
+
+    # 3) ARCHIVE 기준 절대 경로 계산
+    base = ARCHIVE.resolve()
+    full = (base / safe_rel).resolve()
+
+    # 4) 경로 이탈 방지(../ 등 차단) + 실제 파일 여부 확인
     if not str(full).startswith(str(base)) or not full.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(str(full), filename=full.name)
+    # 5) 파일 응답 (확장자별 media_type 지정)
+    media_type = _detect_media_type(full)
+    return FileResponse(str(full), filename=full.name, media_type=media_type)
 
 # ---------------------------------------------------------------------------
 # Health & Misc
 # ---------------------------------------------------------------------------
 @app.get("/health", include_in_schema=False)
 async def health():
-    return {"status": True}
+    # Cloud Run / 로컬 모두 공통 사용:
+    # - ok: 헬스 자체 OK 여부
+    # - status: 이전 버전과의 호환용 플래그
+    return {"ok": True, "status": True}
+
+
+@app.get("/readyz", include_in_schema=False)
+async def readyz():
+    return {"ready": True}
+
 
 @app.get("/api/db/mode")
 def db_mode():
@@ -619,7 +668,7 @@ def _err(op: str, msg: str, **kw):
 
 # ---------------------------------------------------------------------------
 def _task_log_dir() -> Path:
-    d = (ROOT / "logs" / "tasks")
+    d = (LOGS_DIR / "tasks")
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -915,13 +964,18 @@ class Task:
         self._cancel = False
         self._lock = threading.Lock()
         # persistent log file path
-        global TASK_LOG_DIR
+        # Use LOGS_DIR/tasks when available
+        self.log_file: Path | None = None
         try:
-            TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)
-            self.log_file: Path | None = TASK_LOG_DIR / f"{self.id}.log"
-            self.log_file.write_text("", encoding="utf-8")
+            if LOGS_DIR:
+                task_dir = LOGS_DIR / "tasks"
+                task_dir.mkdir(parents=True, exist_ok=True)
+                p = task_dir / f"{self.id}.log"
+                p.write_text("", encoding="utf-8")
+                self.log_file = p
         except Exception:
             self.log_file = None
+
 
     def append(self, line: str):
         with self._lock:
@@ -1183,12 +1237,17 @@ async def set_gate_required(p: GatePatch, authorized: bool = Depends(authorize))
         GATE["gate_required"] = v
     return {"ok": True, "gate_required": v}
 
-
 @app.post("/api/report")
 def post_report(payload: dict | None = Body(default=None), authorized: bool = Depends(authorize)):
     """
-    UI 스피너/토스트 연동을 위해 항상 {"ok", "op", "path", "count", "duration_ms"} 형태로 응답.
-    실패 시에도 200 JSON으로 {"ok":False,"error":...} 반환(토스트용).
+    UI 스피너/토스트 연동용 리포트 생성 엔드포인트.
+    - 정상(S1/S2/S3): ok=True, HTTP 200
+      · S1: 기사 N건
+      · S2: JSON은 있으나 items=[] (기사 0건)
+      · S3: 입력 JSON 파일 자체가 없음 (NO_SOURCE)
+    - 에러(E1/E2): ok=False, HTTP 200 + error_code 포함
+      · E1: 소스 JSON 파싱 실패 REPORT_SOURCE_INVALID
+      · E2: 파일 쓰기 등 내부 오류 REPORT_WRITE_FAILED
     """
     t0 = _now_ms()
     try:
@@ -1202,14 +1261,18 @@ def post_report(payload: dict | None = Body(default=None), authorized: bool = De
             ROOT / "selected_articles.json",                   # list
             BASE / "data_selected_articles.json",              # list
         ]
-        items = []
+        items: list[dict] = []
         keyword = "report"
+        source_found = False   # 후보 JSON이 하나라도 있었는지
+        source_error = False   # JSON 파싱 에러가 났는지
 
         def _slug(s: str) -> str:
             return re.sub(r"[^A-Za-z0-9_-]+", "_", (s or "")).strip("_") or "report"
 
+        # S1/S2/E1 판정용: 후보 JSON 탐색
         for p in candidates:
             if p.exists():
+                source_found = True
                 try:
                     obj = json.loads(p.read_text(encoding="utf-8"))
                     if isinstance(obj, dict) and "items" in obj:
@@ -1218,10 +1281,36 @@ def post_report(payload: dict | None = Body(default=None), authorized: bool = De
                     elif isinstance(obj, list):
                         items = obj
                     break
-                except Exception:
-                    pass
+                except Exception as e:
+                    # 소스 JSON은 있는데 파싱 실패(E1)
+                    source_error = True
+                    try:
+                        logger.warning("REPORT_SOURCE_INVALID: %s (%s)", p, e)
+                    except Exception:
+                        pass
+                    continue
 
-        def _esc(s): return re.sub(r"[\r\n]+", " ", str(s or "")).strip()
+        # S3: 후보 JSON이 전혀 없는 경우 → 빈 리포트지만 정상 처리 (ok=True)
+        if not source_found:
+            try:
+                logger.warning(
+                    "REPORT_NO_SOURCE_JSON: %s",
+                    ", ".join(str(p) for p in candidates),
+                )
+            except Exception:
+                pass
+        # E1: JSON은 있었지만 모두 파싱 실패 → 즉시 에러 응답(ok=False)
+        elif source_error and not items:
+            return _err(
+                "report",
+                "REPORT_SOURCE_INVALID",
+                error_code="REPORT_SOURCE_INVALID",
+                duration_ms=_now_ms() - t0,
+            )
+
+        def _esc(s: Any) -> str:
+            return re.sub(r"[\r\n]+", " ", str(s or "")).strip()
+
         lines = [f"# {date} · {keyword.upper()} · Daily Report", ""]
         if items:
             for i, it in enumerate(items, 1):
@@ -1231,20 +1320,31 @@ def post_report(payload: dict | None = Body(default=None), authorized: bool = De
                 sk = _esc(it.get("summary_ko") or it.get("summary_kr") or "")
                 note = _esc(it.get("editor_note") or "")
                 lines.append(f"## {i}. {t}")
-                if u:   lines.append(f"- 원문: {u}")
-                if se:  lines.append(f"- 요약(EN): {se}")
-                if sk:  lines.append(f"- 요약(KO): {sk}")
-                if note:lines.append(f"- 코멘트: {note}")
+                if u:
+                    lines.append(f"- 원문: {u}")
+                if se:
+                    lines.append(f"- 요약(EN): {se}")
+                if sk:
+                    lines.append(f"- 요약(KO): {sk}")
+                if note:
+                    lines.append(f"- 코멘트: {note}")
                 lines.append("")
         else:
+            # S2/S3: 기사 0건 또는 소스 JSON 없음 → 빈 리포트 문구만 출력
             lines += ["(수집된 기사 없음)", ""]
 
         out = reports_dir / f"{date}_{keyword}_report.md"
         out.write_text("\n".join(lines), encoding="utf-8")
         rel = f"archive/reports/{out.name}"
-        return _ok("report", path=rel, count=len(items), duration_ms=_now_ms()-t0)
+        return _ok("report", path=rel, count=len(items), duration_ms=_now_ms() - t0)
     except Exception as e:
-        return _err("report", str(e), duration_ms=_now_ms()-t0)
+        # E2: 파일 쓰기 등 내부 오류 → ok=False + error_code
+        return _err(
+            "report",
+            str(e),
+            error_code="REPORT_WRITE_FAILED",
+            duration_ms=_now_ms() - t0,
+        )
 
 
 @app.post("/api/enrich/keyword")
@@ -1817,7 +1917,7 @@ def api_flow_keyword(req: FlowKwReq, authorized: bool = Depends(authorize)):
 # ---------------------------------------------------------------------------
 @app.get("/api/logs")
 def list_logs(authorized: bool = Depends(authorize), user: dict = Depends(verify_jwt_token)):
-    logs_dir = ROOT / "logs"
+    logs_dir = (LOGS_DIR or (ROOT / 'logs'))
     items = []
     if logs_dir.exists() and logs_dir.is_dir():
         for p in logs_dir.iterdir():
@@ -1832,7 +1932,7 @@ def list_logs(authorized: bool = Depends(authorize), user: dict = Depends(verify
 
 @app.get("/api/logs/{log_name}")
 def get_log(log_name: str, lines: int = 200, authorized: bool = Depends(authorize), user: dict = Depends(verify_jwt_token)):
-    path = ROOT / "logs" / log_name
+    path = ((LOGS_DIR or (ROOT / 'logs')) / log_name)
     if not path.exists() or not path.is_file():
         raise HTTPException(404, "log not found")
     try:
@@ -1845,7 +1945,7 @@ def get_log(log_name: str, lines: int = 200, authorized: bool = Depends(authoriz
 
 @app.get("/api/logs/{log_name}/download")
 def download_log(log_name: str, authorized: bool = Depends(authorize), user: dict = Depends(verify_jwt_token)):
-    path = ROOT / "logs" / log_name
+    path = ((LOGS_DIR or (ROOT / 'logs')) / log_name)
     if not path.exists() or not path.is_file():
         raise HTTPException(404, "log not found")
     return FileResponse(str(path), filename=log_name, media_type="text/plain")
