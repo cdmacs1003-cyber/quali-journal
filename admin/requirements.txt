@@ -1,4 +1,4 @@
-﻿# --- Web / API ---
+# --- Web / API ---
 fastapi==0.115.4
 uvicorn[standard]==0.32.0
 
@@ -16,15 +16,3 @@ SQLAlchemy>=2.0
 
 # --- Postgres 드라이버(운영에서 Cloud SQL/Postgres 사용 시 필수) ---
 psycopg2-binary>=2.9
-# QualiNews ??optional dependencies
-
-# HTML/XML parsing & RSS
-html5lib>=1.1
-feedparser>=6.0
-
-# Export/convert helpers (?좏깮)
-# Linux/macOS?먯꽌 HTML?뭁DF 蹂??weasyprint>=61.0 ; platform_system != 'Windows'
-# Windows??wkhtmltopdf(蹂꾨룄 ?ㅼ튂) 沅뚯옣
-
-# Search / Index (?κ린 濡쒕뱶留?
-elasticsearch>=8.15

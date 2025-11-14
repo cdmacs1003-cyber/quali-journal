@@ -37,3 +37,7 @@ node_modules/
 !admin/server_quali.py
 !app/**
 !static/**
+
+!admin/**
+!**/*.html
+!**/*.py
