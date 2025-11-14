@@ -39,4 +39,4 @@ WORKDIR /app
 
 # (4) Uvicorn으로 FastAPI 기동
 # server_quali.py에 FastAPI app 존재 (/health 구현)
-CMD ["bash","-lc","gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT admin.server_quali:app"]
+CMD ["bash","-lc","exec uvicorn admin.server_quali:app --host 0.0.0.0 --port $PORT"]
