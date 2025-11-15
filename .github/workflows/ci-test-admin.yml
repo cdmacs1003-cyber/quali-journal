@@ -52,8 +52,16 @@ jobs:
       - name: Run admin smoke tests (/api/report, /api/archive)
         working-directory: admin
         run: |
-          # pytest가 없으면 여기서 설치
-          python -m pip install pytest
-          # /api/report, /api/archive 스모크 테스트 실행
-          python -m pytest tests/test_report_archive_smoke.py -q
+          python - << 'PY'
+          from tests.test_report_archive_smoke import (
+              test_report_smoke,
+              test_archive_smoke_from_report,
+          )
+
+          # pytest 없이도 동일한 스모크 테스트를 수행한다.
+          # AssertionError 발생 시 프로세스가 1로 종료되어 워크플로가 실패 처리됨.
+          test_report_smoke()
+          test_archive_smoke_from_report()
+          PY
+
 
