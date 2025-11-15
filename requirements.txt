@@ -1,21 +1,18 @@
-﻿# --- Web core ---
-fastapi==0.115.0
-starlette==0.38.5            # fastapi 0.115.x 호환
-uvicorn[standard]==0.30.1
-pydantic==2.9.2              # fastapi 0.115.x는 pydantic v2 필요
+﻿# --- Web / API ---
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+
+# --- HTML/Parsing/Utils ---
+aiofiles>=23.2
+beautifulsoup4
+feedparser
+jinja2>=3.1
+lxml
 python-dotenv==1.0.1
-python-multipart==0.0.9
+requests
 
-# --- IO / Utils ---
-aiofiles==23.2.1
-requests==2.31.0
+# --- DB / ORM (필수) ---
+SQLAlchemy>=2.0
 
-# --- Parsing / Crawling (필요 시 사용) ---
-beautifulsoup4==4.12.3
-feedparser==6.0.11
-lxml==5.3.0
-praw==7.7.1
-
-# --- DB (선택) ---
-sqlalchemy==2.0.34
-cloud-sql-python-connector==1.5.0
+# --- Postgres 드라이버(운영에서 Cloud SQL/Postgres 사용 시 필수) ---
+psycopg2-binary>=2.9

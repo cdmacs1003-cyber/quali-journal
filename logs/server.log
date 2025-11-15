@@ -1,0 +1,258 @@
+2025-10-07 17:41:40,219 [INFO] fallback logger initialized
+2025-10-07 17:42:26,155 [INFO] fallback logger initialized
+2025-10-07 17:43:05,317 [INFO] fallback logger initialized
+2025-10-07 17:48:37,205 [INFO] fallback logger initialized
+2025-10-07 18:07:12,051 [INFO] fallback logger initialized
+2025-10-07 18:08:40,124 [INFO] fallback logger initialized
+2025-10-07 18:37:20,477 [INFO] fallback logger initialized
+2025-10-07 18:51:39,831 [INFO] fallback logger initialized
+2025-10-08 14:15:36,301 [INFO] fallback logger initialized
+2025-10-09 16:00:01,026 [INFO] fallback logger initialized
+2025-10-09 16:07:45,964 [INFO] fallback logger initialized
+2025-10-09 16:28:51,965 [INFO] fallback logger initialized
+2025-10-09 16:29:31,776 [INFO] fallback logger initialized
+2025-10-09 16:31:32,542 [INFO] fallback logger initialized
+2025-10-10 04:57:44,241 [INFO] fallback logger initialized
+2025-10-10 18:11:47,216 [INFO] fallback logger initialized
+2025-10-10 18:16:27,689 [INFO] fallback logger initialized
+2025-10-11 01:57:25,956 [INFO] fallback logger initialized
+2025-10-11 02:33:00,437 [INFO] fallback logger initialized
+2025-10-11 14:15:53,339 [INFO] fallback logger initialized
+2025-10-12 10:39:07,926 [INFO] fallback logger initialized
+2025-10-12 10:48:42,842 [INFO] fallback logger initialized
+2025-10-12 10:48:48,710 [INFO] fallback logger initialized
+2025-10-12 10:49:05,819 [INFO] fallback logger initialized
+2025-10-12 10:58:22,905 [INFO] fallback logger initialized
+2025-10-12 10:58:38,659 [INFO] fallback logger initialized
+2025-10-12 11:06:39,531 [INFO] fallback logger initialized
+2025-10-12 11:07:02,201 [INFO] fallback logger initialized
+2025-10-12 11:47:41,371 [INFO] fallback logger initialized
+2025-10-12 11:48:56,063 [INFO] fallback logger initialized
+2025-10-12 11:55:23,616 [INFO] fallback logger initialized
+2025-10-12 12:17:12,265 [INFO] fallback logger initialized
+2025-10-12 12:17:37,826 [INFO] fallback logger initialized
+2025-10-12 12:20:57,007 [INFO] fallback logger initialized
+2025-10-12 12:24:24,524 [INFO] fallback logger initialized
+2025-10-12 12:35:23,370 [INFO] fallback logger initialized
+2025-10-12 12:37:24,833 [INFO] fallback logger initialized
+2025-10-12 12:45:27,047 [INFO] fallback logger initialized
+2025-10-12 12:48:39,811 [INFO] fallback logger initialized
+2025-10-12 12:49:47,810 [INFO] fallback logger initialized
+2025-10-12 12:55:32,466 [INFO] fallback logger initialized
+2025-10-12 13:24:20,397 [INFO] fallback logger initialized
+2025-10-12 13:24:44,916 [INFO] fallback logger initialized
+2025-10-12 14:45:58,230 [INFO] fallback logger initialized
+2025-10-12 14:53:16,455 [INFO] fallback logger initialized
+2025-10-12 22:11:12,890 [INFO] fallback logger initialized
+2025-10-12 23:41:37,434 [INFO] fallback logger initialized
+2025-10-12 23:56:21,743 [INFO] fallback logger initialized
+2025-10-13 01:03:26,916 [INFO] fallback logger initialized
+2025-10-13 01:14:02,162 [INFO] fallback logger initialized
+2025-10-13 01:15:32,471 [INFO] fallback logger initialized
+2025-10-13 01:16:58,387 [INFO] fallback logger initialized
+2025-10-13 01:17:32,704 [INFO] fallback logger initialized
+2025-10-13 01:36:52,112 [INFO] fallback logger initialized
+2025-10-13 01:36:53,664 [INFO] fallback logger initialized
+2025-10-13 01:38:37,697 [INFO] fallback logger initialized
+2025-10-13 02:47:17,773 [INFO] fallback logger initialized
+2025-10-13 02:47:57,313 [INFO] fallback logger initialized
+2025-10-13 02:54:03,847 [INFO] fallback logger initialized
+2025-10-13 02:54:57,953 [INFO] fallback logger initialized
+2025-10-13 02:55:52,732 [INFO] fallback logger initialized
+2025-10-13 02:56:27,889 [INFO] fallback logger initialized
+2025-10-13 02:56:45,114 [INFO] fallback logger initialized
+2025-10-13 03:01:04,507 [INFO] fallback logger initialized
+2025-10-13 07:33:55,209 [INFO] fallback logger initialized
+2025-10-13 14:31:39,145 [INFO] fallback logger initialized
+2025-10-13 15:20:45,281 [INFO] fallback logger initialized
+2025-10-13 15:21:49,388 [INFO] fallback logger initialized
+2025-10-13 15:22:46,508 [INFO] fallback logger initialized
+2025-10-13 15:23:01,899 [INFO] fallback logger initialized
+2025-10-13 15:24:00,139 [INFO] fallback logger initialized
+2025-10-13 15:24:27,792 [INFO] fallback logger initialized
+2025-10-13 16:10:35,958 [INFO] fallback logger initialized
+2025-10-13 17:13:37,460 [INFO] fallback logger initialized
+2025-10-13 18:57:09,254 [INFO] fallback logger initialized
+2025-10-13 19:23:42,554 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 19:23:42,554 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 19:23:42,703 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 19:23:42,703 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 19:23:42,852 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 19:23:42,853 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 22:52:34,911 [INFO] fallback logger initialized
+2025-10-13 23:04:40,092 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:04:40,093 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:04:40,248 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:04:40,248 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:04:40,408 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:04:40,408 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:04:40,577 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:04:40,577 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:04:46,593 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:04:46,593 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:04:46,752 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:04:46,752 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:04:46,903 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:04:46,903 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:04:47,060 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:04:47,060 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:00,170 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:05:00,171 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:00,319 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:05:00,320 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:00,475 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:05:00,475 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:00,637 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:05:00,637 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:11,069 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:05:11,069 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:11,220 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:05:11,220 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:11,372 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:05:11,372 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:11,527 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:05:11,527 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:18,585 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:05:18,585 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:18,738 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:05:18,738 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:18,887 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:05:18,887 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:19,050 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:05:19,051 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:22,358 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:05:22,358 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:22,515 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:05:22,515 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:22,682 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:05:22,682 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:05:22,850 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:05:22,850 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:29,634 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:06:29,634 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:29,785 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:06:29,785 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:29,941 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:06:29,941 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:30,115 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:06:30,115 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:43,303 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:06:43,303 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:43,455 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:06:43,455 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:43,607 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:06:43,607 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:43,788 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:06:43,788 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:45,030 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:06:45,031 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:45,182 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:06:45,182 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:45,332 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:06:45,333 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:06:45,497 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:06:45,497 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:34:06,249 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:34:06,249 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:34:06,404 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-13 23:34:06,404 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:34:06,550 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-13 23:34:06,550 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-13 23:34:06,737 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-13 23:34:06,737 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 24, in <module>     import requests ModuleNotFoundError: No module named 'requests'
+2025-10-14 00:39:02,706 [INFO] fallback logger initialized
+2025-10-14 00:39:49,837 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-14 00:39:49,837 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 25, in <module>     from bs4 import BeautifulSoup ModuleNotFoundError: No module named 'bs4'
+2025-10-14 00:39:50,195 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=1
+2025-10-14 00:39:50,195 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 25, in <module>     from bs4 import BeautifulSoup ModuleNotFoundError: No module named 'bs4'
+2025-10-14 00:39:50,553 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=1
+2025-10-14 00:39:50,553 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 25, in <module>     from bs4 import BeautifulSoup ModuleNotFoundError: No module named 'bs4'
+2025-10-14 00:39:50,922 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=1
+2025-10-14 00:39:50,922 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 25, in <module>     from bs4 import BeautifulSoup ModuleNotFoundError: No module named 'bs4'
+2025-10-14 00:48:29,034 [INFO] fallback logger initialized
+2025-10-14 00:48:35,385 [INFO] fallback logger initialized
+2025-10-14 00:48:43,354 [INFO] fallback logger initialized
+2025-10-14 00:58:28,997 [INFO] fallback logger initialized
+2025-10-14 01:02:02,815 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=3221225786
+2025-10-14 01:02:02,815 [WARNING] orch stderr: Traceback (most recent call last):   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 1538, in <module>     main()     ~~~~^^   File "C:\Users\user\Desktop\퀄리저널\orchestrator.py", line 1506, in 
+2025-10-14 01:02:03,469 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=0
+2025-10-14 01:02:04,111 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=0
+2025-10-14 01:02:05,403 [INFO] fallback logger initialized
+2025-10-14 01:04:33,699 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=0
+2025-10-14 01:09:53,965 [INFO] fallback logger initialized
+2025-10-14 03:01:57,916 [INFO] fallback logger initialized
+2025-10-14 03:08:39,714 [INFO] fallback logger initialized
+2025-10-14 03:13:23,285 [INFO] fallback logger initialized
+2025-10-14 09:45:48,999 [INFO] fallback logger initialized
+2025-10-14 10:25:48,113 [INFO] fallback logger initialized
+2025-10-14 17:24:47,463 [INFO] fallback logger initialized
+2025-10-14 20:51:13,500 [INFO] fallback logger initialized
+2025-10-15 00:31:37,115 [INFO] fallback logger initialized
+2025-10-15 00:43:43,126 [INFO] fallback logger initialized
+2025-10-15 14:30:57,727 [INFO] fallback logger initialized
+2025-10-15 16:08:48,919 [INFO] fallback logger initialized
+2025-10-15 16:16:03,352 [INFO] fallback logger initialized
+2025-10-15 16:23:28,565 [INFO] fallback logger initialized
+2025-10-15 16:54:25,793 [INFO] fallback logger initialized
+2025-10-15 17:21:18,659 [INFO] fallback logger initialized
+2025-10-15 17:42:40,755 [INFO] fallback logger initialized
+2025-10-15 20:41:45,638 [INFO] fallback logger initialized
+2025-10-15 20:47:55,709 [INFO] fallback logger initialized
+2025-10-15 21:00:19,551 [INFO] fallback logger initialized
+2025-10-15 21:11:30,740 [INFO] fallback logger initialized
+2025-10-15 22:02:37,605 [INFO] fallback logger initialized
+2025-10-15 23:04:01,804 [INFO] fallback logger initialized
+2025-10-15 23:31:51,496 [INFO] fallback logger initialized
+2025-10-15 23:43:09,720 [INFO] fallback logger initialized
+2025-10-16 01:27:08,599 [INFO] fallback logger initialized
+2025-10-16 17:58:19,911 [INFO] fallback logger initialized
+2025-10-17 19:26:58,887 [INFO] fallback logger initialized
+2025-10-17 19:28:02,372 [INFO] fallback logger initialized
+2025-10-20 19:45:26,752 [INFO] fallback logger initialized
+2025-10-20 19:45:57,275 [INFO] fallback logger initialized
+2025-10-20 19:46:11,003 [INFO] fallback logger initialized
+2025-10-21 00:39:44,876 [INFO] fallback logger initialized
+2025-10-22 06:41:16,061 [INFO] fallback logger initialized
+2025-10-24 03:22:20,369 [INFO] fallback logger initialized
+2025-10-24 03:28:22,322 [INFO] fallback logger initialized
+2025-10-24 03:56:48,587 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-keyword IPC-A-610 --use-external-rss rc=0
+2025-10-24 03:56:49,539 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --approve-keyword-top 20 --approve-keyword IPC-A-610 rc=0
+2025-10-24 03:56:50,694 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-keyword IPC-A-610 rc=0
+2025-10-24 04:01:21,800 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-keyword IPC-A-610 --use-external-rss rc=0
+2025-10-24 04:01:23,332 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --approve-keyword-top 20 --approve-keyword IPC-A-610 rc=0
+2025-10-24 04:01:25,027 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-keyword IPC-A-610 rc=0
+2025-10-24 04:17:47,936 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-keyword IPC-A-610 --use-external-rss rc=0
+2025-10-24 04:17:47,936 [WARNING] orch stderr: 2025-10-24 04:17:47,180 INFO: orchestrator start args: --collect-keyword IPC-A-610 --use-external-rss
+2025-10-24 04:17:49,007 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --approve-keyword-top 20 --approve-keyword IPC-A-610 rc=0
+2025-10-24 04:17:49,008 [WARNING] orch stderr: 2025-10-24 04:17:48,965 INFO: orchestrator start args: --approve-keyword-top 20 --approve-keyword IPC-A-610
+2025-10-24 04:17:50,141 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-keyword IPC-A-610 rc=0
+2025-10-24 04:17:50,142 [WARNING] orch stderr: 2025-10-24 04:17:50,097 INFO: orchestrator start args: --publish-keyword IPC-A-610 2025-10-24 04:17:50,098 WARNING: approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-24 04:30:06,210 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-keyword IPC-A-610 --use-external-rss rc=0
+2025-10-24 04:30:06,210 [WARNING] orch stderr: 2025-10-24 04:30:04,909 INFO: orchestrator start args: --collect-keyword IPC-A-610 --use-external-rss
+2025-10-24 04:30:07,228 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --approve-keyword-top 20 --approve-keyword IPC-A-610 rc=0
+2025-10-24 04:30:07,228 [WARNING] orch stderr: 2025-10-24 04:30:07,182 INFO: orchestrator start args: --approve-keyword-top 20 --approve-keyword IPC-A-610
+2025-10-24 04:30:08,349 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-keyword IPC-A-610 rc=0
+2025-10-24 04:30:08,349 [WARNING] orch stderr: 2025-10-24 04:30:08,303 INFO: orchestrator start args: --publish-keyword IPC-A-610 2025-10-24 04:30:08,305 WARNING: approved 10 (<15). 발행은 계속 진행합니다.
+2025-10-24 04:32:08,129 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=0
+2025-10-24 04:32:08,129 [WARNING] orch stderr: 2025-10-24 04:30:33,796 INFO: orchestrator start args: --collect-community
+2025-10-24 04:32:09,203 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish-community --format all rc=0
+2025-10-24 04:32:09,203 [WARNING] orch stderr: 2025-10-24 04:32:09,146 INFO: orchestrator start args: --publish-community --format all
+2025-10-24 04:32:10,291 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --publish --format all rc=0
+2025-10-24 04:32:10,291 [WARNING] orch stderr: 2025-10-24 04:32:10,229 INFO: orchestrator start args: --publish --format all
+2025-10-24 04:32:14,305 [INFO] run orch: C:\Users\user\Desktop\퀄리저널\orchestrator.py --collect-community rc=0
+2025-10-24 04:32:14,306 [WARNING] orch stderr: 2025-10-24 04:32:11,342 INFO: orchestrator start args: --collect-community
+2025-10-24 05:34:07,220 [INFO] fallback logger initialized
+2025-10-24 05:34:26,849 [INFO] fallback logger initialized
+2025-10-24 20:15:13,487 [INFO] fallback logger initialized
+2025-10-24 20:15:44,126 [INFO] fallback logger initialized
+2025-10-24 20:34:14,483 [INFO] fallback logger initialized
+2025-10-24 23:20:36,797 [INFO] fallback logger initialized
+2025-10-25 02:47:51,279 [INFO] fallback logger initialized
+2025-10-26 12:56:04,823 [INFO] fallback logger initialized
+2025-10-28 06:04:05,550 [INFO] fallback logger initialized
+2025-10-28 06:09:05,239 [INFO] fallback logger initialized
+2025-10-28 06:09:38,434 [INFO] fallback logger initialized
+2025-10-28 06:09:59,140 [INFO] fallback logger initialized
+2025-10-28 06:10:06,819 [INFO] fallback logger initialized
+2025-10-28 11:32:44,947 [INFO] fallback logger initialized
+2025-10-29 02:23:56,694 [INFO] fallback logger initialized

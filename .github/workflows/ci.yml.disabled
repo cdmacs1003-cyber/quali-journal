@@ -1,0 +1,63 @@
+﻿on:
+  workflow_dispatch: {}
+
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-northeast3    # ?? ?쒖슱
+  SERVICE: quali-admin       # Cloud Run ?쒕퉬?ㅻ챸
+  APP_ENV: prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps (optional)
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}  # JSON key
+          export_default_credentials: true
+
+      - name: Enable APIs (idempotent)
+        run: |
+          gcloud services enable run.googleapis.com cloudbuild.googleapis.com
+
+      # 諛고룷 (?뚯뒪 鍮뚮뱶). Dockerfile???ъ슜?대룄 ?섍퀬, --source . 濡쒕룄 媛??
+      - name: Deploy to Cloud Run (latest=100)
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --region "$REGION" \
+            --source . \
+            --allow-unauthenticated \
+            --set-env-vars "QUALI_DB_MODE=local" \
+            --set-env-vars "GATE_REQUIRED=15" \
+            --set-env-vars "PYTHONUNBUFFERED=1" \
+            --traffic latest=100
+
+      # ?덉쟾留? ?뱀떆 ???④퀎?먯꽌 ?몃옒?쎌씠 ???щ씪媛붿쓣 ??蹂닿컯
+      - name: Force traffic to latest
+        run: |
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest
+
+      - name: Show runtime info
+        run: |
+          echo "Deployed $SERVICE in $REGION"
+

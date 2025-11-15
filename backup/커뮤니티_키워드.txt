@@ -1,0 +1,24 @@
+﻿IPC
+ECSS
+NASA-STD
+NASA
+ESA
+MIL-STD
+STANDARD
+SPEC
+QUALIFICATION
+soldering
+solder
+leadfree
+pbfree
+esd
+iron
+pcb
+smd
+rework
+reballing
+jbc
+profile
+Whisker
+rohs
+Dry cabinet

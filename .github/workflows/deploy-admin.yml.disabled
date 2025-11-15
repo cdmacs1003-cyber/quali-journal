@@ -1,0 +1,129 @@
+﻿on:
+  workflow_dispatch: {}
+
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+癤퓆ame: Deploy Admin API (WIF harden)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-admin-api
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID: quali-journal-prod
+  REGION: asia-northeast3
+  SERVICE: quali-journal-admin
+  REPO_NAME: ${{ github.repository }}
+  GIT_REF:   ${{ github.ref }}
+  GIT_SHA:   ${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth via WIF (OIDC)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          token_format: 'id_token'
+          id_token_audience: 'https://sts.googleapis.com'
+          id_token_include_email: true
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Verify OIDC claims (repo/ref)
+        env:
+          AUDIENCE: https://sts.googleapis.com
+          REPO_NAME: ${{ env.REPO_NAME }}
+          GIT_REF:   ${{ env.GIT_REF }}
+        run: |
+          set -euo pipefail
+          GH_OIDC_JWT=$(curl -s -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" | jq -r .value)
+          echo "$GH_OIDC_JWT" | cut -d'.' -f2 | tr '_-' '/+' | base64 -d > gh-oidc.json || true
+          echo "OIDC claims:"; cat gh-oidc.json || true
+          test "$(jq -r .repository gh-oidc.json)" = "${REPO_NAME}"
+          test "$(jq -r .ref         gh-oidc.json)" = "${GIT_REF}"
+
+      # Pre-gate: ensure required files in admin/ context (prevent build without required files)
+      - name: 'Pre-gate: files to be uploaded (admin/)'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # admin 而⑦뀓?ㅽ듃?먯꽌 ?꾩닔 ?뚯씪???덈뒗吏 ?뺤씤
+          pushd admin >/dev/null
+          LIST="$(gcloud meta list-files-for-upload || true)"
+          for f in server_quali.py requirements.txt index.html; do
+            echo "$LIST" | grep -qx "$f" || { echo "Error: Missing in upload (admin/$f)" && exit 1; }
+          done
+          echo "---- upload list (first 100 lines) ----"
+          echo "$LIST" | head -n 100
+          popd >/dev/null
+
+      - name: Snapshot previous revision
+        id: prev
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          PREV=$(gcloud run services describe "$SERVICE" --region "$REGION" \
+                 --format='value(status.latestCreatedRevisionName)')
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+
+      - name: Build image (Cloud Build)
+        run: |
+          TAG="$(date +%Y%m%d_%H%M%S)-${GIT_SHA::7}"
+          IMG="asia-northeast1-docker.pkg.dev/${PROJECT_ID}/qualijournal/qj-admin:${TAG}"
+          echo "IMG=$IMG" >> "$GITHUB_ENV"
+          gcloud builds submit --tag "$IMG" .
+
+      - name: Deploy (no-traffic)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          gcloud run deploy "$SERVICE" --image "$IMG" --region "$REGION" \
+            --no-traffic --labels=commit-sha="${GIT_SHA}",env=prod --quiet
+          gcloud run services describe "$SERVICE" --region "$REGION" \
+            --format='value(status.latestCreatedRevisionName)'
+
+      - name: "Smoke /health (run.app)"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
+          curl -fsS "$URL/health" >/dev/null
+
+      - name: Shift traffic to latest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest --quiet
+          gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.traffic)'
+
+      - name: Assert revision updated
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          NEW=$(gcloud run services describe "$SERVICE" --region "$REGION" \
+                --format='value(status.latestCreatedRevisionName)')
+          echo "prev=${{ steps.prev.outputs.prev }} | new=${NEW}"
+          if [ "$NEW" = "${{ steps.prev.outputs.prev }}" ]; then
+            echo "::error ::Revision not updated. WIF/OIDC cache or policy mismatch suspected."
+            exit 1
+          fi
+
