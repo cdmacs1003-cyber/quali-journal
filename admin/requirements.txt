@@ -1,0 +1,18 @@
+# --- Web / API ---
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+
+# --- HTML/Parsing/Utils ---
+aiofiles>=23.2
+beautifulsoup4
+feedparser
+jinja2>=3.1
+lxml
+python-dotenv==1.0.1
+requests
+
+# --- DB / ORM (필수) ---
+SQLAlchemy>=2.0
+
+# --- Postgres 드라이버(운영에서 Cloud SQL/Postgres 사용 시 필수) ---
+psycopg2-binary>=2.9

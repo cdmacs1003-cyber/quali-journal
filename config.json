@@ -85,7 +85,7 @@
     "min_core_tokens": 1,
     "min_context_tokens": 1
   },
-  "paths": {
+    "paths": {
     "archive": "archive",
     "reports": "archive/reports",
     "selection_file": "selected_articles.json",
@@ -97,5 +97,10 @@
     "keywords_txt": "keywords.txt",
     "smt_sources_file": "smt_sources.json",
     "supply_sources_file": "supply_sources.json"
-  }
+  },
+  "gate_required": 70,
+  "url_timeout_ms": 3000,
+  "url_redirect_hops": 3,
+  "data_dir": "data"
 }
+

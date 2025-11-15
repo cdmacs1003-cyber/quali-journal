@@ -1,37 +1,42 @@
-# ===========================
-# QualiJournal Admin Dockerfile
-# ===========================
+﻿# Python 런타임(슬림)
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONIOENCODING=utf-8 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_ROOT_USER_ACTION=ignore
+# 기본 패키지
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# (선택) 빌드 툴킷 설치 후 제거 — 일부 패키지가 wheel이 없을 때 대비
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
-    rm -rf /var/lib/apt/lists/*
-
+# 작업 루트
 WORKDIR /app
 
-# 종속성 레이어 캐시 최적화
+# (1) 루트 requirements.txt 사용
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --upgrade pip && \
-    pip install -r /app/requirements.txt && \
-    pip install "fastapi" "uvicorn[standard]" "gunicorn" "python-dotenv"
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# 애플리케이션 복사
-COPY . /app
+# (2) 앱 리소스 복사: admin/ 및 필요한 루트 파일들
+COPY admin/ /app/admin/
+COPY config.json /app/config.json
+COPY archive/ /app/archive/
+COPY feeds/ /app/feeds/
+COPY data/ /app/data/
 
-# (옵션) 빌드툴 제거로 경량화
-RUN apt-get purge -y build-essential || true && apt-get autoremove -y || true
+# 선택 JSON들(있으면 복사)
+# NOTE:
+# - selected_articles.json / selected_keyword_articles.json 은
+#   배포 이미지 빌드 시점에 항상 존재하지 않는다.
+# - 실제로는 런타임에 /archive 또는 /tmp/archive 아래에서 생성·사용하는 데이터이므로
+#   빌드 단계에서 필수 COPY 대상으로 두면 Cloud Build가 실패한다.
+# - 필요하다면 런타임에서 외부 스토리지(GCS 등)나 볼륨에 있는 파일을 읽도록 처리한다.
+#COPY selected_articles.json /app/selected_articles.json
+#COPY selected_keyword_articles.json /app/selected_keyword_articles.json
 
-# 권장: 비루트 사용자
-RUN useradd -m appuser && chown -R appuser:appuser /app
-USER appuser
 
+# Cloud Run 기본 포트
+ENV PORT=8080
 EXPOSE 8080
 
-# Cloud Run 표준: $PORT 사용 + ASGI 엔트리 = server_quali:app
-CMD ["bash","-lc","exec gunicorn -k uvicorn.workers.UvicornWorker -b :$PORT server_quali:app"]
+# (3) 앱 디렉터리로 이동
+WORKDIR /app
+
+# (4) Uvicorn으로 FastAPI 기동
+# server_quali.py에 FastAPI app 존재 (/health 구현)
+CMD ["bash","-lc","exec uvicorn admin.server_quali:app --host 0.0.0.0 --port $PORT"]

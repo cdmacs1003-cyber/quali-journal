@@ -1,0 +1,9 @@
+# k8s/service.yaml
+apiVersion: v1
+kind: Service
+metadata: { name: quali-journal }
+spec:
+  type: ClusterIP
+  selector: { app: quali-journal }
+  ports:
+    - { port: 80, targetPort: 8080 }

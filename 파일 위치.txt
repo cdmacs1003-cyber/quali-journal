@@ -1,0 +1,49 @@
+좋아, “초딩 버전”으로 어디에 저장할지 딱 찍어 줄게. (폴더 기준: 프로젝트 루트 = C:\Users\user\Desktop\퀄리저널)
+
+루트(최상위)에 두는 파일
+
+C:\Users\user\Desktop\퀄리저널\Dockerfile
+
+C:\Users\user\Desktop\퀄리저널\.gcloudignore
+
+C:\Users\user\Desktop\퀄리저널\.dockerignore
+
+C:\Users\user\Desktop\퀄리저널\.gitignore (있으면)
+
+C:\Users\user\Desktop\퀄리저널\config.json
+
+C:\Users\user\Desktop\퀄리저널\requirements.txt
+
+C:\Users\user\Desktop\퀄리저널\orchestrator.py ← 오케스트레이터는 루트여야 서버가 자동 인식해 실행해요.
+
+관리자 UI(프런트)는 admin 폴더
+
+C:\Users\user\Desktop\퀄리저널\admin\index.html (지금 쓰는 관리자 화면)
+
+C:\Users\user\Desktop\퀄리저널\admin\server_quali.py (FastAPI 엔트리) — 이 파일은 admin 폴더 안이 맞아요.
+
+(있다면) admin\style.css, admin\admin.js 등도 같은 폴더.
+
+백엔드/도구 폴더
+
+C:\Users\user\Desktop\퀄리저널\tools\ …(각종 스크립트) ← 이미지에 포함되도록 ignore에서 빼줘야 함.
+
+C:\Users\user\Desktop\퀄리저널\data\ (작업본 JSON) / C:\Users\user\Desktop\퀄리저널\archive\ (발행본)
+
+CI/CD 위치
+
+C:\Users\user\Desktop\퀄리저널\.github\workflows\ci.yml ← GitHub Actions 파이프라인 파일은 여기.
+
+선택(있으면 편한 배포 스크립트)
+
+C:\Users\user\Desktop\퀄리저널\scripts\deploy_ci.ps1 ← 없어도 되지만 쓰면 편해요.
+
+핵심 기억 포인트(3줄 요약)
+
+오케스트레이터: orchestrator.py는 루트. (서버가 이 경로를 먼저 찾음)
+
+관리자 서버/화면: admin\server_quali.py + admin\index.html은 admin 폴더.
+
+배포 설정 파일들: Dockerfile / .gcloudignore / .dockerignore는 루트, Actions는 .github\workflows\ci.yml.
+
+(이 배치대로 두면 Cloud Run에서 server_quali.py가 루트의 orchestrator.py를 찾아 잘 실행하고, 정적 index.html도 정상 서빙됩니다.)
