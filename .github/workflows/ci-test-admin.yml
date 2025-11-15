@@ -52,4 +52,8 @@ jobs:
       - name: Run admin smoke tests (/api/report, /api/archive)
         working-directory: admin
         run: |
+          # pytest가 없으면 여기서 설치
+          python -m pip install pytest
+          # /api/report, /api/archive 스모크 테스트 실행
           python -m pytest tests/test_report_archive_smoke.py -q
+
