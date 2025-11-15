@@ -41,6 +41,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest
+
+      - name: Install pytest for admin tests
+        working-directory: admin
+        run: |
+          python -m pip install pytest
+
 
       - name: Run admin smoke tests (/api/report, /api/archive)
         working-directory: admin
