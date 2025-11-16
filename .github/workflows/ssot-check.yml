@@ -1,0 +1,28 @@
+name: SSOT Check
+
+on:
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reject SSOT changes without label
+        run: |
+          set -e
+          # 기준 브랜치와 diff에서 SSOT 파일 변경 여부 확인
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}... | grep -E '^docs/SSOT_Admin_DoD\.md$' || true)
+          if [ -n "$CHANGED" ]; then
+            echo "SSOT_Admin_DoD.md가 변경되었습니다."
+            # PR 라벨 목록에 ssot-change 가 없는지 확인
+            if [[ ! "${{ github.event.pull_request.labels.*.name }}" =~ ssot-change ]]; then
+              echo "::error ::SSOT file changed without 'ssot-change' label"
+              exit 1
+            fi
+            echo "라벨 'ssot-change' 가 있으므로 통과합니다."
+          else
+            echo "SSOT 파일 변경 없음"
+          fi
