@@ -9,15 +9,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
 
       - name: Reject SSOT changes without label
         run: |
           set -e
           # 기준 브랜치와 diff에서 SSOT 파일 변경 여부 확인
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}... | grep -E '^docs/SSOT_Admin_DoD\.md$' || true)
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          echo "Base SHA: $BASE_SHA"
+          echo "Head SHA: $HEAD_SHA"
+
+          # base~head 사이에서 SSOT 파일이 바뀌었는지 확인
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '^docs/SSOT_Admin_DoD\.md$' || true)
+
           if [ -n "$CHANGED" ]; then
             echo "SSOT_Admin_DoD.md가 변경되었습니다."
-            # PR 라벨 목록에 ssot-change 가 없는지 확인
+            # PR 라벨에 ssot-change 가 없으면 실패
             if [[ ! "${{ github.event.pull_request.labels.*.name }}" =~ ssot-change ]]; then
               echo "::error ::SSOT file changed without 'ssot-change' label"
               exit 1
@@ -26,3 +37,4 @@ jobs:
           else
             echo "SSOT 파일 변경 없음"
           fi
+
