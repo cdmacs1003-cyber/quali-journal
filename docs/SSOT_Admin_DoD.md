@@ -386,3 +386,4 @@ Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" -Headers @{"
    - 1~3장으로 기능/환경 요구를 다시 확인하고, 5~6장으로 Cloud SQL·DevOps 쪽 설정이 어긋나지 않았는지 점검한다.
 
 이 문서는 “관리자 모드 개발·운영의 기준선”으로 사용되며, 변경이 필요할 경우 **반드시 PR + 리뷰 + DevOps 품질 게이트**를 거쳐 갱신한다.
+<!-- SSOT 변경 테스트 v1 (라벨 없이 CI 반응 확인용) -->
