@@ -17,7 +17,8 @@ env:
   AR_REPO:           containers
   RUNTIME_SA:        quali-run-sa
   IMAGE: asia-northeast1-docker.pkg.dev/quali-journal-prod/containers/quali-admin-domap:${{ github.sha }}
-
+  CLOUD_SQL_INSTANCE: quali-pg
+  
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -39,13 +40,37 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      # 3) Cloud Build로 루트 Dockerfile 빌드
+      # 3) Cloud SQL STOP Policy 가드레일 (STOP이면 배포 차단)
+      - name: Guardrail - Cloud SQL STOP Policy
+        run: |
+          set -e
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+          INSTANCE="${{ env.CLOUD_SQL_INSTANCE }}"
+          echo "Checking Cloud SQL instance: $INSTANCE in project: $PROJECT_ID"
+
+          STATE=$(gcloud sql instances describe "$INSTANCE" \
+                    --project "$PROJECT_ID" \
+                    --format="value(state)")
+          POLICY=$(gcloud sql instances describe "$INSTANCE" \
+                    --project "$PROJECT_ID" \
+                    --format="value(settings.activationPolicy)")
+
+          echo "Cloud SQL state=$STATE, activationPolicy=$POLICY"
+
+          if [ "$STATE" != "RUNNABLE" ]; then
+            echo "Cloud SQL STOP Policy: instance is not RUNNABLE (state=$STATE)."
+            echo "배포 차단: Cloud SQL이 STOP 상태이므로 DB 의존 배포/테스트를 진행하지 않습니다."
+            exit 1
+          fi
+
+          echo "Cloud SQL RUNNABLE - 배포 계속 진행"
+
+      # 4) Cloud Build로 루트 Dockerfile 빌드
       - name: Build image with Cloud Build
         run: |
           gcloud builds submit \
             --tag "${{ env.IMAGE }}" \
             --project "${{ env.PROJECT_ID }}"
-
       # 4) Cloud Run에 이미지 배포
       - name: Deploy to Cloud Run (image)
         id: deploy
