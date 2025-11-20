@@ -188,3 +188,4 @@ jobs:
           echo "/api/standards/reviews -> $code"
           [ "$code" = "200" ] || (echo "Smoke failed: /api/standards/reviews $code" && exit 1)
           echo "Smoke /api/standards/reviews OK"
+          
