@@ -12,11 +12,18 @@ permissions:
 env:
   # ==== SSOT ====
   PROJECT_ID:        quali-journal-prod
-  REGION:            asia-northeast1
+  REGION:            asia-northeast1      # prod(domap) 리전
   SERVICE_NAME:      quali-admin-domap
   AR_REPO:           containers
   RUNTIME_SA:        quali-run-sa
+
+  # 기존 PROD 이미지 태그(백업용, 지금 배포에는 사용하지 않음)
   IMAGE: asia-northeast1-docker.pkg.dev/quali-journal-prod/containers/quali-admin-domap:${{ github.sha }}
+
+  # dev 서비스(이미지 SSOT)
+  DEV_REGION:        asia-northeast3
+  DEV_SERVICE_NAME:  quali-journal-admin-dev
+
   CLOUD_SQL_INSTANCE: quali-pg
 
 jobs:
@@ -68,12 +75,27 @@ jobs:
 
           echo "Cloud SQL RUNNABLE - 배포 계속 진행"
 
-      # 4) Cloud Build로 루트 Dockerfile 빌드
-      - name: Build image with Cloud Build
+      # 4) dev 서비스에서 사용 중인 이미지 재사용 (build once, promote)
+      - name: Get image from dev service (SSOT)
+        id: dev-image
         run: |
-          gcloud builds submit \
-            --tag "${{ env.IMAGE }}" \
-            --project "${{ env.PROJECT_ID }}"
+          set -e
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+          DEV_REGION="${{ env.DEV_REGION }}"
+          DEV_SERVICE="${{ env.DEV_SERVICE_NAME }}"
+
+          IMAGE=$(gcloud run services describe "$DEV_SERVICE" \
+                    --region "$DEV_REGION" \
+                    --project "$PROJECT_ID" \
+                    --format="value(spec.template.spec.containers[0].image)")
+
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: dev service image not found"
+            exit 1
+          fi
+
+          echo "IMAGE=$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
 
       # 5) Cloud Run에 이미지 배포
       - name: Deploy to Cloud Run (image)
@@ -83,7 +105,7 @@ jobs:
           project_id:  ${{ env.PROJECT_ID }}
           region:      ${{ env.REGION }}
           service:     ${{ env.SERVICE_NAME }}
-          image:       ${{ env.IMAGE }}
+          image:       ${{ steps.dev-image.outputs.IMAGE }}
           env_vars: |
             PYTHONUTF8=1
             PYTHONIOENCODING=utf-8
@@ -128,7 +150,26 @@ jobs:
           echo "warmup failed: /health not ready"
           exit 1
 
-      # 8) Smoke test: /api/standards/reviews 200 확인
+      # 8) Smoke test: /api/status, /api/report 200 확인
+      - name: Smoke tests (/api/status, /api/report)
+        run: |
+          set -e
+          URL="${{ steps.url.outputs.URL }}"
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+          TOKEN=$(gcloud secrets versions access latest \
+                    --secret=ADMIN_TOKEN \
+                    --project "$PROJECT_ID" | tr -d '\r\n')
+          for P in /api/status /api/report; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+                    -H "Authorization: Bearer $TOKEN" \
+                    -H "X-Admin-Token: $TOKEN" \
+                    "$URL$P" || true)
+            echo "$P -> $code"
+            [ "$code" = "200" ] || (echo "Smoke failed: $P $code" && exit 1)
+          done
+          echo "Smoke OK"
+
+      # 9) Smoke test: /api/standards/reviews 200 확인
       - name: Smoke tests (/api/standards/reviews)
         run: |
           set -e
@@ -147,4 +188,3 @@ jobs:
           echo "/api/standards/reviews -> $code"
           [ "$code" = "200" ] || (echo "Smoke failed: /api/standards/reviews $code" && exit 1)
           echo "Smoke /api/standards/reviews OK"
-
