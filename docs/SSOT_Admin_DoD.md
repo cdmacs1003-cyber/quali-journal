@@ -1,0 +1,389 @@
+
+# QualiJournal 관리자 모드 SSOT (Admin DoD v1.1)
+
+> **Single Source of Truth (SSOT)**  
+> 이 문서는 QualiJournal 관리자 모드(Admin)의 개발·테스트·배포·운영을 위한 단일 기준(Single Source of Truth)이다.  
+> 관리자 모드 관련 모든 논의·결정·작업은 아래 내용을 기본 전제로 한다.
+
+---
+
+## 0. 문서 개요
+
+### 0.1 목적
+
+- 관리자 모드의 **개발 완료 기준(DoD, Definition of Done)** 을 한 곳에 모아 정리한다.
+- 기능, 비기능, 운영/환경, DevOps, Cloud SQL 정책, PR 체크리스트를 **하나의 기준선**으로 통합한다.
+- “관리자 모드 인크리먼트가 Done인가?”를 판단할 때 이 문서를 가장 먼저 참고한다.
+
+### 0.2 Ground Truth 문서
+
+이 SSOT는 다음 다섯 문서를 종합·요약한 것이다.
+
+1. **「1115 관리자 모드 개발 완료 기준 정의서」**  fileciteturn1file0  
+2. **「DoD(Definition of Done) 충족 상태 점검 요약서」**  fileciteturn1file1  
+3. **「QualiJournal Cloud SQL Stop Policy」**  fileciteturn1file2  
+4. **「QualiJournal_DoD_런북_인수인계_v1.1__2025-11-15.md」**  fileciteturn1file3  
+5. **「QualiJournal_PR_Template_DevOps_Checklist_v1_2025-11-15_1.md」**  fileciteturn1file4  
+
+원문이 변경될 경우, 이 SSOT를 함께 업데이트해야 한다.
+
+---
+
+## 1. 기능 DoD 체크리스트 (요약)
+
+관리자 모드는 다음 기능이 “정의서 기준”으로 동작해야 **기능 DoD를 충족**한 것으로 본다. fileciteturn1file0  
+
+### 1.1 KPI 및 상태 대시보드 (/api/status)
+
+- **설명**: 전체 기사 수, 승인/대기 수, 게이트 기준치, 게이트 통과 여부 등을 한눈에 보여주는 관리용 대시보드.
+- **완료 기준**
+  - 관리자 UI 대시보드와 `/api/status` 응답 값이 서로 일관된다.
+  - 최소 필드: `total`, `ready_count`, `gate_required`, `ready_rate`, `gate_pass` 등.
+- **검증 방법**
+  - 테스트 데이터(예: 기사 100건 중 80건 승인)를 준비한다.
+  - `/api/status` 응답에서 위 필드 값이 기대값과 일치하는지 확인한다.
+  - UI 대시보드 숫자와 API 응답을 교차 검증한다.
+
+### 1.2 비동기 플로우 실행 및 로그 확인 (/api/flow/*, /api/tasks/flow)
+
+- **설명**: 뉴스 수집, 일일 플로우, 키워드 플로우 등 백그라운드 작업을 수동으로 실행하고, 결과 로그를 조회하는 기능. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - 운영자가 일일/키워드 플로우를 버튼 또는 API로 실행할 수 있다.
+  - 플로우 실행 시, 대응되는 로그 파일이 `/api/logs` 목록에 새로 생긴다.
+- **검증 방법**
+  - `/api/flow/daily` 또는 `/api/tasks/flow?type=daily` 를 호출한다.
+  - 작업 완료 후 `/api/logs` 를 호출해 신규 로그가 생성되었는지 확인한다.
+  - 필요 시 `/api/tasks/{job_id}/stream` SSE로 진행 로그를 확인한다.
+
+### 1.3 기사 목록 확인 및 승인/거절/코멘트
+
+- **설명**: 수집된 기사 목록을 확인하고, 승인/거절 처리 및 편집자 코멘트를 저장하는 기능. fileciteturn1file0  
+- **완료 기준**
+  - 대기 중(ready 전) 기사 목록을 UI와 API(`/api/items`, `/api/community`)에서 조회할 수 있다.
+  - 각 기사에 대해 승인/거절이 가능하며, 승인 시 상태가 “준비(ready)”로 변경된다.
+  - 코멘트 입력 시 데이터에 저장된다.
+- **검증 방법**
+  - 테스트용 기사 몇 개를 준비하고 승인/거절 버튼을 눌러본다.
+  - 처리 후 상태 필드와 코멘트 저장 여부를 API 응답 또는 데이터 저장소에서 확인한다.
+
+### 1.4 발행 및 게이트 설정 (/api/items/{id}/publish, /api/config/gate_required)
+
+- **설명**: 승인된 기사를 실제 사용자 서비스에 발행하고, 발행 최소 기준(게이트)을 설정·조정하는 기능. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - `/api/items/{id}/publish` 호출 시 해당 기사가 발행 상태로 변경되고, 사용자 화면에 노출된다.
+  - `/api/config/gate_required` 값 변경 시 `/api/status` 의 `gate_required`가 즉시 갱신된다.
+- **검증 방법**
+  - 특정 기사에 대해 발행 API를 호출한 뒤 사용자 화면 노출 여부를 확인한다.
+  - 게이트 값을 10→15 등으로 변경하고 `/api/status` 응답에서 값이 즉시 반영되는지 본다.
+
+### 1.5 보고서 생성 및 결과물 내보내기 (/api/report, /api/export/*)
+
+- **설명**: 특정 날짜/키워드에 대한 요약 보고서를 생성하고, MD/CSV 파일로 다운로드하는 기능. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - `/api/report` 호출 시 `ok=true`와 함께 보고서 파일 경로가 반환된다.
+  - `/api/export/md`, `/api/export/csv` 로 해당 파일을 실제로 다운로드할 수 있다.
+- **검증 방법**
+  - 1일치 보고서를 생성하고 반환된 `path` 를 사용해 export API를 호출한다.
+  - 다운로드된 MD/CSV 내용이 비어 있지 않은지 확인한다.
+
+### 1.6 로그 및 백업 상태 확인 (/api/logs, /api/backup/status)
+
+- **설명**: 시스템 로그와 백업 상태를 조회하고, 최근 성공/실패 여부를 모니터링한다. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - `/api/logs` 에서 로그 파일 목록이 JSON으로 조회된다.
+  - `/api/logs/{name}`, `/api/logs/{name}/download` 로 개별 로그 열람·다운로드가 가능하다.
+  - `/api/backup/status` 에서 최근 백업 성공/실패 시각과 메시지가 노출된다.
+- **검증 방법**
+  - `/api/logs` 응답에 대표 로그 파일 이름이 포함되는지 확인한다.
+  - 그 중 하나를 열어 최신 내용이 출력되는지 본다.
+  - `/api/backup/status` 응답에 마지막 백업 성과 시간이 올바르게 표시되는지 확인한다.
+
+### 1.7 헬스체크 및 디버그용 API (/health, /api/debug/*)
+
+- **설명**: 서비스 상태를 점검하는 헬스체크와, 운영 편의를 위한 디버그 정보 제공용 API. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - `/health` 는 항상 200 OK 와 단순한 “ok” 메시지를 반환한다.
+  - `/api/debug/*` 계열 엔드포인트는 런타임/설정/메트릭 등의 JSON 정보를 제공한다(운영/개발 환경에서만 사용).
+- **검증 방법**
+  - `/health` 를 여러 번 호출해 200 응답을 확인한다.
+  - ` /api/debug/runtime`, `/api/debug/config` 등을 호출해 내부 정보가 JSON으로 반환되는지 확인한다.
+
+---
+
+## 2. 비기능 DoD 체크리스트 (요약)
+
+### 2.1 응답 JSON 구조 및 HTTP 상태 코드 일관성
+
+- **요구사항** fileciteturn1file0turn1file1  
+  - 성공: HTTP 200 + `{ ok: true, data: {...} }`
+  - 실패: HTTP 4xx/5xx + `{ ok: false, error, error_code, detail? }`
+  - 모든 엔드포인트가 정의된 스키마(필드명·타입)를 공유해야 한다.
+- **검증**
+  - 대표 API 여러 개에 대해 성공/실패 케이스를 만들어 응답 구조와 상태 코드를 비교한다.
+  - Pydantic `BaseModel` 등을 활용해 응답 스키마를 코드로도 강제한다.
+
+### 2.2 인증/권한 안전성
+
+- **요구사항** fileciteturn1file0turn1file3  
+  - 관리자 모드 API는 환경 변수 `ADMIN_TOKEN`(또는 동등한 비밀 값) 기반으로 보호한다.
+  - 민감 API는 **유효한 토큰 헤더**(예: `Authorization: Bearer <token>`, `X-Admin-Token`)가 있어야만 처리한다.
+  - Cloud Run 서비스는 Invoker 권한이 특정 서비스 계정 등으로 제한된 **private 서비스**를 기본으로 한다.
+- **검증**
+  - 토큰 없이 호출 시 401/403 이 반환되는지 확인한다.
+  - 올바른 토큰으로 호출 시 200 응답이 나오는지 확인한다.
+  - Cloud Run 콘솔에서 Invoker 권한이 특정 주체에만 부여되어 있는지 점검한다.
+
+### 2.3 보고서 및 플로우 성능
+
+- **요구사항** fileciteturn1file0turn1file1  
+  - 일반적인 기사량(수십 건 기준)에서 보고서 생성은 수 초 내에 끝나야 한다.
+  - 일일/키워드 플로우 등 일괄 작업도 Cloud Run 타임아웃(기본 15분, 상한 60분) 내에서 완료되어야 한다.
+  - 메모리 사용량은 설정 한도(예: 512MiB)를 넘지 않아야 한다.
+- **검증**
+  - 테스트 데이터 50~200건 정도를 준비해 `/api/report`, `/api/flow/daily` 처리 시간과 메모리를 모니터링한다.
+  - Cloud Run 로그/모니터링 대시보드에서 타임아웃·OOM(No) 여부를 확인한다.
+
+### 2.4 유지보수 가능성
+
+- **요구사항** fileciteturn1file0turn1file1  
+  - 데이터 모델과 요청/응답 스키마가 Pydantic 모델로 일관되게 선언되어 있어야 한다.
+  - 상수·구조는 중복 없이 “한 곳에서만 정의”하는 단일 소스 원칙을 따른다.
+  - 핵심 기능에 대한 자동화 테스트가 존재해 리팩토링 시 회귀를 빠르게 발견할 수 있어야 한다.
+- **검증**
+  - 새로운 필드를 추가해도 모델 한 곳만 수정하면 전체 테스트가 통과하는지 확인한다.
+  - 동일 상수가 여러 파일에 하드코딩돼 있지 않은지 코드 리뷰로 점검한다.
+
+---
+
+## 3. 운영/환경 DoD 체크리스트 (요약)
+
+### 3.1 Cloud Run 환경 제약 준수
+
+- **요구사항** fileciteturn1file0turn1file1  
+  - 모든 요청 처리가 Cloud Run 최대 타임아웃 이내에 끝나야 한다.
+  - 메모리 사용량이 설정 한도를 넘지 않아야 한다.
+  - 부하가 걸려도 인스턴스가 타임아웃/OOM으로 자주 죽지 않도록 설계한다.
+- **검증**
+  - 대용량 시나리오(기사 200건 수준)를 실행해 가장 긴 요청 시간이 타임아웃보다 충분히 짧은지 확인한다.
+  - 모니터링에서 CPU/메모리 그래프를 확인해 여유를 확인한다.
+
+### 3.2 배포 및 IAM 구성
+
+- **요구사항** fileciteturn1file0turn1file3  
+  - GitHub Actions 등 CI/CD 파이프라인이 main 브랜치 변경을 자동으로 Cloud Run에 배포한다.
+  - 배포 후 최신 리비전에 100% 트래픽이 연결되어 있어야 한다.
+  - Cloud Run Invoker 권한은 배포용/운영용 서비스 계정에만 부여한다.
+  - `ADMIN_TOKEN` 등 비밀은 Secret Manager를 통해 환경 변수로 안전하게 주입한다.
+- **검증**
+  - 테스트 브랜치에서 PR/머지 후 새로운 리비전이 생성되고 트래픽이 정상 전환되는지 확인한다.
+  - Cloud Run IAM 탭에서 Invoker 범위를 점검한다.
+  - 환경 변수 화면에서 비밀 값이 정상 주입되었는지 확인한다.
+
+---
+
+## 4. DoD 충족 상태 점검 요약 (런북 v1.1 기반)
+
+다음 내용은 **DoD(Definition of Done) 충족 상태 점검 요약서 + 인수인계 런북 v1.1** 를 바탕으로 한 “실행용 요약”이다. fileciteturn1file1turn1file3  
+
+### 4.1 단계별 실행 계획(Plan – 프롬프트 체이닝 관점)
+
+0단계. **기준 정합화**
+- 입력: 정의서, Q&A, 현재 Cloud Run 리비전/트래픽/도메인, ADMIN_TOKEN 위치.
+- 산출물: 엔드포인트·스키마·HTTP 코드·권한 맵, 현재 배포 스냅샷.
+- 스모크: `/health`, `/api/status(토큰有/無)` 확인.
+
+1단계. **API 명세·스키마 정합화**
+- 목표: 모든 주요 API가 공통 응답 구조와 HTTP 코드 규약을 따른다.
+- 작업: Pydantic 응답 모델 정의, 에러 코드 테이블 작성, 엔드포인트별 스펙 표준화.
+
+2단계. **보안/IAM 하드닝**
+- 목표: 토큰+Cloud Run IAM 2중 방어.
+- 작업: 익명 접근 차단, Invoker 최소화, Scheduler/SA 권한 정리, 토큰 회전 절차.
+
+3단계. **로그·백업·플로우 모니터링**
+- 목표: `/api/logs`, `/api/backup/status`, `/api/tasks/flow`가 연계된 관제 체계를 갖춘다.
+- 작업: 백업 상태 응답 형식 표준화, 로그/다운로드 케이스 정리, 플로우 실행→로그 연결 확인.
+
+4단계. **성능/리소스·운영 자동화**
+- 목표: 타임아웃/메모리 한도 내 처리 + 드리프트(리비전·트래픽) 방지.
+- 작업: 성능 측정, 부하 테스트, CI에서 `update-traffic --to-latest` 정례화.
+
+5단계. **릴리스 판정(Go/No-Go)**
+- 목표: 기능/비기능/보안/운영 기준을 한 번에 보고 결정한다.
+- 작업: 차단 이슈 목록과 완화책 정리, Go/No-Go 표 작성.
+
+---
+
+## 5. Cloud SQL Stop Policy (운영 정책 SSOT)
+
+Cloud SQL 관련 내용은 **별도 정책 문서**를 SSOT로 삼는다. fileciteturn1file2  
+
+### 5.1 기본 원칙
+
+- Cloud SQL 인스턴스 `quali-pg` 는 **STOPPED + activationPolicy=NEVER** 상태가 “기본”이다.
+- DB가 필요한 작업(배포, 마이그레이션, 스키마 점검 등)이 있을 때만 일시적으로 `ALWAYS` 로 변경해 사용한다.
+- 작업 후 반드시 다시 `NEVER` 로 되돌려 STOP 상태를 유지한다.
+- 애플리케이션에는 `DB_DISABLED=true` 를 설정해, DB가 꺼져 있어도 에러 없이 동작하도록 방어한다.
+
+### 5.2 일상 스모크(매일 3줄)
+
+- Cloud SQL 상태, Cloud Run 트래픽, Admin 도메인 HTML을 한 번에 확인한다.
+
+```bash
+gcloud sql instances list --format="table(name,region,state,settings.activationPolicy)"
+gcloud run services describe quali-admin-domap --region asia-northeast1 --format="value(status.traffic)"
+Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" -Headers @{"Cache-Control"="no-cache"} -OutFile "deployed_index.html"
+```
+
+- 기대 결과
+  - SQL: `STOPPED / NEVER`
+  - Run: `percent: 100`
+  - HTML: 정상 다운로드
+
+### 5.3 배포 차단 훅(CI)
+
+- SQL이 STOP 상태이면 **배포를 실패**시키는 훅을 CI에 추가한다.
+
+```bash
+STATE=$(gcloud sql instances describe quali-pg --format="value(state)")
+if [ "$STATE" = "STOPPED" ]; then
+  echo "::error ::Cloud SQL is STOPPED; deployment blocked."
+  exit 1
+fi
+```
+
+---
+
+## 6. DevOps 품질 게이트 (DoD v1.1 – Admin Tests + main 브랜치 보호)
+
+이 절은 **QualiJournal 관리자 모드 – DevOps 품질 게이트 패키지 v1.1** 의 내용을 DoD 관점에서 요약한 것이다. fileciteturn1file3  
+
+### 6.1 Admin Tests (자동화 테스트 품질 게이트)
+
+- **목적**
+  - 관리자 모드 배포 전 최소 동작을 보장하는 **자동화 스모크 테스트**.
+  - Admin Tests 가 실패하면 main 브랜치에 병합할 수 없다.
+- **필수 조건**
+  - GitHub Actions 워크플로 `Admin Tests (pytest only)` 의 `test-admin` 잡이 성공 상태여야 한다.
+  - `POST /api/report` 에 대해:
+    - HTTP 200 OK
+    - `ok=true`, `op="report"`, 유효한 `path`, 정수형 `count` 필드 존재
+  - 해당 `path` 로 `GET /api/archive/{path}` 호출 시:
+    - 200 OK
+    - `Content-Type` 이 text/markdown 계열
+    - 본문이 비어 있지 않은 리포트여야 한다.
+- **체크리스트**
+  - [ ] 최신 PR에서 `test-admin` 이 성공 상태다.
+  - [ ] `/api/report` → `/api/archive/{path}` 까지 수동 스모크 결과가 기대와 같다.
+
+### 6.2 main 브랜치 보호(브랜치 품질 게이트)
+
+- **목적**
+  - main 브랜치를 관리자 모드 배포의 **단일 진실 소스(SSOT)** 로 보호한다.
+  - 직접 push 를 막고, 품질 게이트를 통과한 PR만 병합하게 한다.
+- **필수 설정(GitHub Branch Protection)**
+  - “Require a pull request before merging” = ON
+  - “Require status checks to pass before merging” = ON
+    - 필수 status check 목록에 `test-admin` 포함
+  - “Require signed commits” = ON (모든 커밋 Verified)
+  - “Require linear history” = ON (squash/rebase 기반 선형 히스토리)
+- **체크리스트**
+  - [ ] main 에 직접 push 하지 않고 PR로만 변경한다.
+  - [ ] `test-admin` 이 필수 status check 로 설정되어 있다.
+  - [ ] main 커밋이 모두 Verified 이다.
+  - [ ] 로그가 선형 히스토리로 유지되고 있다.
+
+### 6.3 DevOps 품질 게이트 선언
+
+관리자 모드 인크리먼트가 **“Done”** 으로 인정되려면 반드시 아래 두 조건을 동시에 만족해야 한다.
+
+1. 6.1 의 Admin Tests 를 통과한다.  
+2. 6.2 의 main 브랜치 보호 규칙을 충족하는 PR을 통해 main 에 병합된다.
+
+---
+
+## 7. PR 템플릿 – DevOps 체크리스트 v1 (요약)
+
+**목적**: 개발자가 PR을 만들 때 DoD-DevOps 기준을 간단히 다시 확인하도록 돕는 템플릿이다. fileciteturn1file4  
+
+### 7.1 PR 기본 정보 섹션
+
+- 제목, 관련 이슈, 변경 유형(신규 기능/버그 수정/리팩터링/설정 변경), 주요 변경 내용 3줄, 영향 범위 등을 간단히 적는다.
+
+### 7.2 DevOps 신호등 체크리스트
+
+1. **Admin Tests**
+   - [ ] Actions 탭에서 `Admin Tests (pytest only)` / `test-admin` 이 green/passed 인지 확인했다.
+2. **main 브랜치 보호**
+   - [ ] main 에 직접 push 하지 않고 PR을 사용했다.
+   - [ ] main 보호 규칙이 켜져 있는 화면을 확인했다.
+3. **서명 커밋**
+   - [ ] PR에 포함된 커밋이 GitHub 에서 Verified 로 보이는지 확인했다.
+4. **선형 히스토리**
+   - [ ] 머지 시 “Squash and merge” 또는 “Rebase and merge” 만 사용한다.
+
+---
+
+## 8. 릴리스 Go / No-Go 기준
+
+다음 표는 DoD 점검 결과를 기반으로 릴리스 여부를 결정할 때 사용하는 상위 기준이다. fileciteturn1file1  
+
+| 영역 | Go 기준 | No-Go(차단) | 기본 조치 |
+|------|---------|-------------|-----------|
+| 기능 | 정의서의 기능 항목을 모두 통과 | 주요 엔드포인트 1개라도 실패 | 핫픽스 또는 롤백 |
+| 응답/코드 | 공통 JSON 스키마·HTTP 코드 일치 | 엔드포인트마다 구조가 제각각 | 응답 모델 정비 후 재배포 |
+| 보안/IAM | 토큰+Invoker 최소 권한, 401/403 흐름 정상 | 공개 Invoker, 토큰 미적용 | 권한 재설정·익명 차단 |
+| 배포/도메인 | 최신 리비전 100% 트래픽, 최신 HTML/JS | 구버전 UI/JS 노출 | 트래픽 최신화·캐시 무시 재배포 |
+| 스케줄러 | 7일 연속 자동 보고서 성공률 ≥ 99% | 잦은 실패 또는 401 | 토큰 회전·잡 수정 |
+| 백업 | 상태 OK, 버저닝/보존 정책 적용 | 마지막 성공 시각 없음 | 백업 잡/정책 보강 |
+| Cloud SQL | STOP 정책 준수(기본 STOP) | 활성 상태 방치 | STOP 복구·차단 훅 적용 |
+
+---
+
+## 9. 샘플 명령 모음 (발췌)
+
+### 9.1 헬스·상태·플로우·보고서 (cURL)
+
+```bash
+# 헬스 체크
+curl -i "https://<DOMAIN>/health"
+
+# 상태(KPI) – 성공/실패 비교
+curl -s "https://<DOMAIN>/api/status" -H "Authorization: Bearer DUMMY_ADMIN_TOKEN"
+curl -s "https://<DOMAIN>/api/status"  # 기대: 401
+
+# 플로우 트리거
+curl -s -X POST "https://<DOMAIN>/api/tasks/flow?type=daily" -H "Authorization: Bearer DUMMY_ADMIN_TOKEN"
+
+# 보고서 생성 → 내보내기
+curl -s -X POST "https://<DOMAIN>/api/report" -H "Authorization: Bearer DUMMY_ADMIN_TOKEN"
+curl -s "https://<DOMAIN>/api/export/md?date=YYYY-MM-DD"  -H "Authorization: Bearer DUMMY_ADMIN_TOKEN" -o report.md
+curl -s "https://<DOMAIN>/api/export/csv?date=YYYY-MM-DD" -H "Authorization: Bearer DUMMY_ADMIN_TOKEN" -o report.csv
+```
+
+### 9.2 Cloud Run 트래픽 최신화 & 캐시 우회 (PowerShell)
+
+```powershell
+$SERVICE="quali-admin-domap"
+$REGION="asia-northeast1"
+$PROJECT="quali-journal-prod"
+
+gcloud run services update-traffic $SERVICE --to-latest --region $REGION --project $PROJECT
+Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" -Headers @{"Cache-Control"="no-cache"} -OutFile "deployed_index.html"
+```
+
+---
+
+## 10. 운영자가 이 문서를 어떻게 사용하면 좋은지
+
+1. **새 기능 개발 시작 전**  
+   - 1~3장을 읽고 “이번 변경이 어느 DoD 항목과 관련돼 있는지” 표시한다.
+2. **PR 열기 전**  
+   - 6~7장의 DevOps 체크리스트를 따라 Admin Tests, 브랜치 보호, 서명 커밋 상태를 확인한다.
+3. **릴리스 전 최종 점검**  
+   - 4장(실행 계획)과 8장(Go/No-Go 기준)을 기반으로 체크리스트를 채우고, No-Go 항목이 없는지 확인한다.
+4. **장애/이슈 발생 시**  
+   - 1~3장으로 기능/환경 요구를 다시 확인하고, 5~6장으로 Cloud SQL·DevOps 쪽 설정이 어긋나지 않았는지 점검한다.
+
+이 문서는 “관리자 모드 개발·운영의 기준선”으로 사용되며, 변경이 필요할 경우 **반드시 PR + 리뷰 + DevOps 품질 게이트**를 거쳐 갱신한다.
+<!-- SSOT 변경 테스트 v2 (라벨 없이 CI 반응 확인용) -->

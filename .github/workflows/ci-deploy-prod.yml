@@ -1,4 +1,4 @@
-﻿name: deploy
+name: deploy
 
 on:
   push:
@@ -12,15 +12,26 @@ permissions:
 env:
   # ==== SSOT ====
   PROJECT_ID:        quali-journal-prod
-  REGION:            asia-northeast1
+  REGION:            asia-northeast1      # prod(domap) 리전
   SERVICE_NAME:      quali-admin-domap
   AR_REPO:           containers
   RUNTIME_SA:        quali-run-sa
+
+  # 기존 PROD 이미지 태그(백업용, 지금 배포에는 사용하지 않음)
   IMAGE: asia-northeast1-docker.pkg.dev/quali-journal-prod/containers/quali-admin-domap:${{ github.sha }}
+
+  # dev 서비스(이미지 SSOT)
+  DEV_REGION:        asia-northeast3
+  DEV_SERVICE_NAME:  quali-journal-admin-dev
+
+  CLOUD_SQL_INSTANCE: quali-pg
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    environment:
+      name: production
 
     steps:
       # 0) 코드 체크아웃
@@ -39,14 +50,54 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      # 3) Cloud Build로 루트 Dockerfile 빌드
-      - name: Build image with Cloud Build
+      # 3) Cloud SQL STOP Policy 가드레일 (STOP이면 배포 차단)
+      - name: Guardrail - Cloud SQL STOP Policy
         run: |
-          gcloud builds submit \
-            --tag "${{ env.IMAGE }}" \
-            --project "${{ env.PROJECT_ID }}"
+          set -e
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+          INSTANCE="${{ env.CLOUD_SQL_INSTANCE }}"
+          echo "Checking Cloud SQL instance: $INSTANCE in project: $PROJECT_ID"
 
-      # 4) Cloud Run에 이미지 배포
+          STATE=$(gcloud sql instances describe "$INSTANCE" \
+                    --project "$PROJECT_ID" \
+                    --format="value(state)")
+          POLICY=$(gcloud sql instances describe "$INSTANCE" \
+                    --project "$PROJECT_ID" \
+                    --format="value(settings.activationPolicy)")
+
+          echo "Cloud SQL state=$STATE, activationPolicy=$POLICY"
+
+          if [ "$STATE" != "RUNNABLE" ]; then
+            echo "Cloud SQL STOP Policy: instance is not RUNNABLE (state=$STATE)."
+            echo "배포 차단: Cloud SQL이 STOP 상태이므로 DB 의존 배포/테스트를 진행하지 않습니다."
+            exit 1
+          fi
+
+          echo "Cloud SQL RUNNABLE - 배포 계속 진행"
+
+      # 4) dev 서비스에서 사용 중인 이미지 재사용 (build once, promote)
+      - name: Get image from dev service (SSOT)
+        id: dev-image
+        run: |
+          set -e
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+          DEV_REGION="${{ env.DEV_REGION }}"
+          DEV_SERVICE="${{ env.DEV_SERVICE_NAME }}"
+
+          IMAGE=$(gcloud run services describe "$DEV_SERVICE" \
+                    --region "$DEV_REGION" \
+                    --project "$PROJECT_ID" \
+                    --format="value(spec.template.spec.containers[0].image)")
+
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: dev service image not found"
+            exit 1
+          fi
+
+          echo "IMAGE=$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      # 5) Cloud Run에 이미지 배포
       - name: Deploy to Cloud Run (image)
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
@@ -54,7 +105,7 @@ jobs:
           project_id:  ${{ env.PROJECT_ID }}
           region:      ${{ env.REGION }}
           service:     ${{ env.SERVICE_NAME }}
-          image:       ${{ env.IMAGE }}
+          image:       ${{ steps.dev-image.outputs.IMAGE }}
           env_vars: |
             PYTHONUTF8=1
             PYTHONIOENCODING=utf-8
@@ -67,7 +118,7 @@ jobs:
             --service-account=${{ env.RUNTIME_SA }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
           update_traffic_flags: --to-latest
 
-      # 5) 배포된 서비스 URL 확인
+      # 6) 배포된 서비스 URL 확인
       - name: Show deployed service URL
         id: url
         run: |
@@ -81,7 +132,7 @@ jobs:
           echo "URL=$URL"
           echo "URL=$URL" >> "$GITHUB_OUTPUT"
 
-      # 6) Warmup: /health 200 나올 때까지 대기
+      # 7) Warmup: /health 200 나올 때까지 대기
       - name: Warmup (wait for /health 200)
         run: |
           set -e
@@ -99,7 +150,7 @@ jobs:
           echo "warmup failed: /health not ready"
           exit 1
 
-      # 7) Smoke test: /api/status, /api/report 200 확인
+      # 8) Smoke test: /api/status, /api/report 200 확인
       - name: Smoke tests (/api/status, /api/report)
         run: |
           set -e
@@ -117,3 +168,23 @@ jobs:
             [ "$code" = "200" ] || (echo "Smoke failed: $P $code" && exit 1)
           done
           echo "Smoke OK"
+
+      # 9) Smoke test: /api/standards/reviews 200 확인
+      - name: Smoke tests (/api/standards/reviews)
+        run: |
+          set -e
+          URL="${{ steps.url.outputs.URL }}"
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+
+          TOKEN=$(gcloud secrets versions access latest \
+                    --secret=ADMIN_TOKEN \
+                    --project "$PROJECT_ID" | tr -d '\r\n')
+
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -H "X-Admin-Token: $TOKEN" \
+                  "$URL/api/standards/reviews" || true)
+
+          echo "/api/standards/reviews -> $code"
+          [ "$code" = "200" ] || (echo "Smoke failed: /api/standards/reviews $code" && exit 1)
+          echo "Smoke /api/standards/reviews OK"

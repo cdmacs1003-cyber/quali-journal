@@ -1,0 +1,54 @@
+name: SSOT Check
+
+on:
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+
+      - name: Reject SSOT changes without label
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          # PR base/head SHA 로 SSOT 파일 변경 여부 확인
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          echo "Base SHA: $BASE_SHA"
+          echo "Head SHA: $HEAD_SHA"
+
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '^docs/SSOT_Admin_DoD\.md$' || true)
+
+          if [ -n "$CHANGED" ]; then
+            echo "SSOT_Admin_DoD.md가 변경되었습니다."
+
+            # 현재 PR 라벨 목록을 GitHub API로 직접 조회
+            ISSUE_API="https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels"
+            echo "Fetching labels from: $ISSUE_API"
+
+            LABELS_JSON=$(curl -s \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "$ISSUE_API")
+
+            echo "Labels JSON: $LABELS_JSON"
+
+            if echo "$LABELS_JSON" | grep -q '"name": "ssot-change"'; then
+              echo "라벨 'ssot-change' 를 찾았습니다. 통과합니다."
+            else
+              echo "::error ::SSOT file changed without 'ssot-change' label"
+              exit 1
+            fi
+          else
+            echo "SSOT 파일 변경 없음"
+          fi
+

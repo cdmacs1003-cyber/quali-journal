@@ -1,0 +1,68 @@
+name: Admin Tests (pytest only)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "admin/**"
+      - "tests/**"
+      - ".github/workflows/ci-test-admin.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "admin/**"
+      - "tests/**"
+      - ".github/workflows/ci-test-admin.yml"
+
+jobs:
+  test-admin:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    env:
+      # 테스트에서 사용하는 ADMIN_TOKEN 값
+      # GitHub 리포지토리 Settings → Secrets and variables → Actions 에
+      # ADMIN_TOKEN (또는 동일 이름) 시크릿이 있다고 가정
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install admin dependencies
+        working-directory: admin
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+          pip install httpx
+
+      - name: Install pytest for admin tests
+        working-directory: admin
+        run: |
+          python -m pip install pytest
+
+
+      - name: Run admin smoke tests (/api/report, /api/archive)
+        working-directory: admin
+        run: |
+          python - << 'PY'
+          from tests.test_report_archive_smoke import (
+              test_report_smoke,
+              test_archive_smoke_from_report,
+          )
+
+          # pytest 없이도 동일한 스모크 테스트를 수행한다.
+          # AssertionError 발생 시 프로세스가 1로 종료되어 워크플로가 실패 처리됨.
+          test_report_smoke()
+          test_archive_smoke_from_report()
+          PY
+
+
