@@ -12,31 +12,41 @@ jobs:
         with:
           fetch-depth: 0
 
-
-      - name: Reject SSOT changes without label
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Detect changed files
+        id: changes
         run: |
           set -e
+          BASE="${{ github.base_ref }}"
+          echo "Base ref: $BASE"
+          git fetch origin "$BASE" --depth=1
+          CHANGED_FILES=$(git diff --name-only "origin/$BASE"...HEAD || true)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          {
+            echo "files<<EOF"
+            echo "$CHANGED_FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
-          # PR base/head SHA 로 SSOT 파일 변경 여부 확인
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+      - name: Guard SSOT docs with label
+        run: |
+          set -e
+          CHANGED_FILES="${{ steps.changes.outputs.files }}"
+          echo "CHANGED_FILES:"
+          echo "$CHANGED_FILES"
 
-          echo "Base SHA: $BASE_SHA"
-          echo "Head SHA: $HEAD_SHA"
+          SSOT_DOC_CHANGED=$(echo "$CHANGED_FILES" | grep -E 'SSOT_.*\.md|Admin_DoD_.*\.md' || true)
 
-          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '^docs/SSOT_Admin_DoD\.md$' || true)
+          if [ -n "$SSOT_DOC_CHANGED" ]; then
+            echo "SSOT 문서가 변경되었습니다:"
+            echo "$SSOT_DOC_CHANGED"
 
-          if [ -n "$CHANGED" ]; then
-            echo "SSOT_Admin_DoD.md가 변경되었습니다."
+            PR_NUMBER=${{ github.event.number }}
+            REPO=${{ github.repository }}
+            ISSUE_API="https://api.github.com/repos/$REPO/issues/$PR_NUMBER"
 
-            # 현재 PR 라벨 목록을 GitHub API로 직접 조회
-            ISSUE_API="https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels"
-            echo "Fetching labels from: $ISSUE_API"
-
-            LABELS_JSON=$(curl -s \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
+            LABELS_JSON=$(curl -sSL \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github+json" \
               "$ISSUE_API")
 
@@ -45,10 +55,65 @@ jobs:
             if echo "$LABELS_JSON" | grep -q '"name": "ssot-change"'; then
               echo "라벨 'ssot-change' 를 찾았습니다. 통과합니다."
             else
-              echo "::error ::SSOT file changed without 'ssot-change' label"
+              echo "::error ::SSOT 파일이 변경되었지만 'ssot-change' 라벨이 없습니다."
               exit 1
             fi
           else
-            echo "SSOT 파일 변경 없음"
+            echo "SSOT 문서 변경 없음"
           fi
 
+      - name: Validate ci-deploy-prod.yml against DoD 12.4
+        run: |
+          set -e
+          CHANGED_FILES="${{ steps.changes.outputs.files }}"
+          FILE=".github/workflows/ci-deploy-prod.yml"
+
+          if ! echo "$CHANGED_FILES" | grep -q "$FILE"; then
+            echo "ci-deploy-prod.yml 변경 없음 → 이 단계는 건너뜁니다."
+            exit 0
+          fi
+
+          if [ ! -f "$FILE" ]; then
+            echo "::error ::$FILE 파일을 찾을 수 없습니다."
+            exit 1
+          fi
+
+          echo "Checking $FILE"
+
+          # 1) env 키 존재 여부
+          for KEY in PROJECT_ID REGION SERVICE_NAME DEV_REGION DEV_SERVICE_NAME CLOUD_SQL_INSTANCE; do
+            if ! grep -q "^[[:space:]]*$KEY:" "$FILE"; then
+              echo "::error ::env.$KEY 가 $FILE 에 정의되어 있지 않습니다."
+              exit 1
+            fi
+          done
+
+          # 2) Deploy step의 image 소스 확인 (steps.dev-image.outputs.IMAGE 포함 여부)
+          if ! grep -q 'steps.dev-image.outputs.IMAGE' "$FILE"; then
+            echo "::error ::Deploy step의 image 가 steps.dev-image.outputs.IMAGE 를 사용하지 않습니다."
+            exit 1
+          fi
+
+          # 3) environment.name == production
+          if ! grep -q 'environment:' "$FILE" || ! grep -q 'name:[[:space:]]*production' "$FILE"; then
+            echo "::error ::jobs.deploy.environment.name 이 production 이 아닙니다."
+            exit 1
+          fi
+
+          # 4) Smoke step 이름/경로 체크
+          if ! grep -q 'Smoke tests (/api/status, /api/report)' "$FILE"; then
+            echo "::error ::Smoke step 이름 'Smoke tests (/api/status, /api/report)' 을 찾지 못했습니다."
+            exit 1
+          fi
+
+          if ! grep -q 'Smoke tests (/api/standards/reviews)' "$FILE"; then
+            echo "::error ::Smoke step 이름 'Smoke tests (/api/standards/reviews)' 을 찾지 못했습니다."
+            exit 1
+          fi
+
+          if ! grep -q '/api/standards/reviews' "$FILE"; then
+            echo "::error ::/api/standards/reviews 엔드포인트를 호출하는 코드가 없습니다."
+            exit 1
+          fi
+
+          echo "ci-deploy-prod.yml DoD 검증 통과"

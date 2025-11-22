@@ -72,120 +72,126 @@ except Exception:  # pragma: no cover
 # === FastAPI app (define FIRST) ==============================================
 app = FastAPI(title="QualiJournal Admin API")
 
-# === READY/SSOT PATCH START (no conflicts version) ===========================
-# - Prefix '/api/ready'로 충돌 제거
-# - 인가: Depends(authorize) 사용(서버 전역과 통일)
-# - 모델 중복 방지: ReadyGatePatch 사용
-READY_DATA_DIR = os.environ.get("QUALI_DATA_DIR", "data")
-READY_CONFIG   = os.environ.get("QUALI_CONFIG", "config.json")
-READY_FILES = [
-    os.path.join(READY_DATA_DIR, "selected_articles.json"),
-    os.path.join(READY_DATA_DIR, "selected_keyword_articles.json"),
-]
-
-def _ready_load_json(path: str):
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-def _ready_all_items() -> List[Dict]:
-    """지원 형태: list 또는 {"articles":[…]} / {"items":[…]}"""
-    acc: List[Dict] = []
-    for p in READY_FILES:
-        obj = _ready_load_json(p)
-        if isinstance(obj, list):
-            acc.extend([x for x in obj if isinstance(x, dict)])
-        elif isinstance(obj, dict):
-            arr = obj.get("articles") or obj.get("items") or []
-            if isinstance(arr, list):
-                acc.extend([x for x in arr if isinstance(x, dict)])
-    return acc
-
-def _ready_load_cfg() -> Dict:
-    cfg = {"gate_required": 70}
-    if os.path.exists(READY_CONFIG):
-        try:
-            with open(READY_CONFIG, "r", encoding="utf-8") as f:
-                file_cfg = json.load(f)
-                if isinstance(file_cfg, dict):
-                    cfg.update(file_cfg)
-        except Exception:
-            pass
-    return cfg
-
-ready_router = APIRouter(prefix="/api/ready", tags=["ready-ssot"])
-
-@ready_router.get("/items")
-def ready_items(
-    state: str = Query("ready"),
-    date: str | None = None,
-    keyword: str | None = None,
-    authorized: bool = Depends(lambda request: authorize(request))  # reuse global auth
-):
-    """
-    SSOT 기반 Ready 전용 아이템 뷰:
-    - 기본 state=ready → ready==true 항목만 반환
-    - date/keyword 지정 시 해당 필드가 같은 항목만 반환(필드 없으면 필터 미적용)
-    반환: List[dict]
-    """
-    def _match(it: dict) -> bool:
-        if date and str(it.get("date","")) != str(date):
-            return False
-        if keyword:
-            if str(it.get("keyword","")).strip() != str(keyword).strip():
-                return False
-        return True
-
-    items = _ready_all_items()
-    s = (state or "").lower().strip()
-    if s == "ready":
-        items = [i for i in items if i.get("ready") is True]
-    else:
-        # 다른 state가 들어오더라도, SSOT 원칙상 ready 재판정은 금지 → 그대로 통과 + date/keyword만 필터
-        pass
-    return [i for i in items if _match(i)]
-
-@ready_router.get("/status")
-def ready_status(authorized: bool = Depends(lambda request: authorize(request))):
-    """
-    SSOT 기반 상태: ready_count/ready_rate는 파일에 저장된 파생값(ready) 기준
-    """
-    items = _ready_all_items()
-    total = len(items)
-    ready_true = sum(1 for i in items if i.get("ready") is True)
-    cfg = _ready_load_cfg()
-    return {
-        "total": total,
-        "ready_count": ready_true,
-        "ready_rate": (ready_true / total) if total else 0.0,
-        "gate_required": int(cfg.get("gate_required", 70)),
-    }
-
-@ready_router.get("/config/gate_required")
-def ready_gate_get(authorized: bool = Depends(lambda request: authorize(request))):
-    return {"gate_required": int(_ready_load_cfg().get("gate_required", 70))}
-
-class ReadyGatePatch(BaseModel):
-    gate_required: int
-
-@ready_router.patch("/config/gate_required")
-def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(lambda request: authorize(request))):
-    cfg = _ready_load_cfg()
-    cfg["gate_required"] = int(p.gate_required)
-    with open(READY_CONFIG, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
-    return {"ok": True, "gate_required": cfg["gate_required"]}
-
-app.include_router(ready_router)
-# === READY/SSOT PATCH END ===================================================
-
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
+# 공통 응답·데이터 스키마 (테스트/문서용)
+# 운영 응답 JSON은 그대로 두고, pytest에서 스키마 검증에만 사용한다.
+
+class AdminResponseOK(BaseModel):
+    """
+    ok=True + data=dict 구조를 표현하기 위한 공통 응답 스키마 (테스트/문서용).
+    현재 /api/status, /api/items 등은 data 래퍼 없이 바로 dict를 내려주지만,
+    DoD 상 'ok+data' 패턴을 설명할 때 참고용으로 사용한다.
+    """
+    ok: bool = True
+    data: Dict[str, Any]
+
+
+class AdminResponseError(BaseModel):
+    """
+    ok=False + error/error_code 구조를 표현하기 위한 공통 에러 스키마 (테스트/문서용).
+    /api/report 의 _err(...) 패턴과 개념적으로 동일하다.
+    """
+    ok: bool = False
+    error: str
+    error_code: Optional[str] = None
+    detail: Optional[Dict[str, Any]] = None
+
+
+class StatusData(BaseModel):
+    """
+    /api/status 응답 구조.
+    현재 server_quali.get_status 가 내려주는 JSON을 그대로 모델로 표현한 것.
+    """
+    selected: int
+    approved: int
+    published: int
+    gate_required: int
+    ts: int
+    selection_total: int
+    selection_approved: int
+    state_counts: Dict[str, int]
+    community_total: int
+    keyword_total: int
+    gate_pass: bool
+    date: Optional[str] = None
+    keyword: str = ""
+
+
+class ItemsData(BaseModel):
+    """
+    /api/items 응답 래퍼 구조.
+    items 내부는 기사 dict 구조가 다양할 수 있어서 일단 Dict[str, Any] 로 둔다.
+    """
+    date: Optional[str] = None
+    keyword: Optional[str] = None
+    state: str
+    items: List[Dict[str, Any]]
+
+
+class GateConfigData(BaseModel):
+    """
+    /api/config/gate_required GET 응답 구조.
+    PATCH 응답은 {"ok": True, "gate_required": int} 이라서
+    gate_required 필드를 중심으로만 검증한다.
+    """
+    gate_required: int
+
+
+class ReportData(BaseModel):
+    """
+    /api/report 성공 시 핵심 필드 구조.
+    ok/op/ts 는 AdminResponseOK + 메타 정보로 보고,
+    여기서는 op/path/count/duration_ms 만 스키마로 고정한다.
+    """
+    op: str
+    path: str
+    count: int
+    duration_ms: int
+
+
+class TasksFlowData(BaseModel):
+    """
+    /api/tasks/flow 성공 시 구조.
+    실제 호출은 환경 의존성이 커서 테스트에서는 선택적으로 사용한다.
+    """
+    job_id: str
+    status: str
+    kind: str
+    args: List[Any]
+
+
+class StandardScoreRequest(BaseModel):
+    """
+    표준·기술 자료 1건에 대해
+    4축 스코어를 계산하기 위한 입력 스키마.
+    """
+    id: str | None = None
+    title: str
+    url: str
+    source_tier: str = Field("official", description="official/association/vendor 중 하나")
+
+    standard_name: str | None = None
+    standard_rev: str | None = None
+    standard_date: str | None = None
+
+    meta_publisher: str | None = None
+    meta_published_at: str | None = None
+    meta_language: str | None = None
+
+    tags: List[str] | None = None
+    target_keywords: List[str] | None = None
+
+
+class ReviewApproveReq(BaseModel):
+    """
+    2인 검수 승인 요청용 스키마.
+    reviewer_id: 검수자 식별자(이름/이메일/ID 등)
+    """
+    reviewer_id: str = Field(..., description="검수자 ID (이름/이메일/계정)")
+
+
 class EnrichReq(BaseModel):
     date: Optional[str] = None
     keyword: Optional[str] = None
@@ -317,6 +323,117 @@ def _auth_header_or_qs_ok(request: Request) -> bool:
         return True
     raise HTTPException(status_code=401, detail="invalid or missing token")
 
+# === READY/SSOT PATCH START (no conflicts version) ===========================
+# - Prefix '/api/ready'로 충돌 제거
+# - 인가: Depends(authorize) 사용(서버 전역과 통일)
+# - 모델 중복 방지: ReadyGatePatch 사용
+READY_DATA_DIR = os.environ.get("QUALI_DATA_DIR", "data")
+READY_CONFIG   = os.environ.get("QUALI_CONFIG", "config.json")
+READY_FILES = [
+    os.path.join(READY_DATA_DIR, "selected_articles.json"),
+    os.path.join(READY_DATA_DIR, "selected_keyword_articles.json"),
+]
+
+def _ready_load_json(path: str):
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def _ready_all_items() -> List[Dict]:
+    """지원 형태: list 또는 {"articles":[…]} / {"items":[…]}"""
+    acc: List[Dict] = []
+    for p in READY_FILES:
+        obj = _ready_load_json(p)
+        if isinstance(obj, list):
+            acc.extend([x for x in obj if isinstance(x, dict)])
+        elif isinstance(obj, dict):
+            arr = obj.get("articles") or obj.get("items") or []
+            if isinstance(arr, list):
+                acc.extend([x for x in arr if isinstance(x, dict)])
+    return acc
+
+def _ready_load_cfg() -> Dict:
+    cfg = {"gate_required": 70}
+    if os.path.exists(READY_CONFIG):
+        try:
+            with open(READY_CONFIG, "r", encoding="utf-8") as f:
+                file_cfg = json.load(f)
+                if isinstance(file_cfg, dict):
+                    cfg.update(file_cfg)
+        except Exception:
+            pass
+    return cfg
+
+ready_router = APIRouter(prefix="/api/ready", tags=["ready-ssot"])
+
+@ready_router.get("/items")
+def ready_items(
+    state: str = Query("ready"),
+    date: str | None = None,
+    keyword: str | None = None,
+    authorized: bool = Depends(authorize)
+):
+
+    """
+    SSOT 기반 Ready 전용 아이템 뷰:
+    - 기본 state=ready → ready==true 항목만 반환
+    - date/keyword 지정 시 해당 필드가 같은 항목만 반환(필드 없으면 필터 미적용)
+    반환: List[dict]
+    """
+    def _match(it: dict) -> bool:
+        if date and str(it.get("date","")) != str(date):
+            return False
+        if keyword:
+            if str(it.get("keyword","")).strip() != str(keyword).strip():
+                return False
+        return True
+
+    items = _ready_all_items()
+    s = (state or "").lower().strip()
+    if s == "ready":
+        items = [i for i in items if i.get("ready") is True]
+    else:
+        # 다른 state가 들어오더라도, SSOT 원칙상 ready 재판정은 금지 → 그대로 통과 + date/keyword만 필터
+        pass
+    return [i for i in items if _match(i)]
+
+@ready_router.get("/status")
+def ready_status(authorized: bool = Depends(authorize)):
+    """
+    SSOT 기반 상태: ready_count/ready_rate는 파일에 저장된 파생값(ready) 기준
+    """
+    items = _ready_all_items()
+    total = len(items)
+    ready_true = sum(1 for i in items if i.get("ready") is True)
+    cfg = _ready_load_cfg()
+    return {
+        "total": total,
+        "ready_count": ready_true,
+        "ready_rate": (ready_true / total) if total else 0.0,
+        "gate_required": int(cfg.get("gate_required", 70)),
+    }
+
+@ready_router.get("/config/gate_required")
+def ready_gate_get(authorized: bool = Depends(authorize)):
+    return {"gate_required": int(_ready_load_cfg().get("gate_required", 70))}
+
+class ReadyGatePatch(BaseModel):
+    gate_required: int
+
+@ready_router.patch("/config/gate_required")
+def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(authorize)):
+    cfg = _ready_load_cfg()
+    cfg["gate_required"] = int(p.gate_required)
+    with open(READY_CONFIG, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    return {"ok": True, "gate_required": cfg["gate_required"]}
+
+app.include_router(ready_router)
+# === READY/SSOT PATCH END ===================================================
 # ---------------------------------------------------------------------------
 # Paths / Constants
 # ---------------------------------------------------------------------------
@@ -363,6 +480,15 @@ ENRICH_DIR   = ENRICHED_DIR
 
 # 커뮤니티 스냅샷 후보: 루트 selected_community.json → archive 안 복사본 순서
 CAND_COMM = [SEL_COMM, ARCHIVE / "selected_community.json"]
+
+# 키워드/작업 스냅샷 후보:
+# - ROOT/data/selected_keyword_articles.json (현재 SSOT)
+# - ROOT/selected_articles.json, ROOT/data_selected_articles.json (옛 형식 호환)
+CAND_WORK = [
+    SEL_WORK,                              # ROOT / "data/selected_keyword_articles.json"
+    ROOT / "selected_articles.json",       # ROOT / "selected_articles.json"
+    ROOT / "data_selected_articles.json",  # ROOT / "data_selected_articles.json"
+]
 
 
 INDEX_HTML = BASE / "index.html"
@@ -1476,6 +1602,25 @@ def export_csv_alias(authorized: bool = Depends(authorize)):
 # Tools runner (repair / approve_top) — protected
 # ---------------------------------------------------------------------------
 
+def _tools_ok(rc: int, sync_log: dict | None, stderr: str | None) -> bool:
+    """
+    Quick Tools B안 성공 판정 규칙:
+    - 기본: rc == 0 → ok = True
+    - B안: rc == 127 이면서 sync_log.ok == True 이고 stderr에 'not found' 포함 → ok = True
+    - 그 외 → ok = False
+    """
+    sync_ok = bool((sync_log or {}).get("ok"))
+    stderr_text = (stderr or "").lower()
+
+    if rc == 0:
+        return True
+
+    if rc == 127 and sync_ok and "not found" in stderr_text:
+        return True
+
+    return False
+
+
 @app.post("/api/tools/repair")
 def api_tools_repair(authorized: bool = Depends(authorize)):
     """
@@ -1484,9 +1629,10 @@ def api_tools_repair(authorized: bool = Depends(authorize)):
     - 실행 로그와 성공 여부를 반환
     """
     rc, out, err = _run_py("repair_selection_files.py", [])
-    ok = (rc == 0)
     # 실행 후 발행본 싱크 보강(있으면 내부 스크립트가 수행하지만, 안전하게 한 번 더)
     sync = _sync_after_save()
+    ok = _tools_ok(rc, sync, err)
+
     return {
         "ok": ok,
         "rc": rc,
@@ -1527,10 +1673,11 @@ def api_tools_approve_top(
             pass
 
     rc, out, err = _run_py("force_approve_top20.py", ["--top", str(n)])
-    ok = (rc == 0)
 
     # 스크립트 내부에서 싱크하더라도, 최종 한번 더 보정
     sync = _sync_after_save()
+    ok = _tools_ok(rc, sync, err)
+
 
     return {
         "ok": ok,
