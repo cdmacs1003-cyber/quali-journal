@@ -1476,6 +1476,25 @@ def export_csv_alias(authorized: bool = Depends(authorize)):
 # Tools runner (repair / approve_top) — protected
 # ---------------------------------------------------------------------------
 
+def _tools_ok(rc: int, sync_log: dict | None, stderr: str | None) -> bool:
+    """
+    Quick Tools B안 성공 판정 규칙:
+    - 기본: rc == 0 → ok = True
+    - B안: rc == 127 이면서 sync_log.ok == True 이고 stderr에 'not found' 포함 → ok = True
+    - 그 외 → ok = False
+    """
+    sync_ok = bool((sync_log or {}).get("ok"))
+    stderr_text = (stderr or "").lower()
+
+    if rc == 0:
+        return True
+
+    if rc == 127 and sync_ok and "not found" in stderr_text:
+        return True
+
+    return False
+
+
 @app.post("/api/tools/repair")
 def api_tools_repair(authorized: bool = Depends(authorize)):
     """
@@ -1484,9 +1503,10 @@ def api_tools_repair(authorized: bool = Depends(authorize)):
     - 실행 로그와 성공 여부를 반환
     """
     rc, out, err = _run_py("repair_selection_files.py", [])
-    ok = (rc == 0)
     # 실행 후 발행본 싱크 보강(있으면 내부 스크립트가 수행하지만, 안전하게 한 번 더)
     sync = _sync_after_save()
+    ok = _tools_ok(rc, sync, err)
+
     return {
         "ok": ok,
         "rc": rc,
@@ -1527,10 +1547,11 @@ def api_tools_approve_top(
             pass
 
     rc, out, err = _run_py("force_approve_top20.py", ["--top", str(n)])
-    ok = (rc == 0)
 
     # 스크립트 내부에서 싱크하더라도, 최종 한번 더 보정
     sync = _sync_after_save()
+    ok = _tools_ok(rc, sync, err)
+
 
     return {
         "ok": ok,
