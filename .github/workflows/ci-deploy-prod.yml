@@ -169,4 +169,24 @@ jobs:
           done
           echo "Smoke OK"
 
+      # 9) Smoke test: /api/standards/reviews 200 확인
+      - name: Smoke tests (/api/standards/reviews)
+        run: |
+          set -e
+          URL="${{ steps.url.outputs.URL }}"
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+
+          TOKEN=$(gcloud secrets versions access latest \
+                    --secret=ADMIN_TOKEN \
+                    --project "$PROJECT_ID" | tr -d '\r\n')
+
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -H "X-Admin-Token: $TOKEN" \
+                  "$URL/api/standards/reviews" || true)
+
+          echo "/api/standards/reviews -> $code"
+          [ "$code" = "200" ] || (echo "Smoke failed: /api/standards/reviews $code" && exit 1)
+          echo "Smoke /api/standards/reviews OK"
+
       

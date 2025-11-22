@@ -1570,13 +1570,38 @@ window.onerror = function(message, source, lineno, colno, error) {
     $msg.style.color = ok ? '#0a7' : '#d33';
     $msg.textContent = (new Date()).toLocaleTimeString() + ' - ' + t;
   }
-  async function post(url) {
+  
+  // ── 공통 POST 헬퍼: API_BASE + authHeaders() 사용
+  async function post(path) {
     const t = getToken();
-    if(!t){ toast('토큰이 없습니다(상단 토큰 먼저 입력).', false); throw new Error('no token'); }
-    const r = await fetch(url, { method:'POST', headers:{ 'Authorization':'Bearer '+t } });
-    if(!r.ok){ const tx = await r.text(); throw new Error('HTTP '+r.status+' '+tx); }
+    if (!t) {
+      toast('토큰이 없습니다(상단 토큰 먼저 입력).', false);
+      throw new Error('no token');
+    }
+
+    // 1) 베이스 URL: API_BASE가 있으면 우선, 없으면 현재 origin
+    const base = (window.API_BASE && String(window.API_BASE).trim())
+      ? String(window.API_BASE).trim()
+      : window.location.origin;
+
+    // 2) 헤더: 전역 authHeaders()가 있으면 그대로, 없으면 Authorization만
+    const headers = (typeof window.authHeaders === 'function')
+      ? window.authHeaders()
+      : { 'Authorization': 'Bearer ' + t };
+
+    // 3) 실제 요청 보내기
+    const r = await fetch(base + path, {
+      method: 'POST',
+      headers
+    });
+
+    if (!r.ok) {
+      const tx = await r.text();
+      throw new Error('HTTP ' + r.status + ' ' + tx);
+    }
     return r.json();
   }
+
 
   // ── 상위 N 자동 승인
   document.getElementById('btnApproveTop')?.addEventListener('click', async () => {

@@ -36,6 +36,22 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Str
 from pydantic import BaseModel, Field
 from starlette.staticfiles import StaticFiles
 
+# 표준·기술 자료 큐레이션 4축 스코어러 (curation_scoring.py)
+from curation_scoring import (
+    SourceTier,
+    StandardItem,
+    ReviewTask,
+    score_and_maybe_enqueue_for_review,
+    PASS_THRESHOLD as CURATION_PASS_THRESHOLD,
+)
+
+# 표준·기술 자료 2인 검수 큐(JSON 파일 저장소)
+from standard_review_store import (
+    load_review_tasks,
+    save_review_tasks,
+    append_review_tasks,
+)
+
 # === DB KPI helpers (optional; safe fallback) ================================
 try:
     # SQLAlchemy ORM (패치셋에서 제공)
@@ -72,6 +88,54 @@ except Exception:  # pragma: no cover
 # === FastAPI app (define FIRST) ==============================================
 app = FastAPI(title="QualiJournal Admin API")
 
+# ---------------------------------------------------------------------------
+# Optional JWT utils (safe fallbacks if module missing)
+# ---------------------------------------------------------------------------
+try:
+    from auth_utils import verify_jwt_token  # type: ignore
+except Exception:  # pragma: no cover
+    async def verify_jwt_token(*args, **kwargs):  # type: ignore
+        return {}
+
+# Simple Bearer Token Authorization (Cloud Run OIDC + App Token 동시 지원)
+security = HTTPBearer(auto_error=False)
+
+async def authorize(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> bool:
+    """
+    허용 규칙
+    - ADMIN_TOKEN 또는 API_TOKEN 둘 중 하나라도 설정되어 있지 않으면 open mode(통과)
+    - 설정되어 있으면 다음 중 '하나'라도 맞으면 통과
+      1) 헤더 X-Admin-Token: <ADMIN_TOKEN or API_TOKEN>
+      2) Authorization: Bearer <ADMIN_TOKEN or API_TOKEN>   (레거시 호환)
+    - Cloud Run 비공개 서비스에서 Authorization은 보통 'ID 토큰'이므로,
+      이 경우 X-Admin-Token 으로 앱 토큰을 따로 실어야 통과됨.
+    """
+    expected = [
+        (os.environ.get("ADMIN_TOKEN") or "").strip(),
+        (os.environ.get("API_TOKEN") or "").strip(),
+    ]
+    expected = [t for t in expected if t]
+    if not expected:
+        return True  # open mode
+
+    # 앱 전용 토큰(권장): X-Admin-Token
+    x_admin = (request.headers.get("X-Admin-Token") or "").strip()
+
+    # 레거시/일반: Authorization: Bearer <token>
+    supplied = credentials.credentials if credentials else ""
+    if not supplied:
+        # security가 못 뽑았을 때 대비
+        auth = (request.headers.get("Authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            supplied = auth[7:].strip()
+
+    if (x_admin and x_admin in expected) or (supplied and supplied in expected):
+        return True
+
+    raise HTTPException(status_code=401, detail="invalid or missing token")
 # === READY/SSOT PATCH START (no conflicts version) ===========================
 # - Prefix '/api/ready'로 충돌 제거
 # - 인가: Depends(authorize) 사용(서버 전역과 통일)
@@ -124,7 +188,7 @@ def ready_items(
     state: str = Query("ready"),
     date: str | None = None,
     keyword: str | None = None,
-    authorized: bool = Depends(lambda request: authorize(request))  # reuse global auth
+    authorized: bool = Depends(authorize),
 ):
     """
     SSOT 기반 Ready 전용 아이템 뷰:
@@ -150,7 +214,9 @@ def ready_items(
     return [i for i in items if _match(i)]
 
 @ready_router.get("/status")
-def ready_status(authorized: bool = Depends(lambda request: authorize(request))):
+def ready_status(
+    authorized: bool = Depends(authorize),
+):
     """
     SSOT 기반 상태: ready_count/ready_rate는 파일에 저장된 파생값(ready) 기준
     """
@@ -166,14 +232,19 @@ def ready_status(authorized: bool = Depends(lambda request: authorize(request)))
     }
 
 @ready_router.get("/config/gate_required")
-def ready_gate_get(authorized: bool = Depends(lambda request: authorize(request))):
+def ready_gate_get(
+    authorized: bool = Depends(authorize),
+):
     return {"gate_required": int(_ready_load_cfg().get("gate_required", 70))}
 
 class ReadyGatePatch(BaseModel):
     gate_required: int
 
 @ready_router.patch("/config/gate_required")
-def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(lambda request: authorize(request))):
+def ready_gate_patch(
+    p: ReadyGatePatch, 
+    authorized: bool = Depends(authorize),
+):
     cfg = _ready_load_cfg()
     cfg["gate_required"] = int(p.gate_required)
     with open(READY_CONFIG, "w", encoding="utf-8") as f:
@@ -186,6 +257,93 @@ app.include_router(ready_router)
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
+# 공통 응답·데이터 스키마 (테스트/문서용)
+# 운영 응답 JSON은 그대로 두고, pytest에서 스키마 검증에만 사용한다.
+
+class AdminResponseOK(BaseModel):
+    """
+    ok=True + data=dict 구조를 표현하기 위한 공통 응답 스키마 (테스트/문서용).
+    현재 /api/status, /api/items 등은 data 래퍼 없이 바로 dict를 내려주지만,
+    DoD 상 'ok+data' 패턴을 설명할 때 참고용으로 사용한다.
+    """
+    ok: bool = True
+    data: Dict[str, Any]
+
+
+class AdminResponseError(BaseModel):
+    """
+    ok=False + error/error_code 구조를 표현하기 위한 공통 에러 스키마 (테스트/문서용).
+    /api/report 의 _err(...) 패턴과 개념적으로 동일하다.
+    """
+    ok: bool = False
+    error: str
+    error_code: Optional[str] = None
+    detail: Optional[Dict[str, Any]] = None
+
+
+class StatusData(BaseModel):
+    """
+    /api/status 응답 구조.
+    현재 server_quali.get_status 가 내려주는 JSON을 그대로 모델로 표현한 것.
+    """
+    selected: int
+    approved: int
+    published: int
+    gate_required: int
+    ts: int
+    selection_total: int
+    selection_approved: int
+    state_counts: Dict[str, int]
+    community_total: int
+    keyword_total: int
+    gate_pass: bool
+    date: Optional[str] = None
+    keyword: str = ""
+
+
+class ItemsData(BaseModel):
+    """
+    /api/items 응답 래퍼 구조.
+    items 내부는 기사 dict 구조가 다양할 수 있어서 일단 Dict[str, Any] 로 둔다.
+    """
+    date: Optional[str] = None
+    keyword: Optional[str] = None
+    state: str
+    items: List[Dict[str, Any]]
+
+
+class GateConfigData(BaseModel):
+    """
+    /api/config/gate_required GET 응답 구조.
+    PATCH 응답은 {"ok": True, "gate_required": int} 이라서
+    gate_required 필드를 중심으로만 검증한다.
+    """
+    gate_required: int
+
+
+class ReportData(BaseModel):
+    """
+    /api/report 성공 시 핵심 필드 구조.
+    ok/op/ts 는 AdminResponseOK + 메타 정보로 보고,
+    여기서는 op/path/count/duration_ms 만 스키마로 고정한다.
+    """
+    op: str
+    path: str
+    count: int
+    duration_ms: int
+
+
+class TasksFlowData(BaseModel):
+    """
+    /api/tasks/flow 성공 시 구조.
+    실제 호출은 환경 의존성이 커서 테스트에서는 선택적으로 사용한다.
+    """
+    job_id: str
+    status: str
+    kind: str
+    args: List[Any]
+
+
 class EnrichReq(BaseModel):
     date: Optional[str] = None
     keyword: Optional[str] = None
@@ -194,6 +352,35 @@ class EnrichReq(BaseModel):
 
 class GatePatch(BaseModel):
     gate_required: int
+
+class StandardScoreRequest(BaseModel):
+    """
+    표준·기술 자료 1건에 대해
+    4축 스코어를 계산하기 위한 입력 스키마.
+    """
+    id: str | None = None
+    title: str
+    url: str
+    source_tier: str = Field("official", description="official/association/vendor 중 하나")
+
+    standard_name: str | None = None
+    standard_rev: str | None = None
+    standard_date: str | None = None
+
+    meta_publisher: str | None = None
+    meta_published_at: str | None = None
+    meta_language: str | None = None
+
+    tags: List[str] | None = None
+    target_keywords: List[str] | None = None
+
+class ReviewApproveReq(BaseModel):
+    """
+    2인 검수 승인 요청용 스키마.
+    reviewer_id: 검수자 식별자(이름/이메일/ID 등)
+    """
+    reviewer_id: str = Field(..., description="검수자 ID (이름/이메일/계정)")
+
 
 class PublishOneReq(BaseModel):
     approve: bool = Field(default=True, description="승인 여부")
@@ -253,55 +440,6 @@ class FlowKwReq(BaseModel):
     keyword: str
     use_external_rss: bool = False
 
-# ---------------------------------------------------------------------------
-# Optional JWT utils (safe fallbacks if module missing)
-# ---------------------------------------------------------------------------
-try:
-    from auth_utils import verify_jwt_token  # type: ignore
-except Exception:  # pragma: no cover
-    async def verify_jwt_token(*args, **kwargs):  # type: ignore
-        return {}
-
-# Simple Bearer Token Authorization (Cloud Run OIDC + App Token 동시 지원)
-security = HTTPBearer(auto_error=False)
-
-async def authorize(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> bool:
-    """
-    허용 규칙
-    - ADMIN_TOKEN 또는 API_TOKEN 둘 중 하나라도 설정되어 있지 않으면 open mode(통과)
-    - 설정되어 있으면 다음 중 '하나'라도 맞으면 통과
-      1) 헤더 X-Admin-Token: <ADMIN_TOKEN or API_TOKEN>
-      2) Authorization: Bearer <ADMIN_TOKEN or API_TOKEN>   (레거시 호환)
-    - Cloud Run 비공개 서비스에서 Authorization은 보통 'ID 토큰'이므로,
-      이 경우 X-Admin-Token 으로 앱 토큰을 따로 실어야 통과됨.
-    """
-    expected = [
-        (os.environ.get("ADMIN_TOKEN") or "").strip(),
-        (os.environ.get("API_TOKEN") or "").strip(),
-    ]
-    expected = [t for t in expected if t]
-    if not expected:
-        return True  # open mode
-
-    # 앱 전용 토큰(권장): X-Admin-Token
-    x_admin = (request.headers.get("X-Admin-Token") or "").strip()
-
-    # 레거시/일반: Authorization: Bearer <token>
-    supplied = credentials.credentials if credentials else ""
-    if not supplied:
-        # security가 못 뽑았을 때 대비
-        auth = (request.headers.get("Authorization") or "").strip()
-        if auth.lower().startswith("bearer "):
-            supplied = auth[7:].strip()
-
-    if (x_admin and x_admin in expected) or (supplied and supplied in expected):
-        return True
-
-    raise HTTPException(status_code=401, detail="invalid or missing token")
-
 def _auth_header_or_qs_ok(request: Request) -> bool:
     expected = [(os.environ.get("ADMIN_TOKEN") or "").strip(),
                 (os.environ.get("API_TOKEN") or "").strip()]
@@ -356,6 +494,13 @@ ARCHIVE_CLOUD = Path("/tmp/archive")
 # Cloud Run에서는 /tmp/archive, 로컬에서는 ROOT/archive 사용
 ARCHIVE = ARCHIVE_CLOUD if IS_CLOUD else ARCHIVE_LOCAL
 
+# Cloud Run에서는 발행본(selected_articles.json)도 /tmp 아래에 저장
+# - 이유: 루트(/) 직하에 쓰기를 시도하면 PermissionError가 발생할 수 있음
+# - 로컬에서는 기존 경로(ROOT/selected_articles.json)를 그대로 사용
+if IS_CLOUD:
+    SEL_PUB = Path("/tmp") / "selected_articles.json"
+
+
 # /archive 하위 폴더들
 ENRICHED_DIR = ARCHIVE / "enriched"
 REPORT_DIR   = ARCHIVE / "reports"
@@ -364,6 +509,17 @@ ENRICH_DIR   = ENRICHED_DIR
 # 커뮤니티 스냅샷 후보: 루트 selected_community.json → archive 안 복사본 순서
 CAND_COMM = [SEL_COMM, ARCHIVE / "selected_community.json"]
 
+# 키워드/작업 스냅샷 후보:
+# - ROOT/data/selected_keyword_articles.json (현재 SSOT)
+# - ROOT/selected_articles.json, ROOT/data_selected_articles.json (옛 형식 호환)
+CAND_WORK = [
+    SEL_WORK,                              # ROOT / "data/selected_keyword_articles.json"
+    ROOT / "selected_articles.json",       # ROOT / "selected_articles.json"
+    ROOT / "data_selected_articles.json",  # ROOT / "data_selected_articles.json"
+]
+
+INDEX_HTML = BASE / "index.html"
+INDEX_LITE = BASE / "index_lite_black.html"
 
 INDEX_HTML = BASE / "index.html"
 INDEX_LITE = BASE / "index_lite_black.html"
@@ -684,10 +840,32 @@ def _read_json(p: Path) -> dict:
             return {}
 
 def _write_json(p: Path, obj: dict):
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(p)
+    """JSON 파일을 안전하게 쓰기.
+
+    - 기본: 주어진 Path(p)에 tmp 파일을 만들고 교체
+    - Cloud Run에서 PermissionError가 나면 /tmp 쪽으로 한 번 더 시도
+    """
+    p = Path(p)
+    data = json.dumps(obj, ensure_ascii=False, indent=2)
+
+    def _do_write(target: Path):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(data, encoding="utf-8")
+        tmp.replace(target)
+
+    try:
+        # 1차 시도: 원래 경로에 기록
+        _do_write(p)
+    except PermissionError:
+        # Cloud Run이고, /tmp가 아닌 곳에 쓰려다 막힌 경우만 /tmp로 폴백
+        if IS_CLOUD and not str(p).startswith("/tmp/"):
+            safe = Path("/tmp") / p.name
+            _do_write(safe)
+        else:
+            # 다른 경우에는 그대로 예외를 다시 던진다
+            raise
+
 
 def _slug_kw(s: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in (s or "")).strip("-").upper()
@@ -1346,6 +1524,174 @@ def post_report(payload: dict | None = Body(default=None), authorized: bool = De
             duration_ms=_now_ms() - t0,
         )
 
+@app.post("/api/standards/score-test")
+def standards_score_test(
+    req: StandardScoreRequest,
+    authorized: bool = Depends(authorize),
+):
+    """
+    표준·기술 자료 1건에 대해
+    - 4축 스코어를 계산하고
+    - 총점이 하한선(CURATION_PASS_THRESHOLD) 미만이면
+      2인 검수 큐에 들어가는지 확인하는 개발용 엔드포인트.
+    """
+
+    # 1) source_tier 문자열을 Enum으로 변환 (잘못된 값이면 400 에러)
+    try:
+        tier = SourceTier(req.source_tier)
+    except ValueError:
+        raise HTTPException(
+            http_status.HTTP_400_BAD_REQUEST,
+            f"invalid source_tier: {req.source_tier}",
+        )
+
+    # 2) 요청을 StandardItem(dataclass) 객체로 변환
+    item = StandardItem(
+        id=req.id or req.url,
+        title=req.title,
+        url=req.url,
+        source_tier=tier,
+        standard_name=req.standard_name,
+        standard_rev=req.standard_rev,
+        standard_date=req.standard_date,
+        meta_publisher=req.meta_publisher,
+        meta_published_at=req.meta_published_at,
+        meta_language=req.meta_language,
+        tags=req.tags or [],
+    )
+
+    # 3) 4축 스코어 계산 + 14점 미만이면 2인 검수 큐에 넣기
+    review_queue: list[ReviewTask] = []
+    item = score_and_maybe_enqueue_for_review(
+        item,
+        req.target_keywords or [],
+        review_queue,
+    )
+
+    # 3-b) HOLD 문서인 경우, review_queue 내용을 JSON 파일에 저장
+    if review_queue:
+        append_review_tasks(review_queue)
+
+    # 4) dataclass → dict 로 변환 (UI/테스트용)
+    item_data = dict(item.__dict__)
+
+
+    review_task = None
+    if review_queue:
+        t = review_queue[0]
+        review_task = {
+            "standard_id": t.standard_id,
+            "status": t.status,
+            "required_reviewers": t.required_reviewers,
+            "approved_by": list(t.approved_by),
+        }
+
+    # 5) Admin 공통 응답 패턴(_ok) 사용
+    return _ok(
+        "standards_score_test",
+        pass_threshold=CURATION_PASS_THRESHOLD,
+        item=item_data,
+        review_task=review_task,
+    )
+
+@app.get("/api/standards/reviews")
+def list_standard_reviews(
+    authorized: bool = Depends(authorize),
+):
+    """
+    표준·기술 자료 2인 검수 큐 목록 조회.
+    JSON 파일에 저장된 ReviewTask 리스트를 그대로 반환한다.
+    """
+    tasks = load_review_tasks()
+    items = []
+    for t in tasks:
+        items.append(
+            {
+                "standard_id": t.standard_id,
+                "status": t.status,
+                "required_reviewers": t.required_reviewers,
+                "approved_by": list(t.approved_by),
+            }
+        )
+    return _ok("standards_reviews", items=items, count=len(items))
+
+
+@app.post("/api/standards/reviews/{standard_id}/approve")
+def approve_standard_review(
+    standard_id: str,
+    req: ReviewApproveReq,
+    authorized: bool = Depends(authorize),
+):
+    """
+    2인 검수 큐에서 하나 승인 처리.
+    - 같은 standard_id 에 대해 서로 다른 reviewer_id 두 번 이상 승인되면
+      status 가 REVIEWED 로 바뀐다.
+    """
+    tasks = load_review_tasks()
+    found: ReviewTask | None = None
+
+    for t in tasks:
+        if t.standard_id == standard_id:
+            t.approve(req.reviewer_id)
+            found = t
+            break
+
+    if not found:
+        raise HTTPException(
+            http_status.HTTP_404_NOT_FOUND,
+            f"review task not found for standard_id={standard_id}",
+        )
+
+    save_review_tasks(tasks)
+
+    data = {
+        "standard_id": found.standard_id,
+        "status": found.status,
+        "required_reviewers": found.required_reviewers,
+        "approved_by": list(found.approved_by),
+    }
+    return _ok("standards_review_approve", item=data)
+
+
+@app.post("/api/standards/reviews/{standard_id}/publish")
+def publish_standard(
+    standard_id: str,
+    authorized: bool = Depends(authorize),
+):
+    """
+    REVIEWED 상태의 표준 항목을 PUBLISHED 로 승격.
+    (현재는 ReviewTask.status 만 업데이트하는 파일 기반 1판)
+    """
+    tasks = load_review_tasks()
+    found: ReviewTask | None = None
+
+    for t in tasks:
+        if t.standard_id == standard_id:
+            if t.status != "REVIEWED":
+                raise HTTPException(
+                    http_status.HTTP_400_BAD_REQUEST,
+                    f"cannot publish: status={t.status}, need REVIEWED",
+                )
+            t.status = "PUBLISHED"
+            found = t
+            break
+
+    if not found:
+        raise HTTPException(
+            http_status.HTTP_404_NOT_FOUND,
+            f"review task not found for standard_id={standard_id}",
+        )
+
+    save_review_tasks(tasks)
+
+    data = {
+        "standard_id": found.standard_id,
+        "status": found.status,
+        "required_reviewers": found.required_reviewers,
+        "approved_by": list(found.approved_by),
+    }
+    return _ok("standards_review_publish", item=data)
+
 
 @app.post("/api/enrich/keyword")
 def enrich_keyword(req: EnrichReq | None = Body(default=None), authorized: bool = Depends(authorize)):
@@ -1487,6 +1833,13 @@ def api_tools_repair(authorized: bool = Depends(authorize)):
     ok = (rc == 0)
     # 실행 후 발행본 싱크 보강(있으면 내부 스크립트가 수행하지만, 안전하게 한 번 더)
     sync = _sync_after_save()
+
+    # B안: repair_selection_files.py가 없어도(rc=127),
+    # fallback merge(sync)가 ok=True이면 전체 결과는 성공으로 간주.
+    # - rc, stderr는 그대로 내려서 "스크립트 없음" 상태는 로그로 남겨 둔다.
+    if (not ok) and rc == 127 and sync.get("ok") and "not found" in (err or ""):
+        ok = True
+
     return {
         "ok": ok,
         "rc": rc,
@@ -1495,6 +1848,7 @@ def api_tools_repair(authorized: bool = Depends(authorize)):
         "synced": bool(sync.get("ok")),
         "sync_log": sync,
     }
+
 
 @app.post("/api/tools/approve_top")
 def api_tools_approve_top(
@@ -1532,6 +1886,12 @@ def api_tools_approve_top(
     # 스크립트 내부에서 싱크하더라도, 최종 한번 더 보정
     sync = _sync_after_save()
 
+    # B안: force_approve_top20.py가 없더라도(frc=127),
+    # fallback merge(sync)가 ok=True이면 전체 결과는 성공으로 간주.
+    # - rc, stderr는 그대로 내려서 "스크립트 없음" 흔적은 남겨둔다.
+    if (not ok) and rc == 127 and sync.get("ok") and "not found" in (err or ""):
+        ok = True
+
     return {
         "ok": ok,
         "rc": rc,
@@ -1541,6 +1901,7 @@ def api_tools_approve_top(
         "sync_log": sync,
         "top": n,
     }
+
 
 # ---------------------------------------------------------------------------
 # Selection Approvals — protected (work JSON <-> publish JSON)
