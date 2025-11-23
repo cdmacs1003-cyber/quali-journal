@@ -1,10 +1,17 @@
 # admin/tests/test_tools_quick.py
 
+import sys
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
-from server_quali import app, authorize, _run_py, _sync_after_save  # _run_py, _sync_after_save는 실제 모듈 이름에 맞게
+# 프로젝트 루트(퀄리저널-main-signed)를 sys.path 에 추가
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
+from admin.server_quali import app, authorize, _run_py, _sync_after_save  # _run_py, _sync_after_save는 실제 모듈 이름에 맞게
 
 client = TestClient(app)
 
@@ -35,8 +42,9 @@ def patch_run_and_sync(monkeypatch):
         def fake_sync_after_save():
             return {"ok": sync_ok, "stdout": "fallback merge ok" if sync_ok else "failed"}
 
-        monkeypatch.setattr("server_quali._run_py", fake_run_py)
-        monkeypatch.setattr("server_quali._sync_after_save", fake_sync_after_save)
+        monkeypatch.setattr("admin.server_quali._run_py", fake_run_py)
+        monkeypatch.setattr("admin.server_quali._sync_after_save", fake_sync_after_save)
+
 
     return _factory
 
