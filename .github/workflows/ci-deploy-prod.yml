@@ -199,18 +199,21 @@ jobs:
               return 1
             fi
 
-            # jq로 JSON 구조 검증 (A1 Runbook의 ok/data/count/items 조건 반영)
-            if ! echo "$BODY" | jq -e '.ok == true' >/dev/null 2>&1; then
-              echo "❌ body.ok != true"
-              return 1
-            fi
+          # jq로 JSON 구조 검증 (실제 /api/standards/reviews 스키마 기준: ok + count + items)
+          if ! echo "$BODY" | jq -e '.ok == true' >/dev/null 2>&1; then
+            echo "❌ body.ok != true"
+            return 1
+          fi
 
-            if ! echo "$BODY" | jq -e '.data and (.data.count != null) and (.data.items != null)' >/dev/null 2>&1; then
-              echo "❌ data/count/items 가 유효하지 않음"
-              return 1
-            fi
+          # 최상위에 count, items 가 존재하는지 검사
+          if ! echo "$BODY" | jq -e '.count != null and .items != null' >/dev/null 2>&1; then
+            echo "❌ count/items 가 유효하지 않음"
+            return 1
+          fi
 
-            echo "✅ /api/standards/reviews JSON schema OK (ok=true, data.count, data.items)"
+          echo "✅ /api/standards/reviews JSON schema OK (ok=true, count, items)"
+
+
             return 0
           }
 
