@@ -116,4 +116,57 @@ jobs:
             exit 1
           fi
 
+          # 5) Reviews Gate Smoke 구조 체크 (Runbook A안 SSOT)
+
+          # 5-1) smoke_once() 함수 정의 여부
+          if ! grep -qF 'smoke_once() {' "$FILE" && ! grep -qF 'smoke_once () {' "$FILE"; then
+            echo "::error ::Reviews 게이트 스텝에 smoke_once() 함수 정의가 없습니다."
+            exit 1
+          fi
+
+          # 5-2) HTTP 200 상태 코드 검증
+          if ! grep -qF 'if [ "$CODE" != "200" ]; then' "$FILE"; then
+            echo "::error ::smoke_once 내에 HTTP 200 상태 코드 검증(if [ \"\$CODE\" != \"200\" ]; then)이 없습니다."
+            exit 1
+          fi
+
+          # 5-3) .ok == true JSON 검증
+          if ! grep -qF "jq -e '.ok == true'" "$FILE"; then
+            echo "::error ::smoke_once 내에 '.ok == true' JSON 검증이 없습니다."
+            exit 1
+          fi
+
+          # 5-4) .count/.items JSON 검증
+          if ! grep -qF "jq -e '.count != null and .items != null'" "$FILE"; then
+            echo "::error ::smoke_once 내에 '.count != null and .items != null' JSON 검증이 없습니다."
+            exit 1
+          fi
+
+          # 5-5) Single smoke 로그 + if ! smoke_once; then 패턴
+          if ! grep -qF '== Single smoke: /api/standards/reviews ==' "$FILE"; then
+            echo "::error ::Single smoke 로그 '== Single smoke: /api/standards/reviews ==' 를 찾지 못했습니다."
+            exit 1
+          fi
+
+          if ! grep -qF 'if ! smoke_once; then' "$FILE"; then
+            echo "::error ::Single/Repeated 스모크 구간에 'if ! smoke_once; then' 패턴이 없습니다."
+            exit 1
+          fi
+
+          # 5-6) 10회 반복 스모크 루프 + 로그
+          if ! grep -qF '== 10x repeated smoke: /api/standards/reviews ==' "$FILE"; then
+            echo "::error ::10회 반복 스모크 로그 '== 10x repeated smoke: /api/standards/reviews ==' 를 찾지 못했습니다."
+            exit 1
+          fi
+
+          if ! grep -qF 'for i in $(seq 1 10); do' "$FILE"; then
+            echo "::error ::Reviews 게이트 스텝에 'for i in $(seq 1 10); do' 루프가 없습니다."
+            exit 1
+          fi
+
+          # 5-7) (권장) JSON schema OK 로그 메시지
+          if ! grep -qF 'JSON schema OK (ok=true, count, items)' "$FILE"; then
+            echo "::warning ::성공 로그 'JSON schema OK (ok=true, count, items)' 가 없습니다. 운영 로그 가독성이 떨어질 수 있습니다."
+          fi
+
           echo "ci-deploy-prod.yml DoD 검증 통과"
