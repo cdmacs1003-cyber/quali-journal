@@ -223,20 +223,8 @@ jobs:
             exit 1
           fi
 
-          echo "== 10x repeated smoke: /api/standards/reviews =="
-          success=0
-          for i in $(seq 1 10); do
-            echo "[reviews] attempt $i/10"
-            if smoke_once; then
-              success=$((success+1))
-            else
-              echo "❌ /api/standards/reviews failed at attempt $i"
-              exit 1
-            fi
-            # 너무 빠른 연속 호출을 피하기 위한 짧은 대기 (선택사항)
-            sleep 1
-          done
+          # [Scenario B] intentionally break 10x loop for SSOT test (feature/test-ssot-break-loop-10x)
+          echo "⚠️ /api/standards/reviews 10x loop temporarily disabled for SSOT scenario B test"
 
-          echo "✅ /api/standards/reviews 10x smoke PASS (success ${success}/10)"
 
           
