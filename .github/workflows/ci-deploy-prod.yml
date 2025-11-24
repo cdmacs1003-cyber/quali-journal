@@ -169,23 +169,74 @@ jobs:
           done
           echo "Smoke OK"
 
-      # 9) Smoke test: /api/standards/reviews 200 확인
       - name: Smoke tests (/api/standards/reviews)
         run: |
           set -e
           URL="${{ steps.url.outputs.URL }}"
           PROJECT_ID="${{ env.PROJECT_ID }}"
 
+          # ADMIN_TOKEN 시크릿에서 토큰 읽기 (A1 Runbook과 동일 SSOT)
           TOKEN=$(gcloud secrets versions access latest \
                     --secret=ADMIN_TOKEN \
                     --project "$PROJECT_ID" | tr -d '\r\n')
 
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-                  -H "Authorization: Bearer $TOKEN" \
-                  -H "X-Admin-Token: $TOKEN" \
-                  "$URL/api/standards/reviews" || true)
+          smoke_once() {
+            echo "---- /api/standards/reviews smoke (single call) ----"
 
-          echo "/api/standards/reviews -> $code"
-          [ "$code" = "200" ] || (echo "Smoke failed: /api/standards/reviews $code" && exit 1)
-          echo "Smoke /api/standards/reviews OK"
+            # 응답 바디 + HTTP 코드 둘 다 얻기
+            RESP=$(curl -sS -w "\n%{http_code}" \
+                    -H "Authorization: Bearer $TOKEN" \
+                    -H "X-Admin-Token: $TOKEN" \
+                    "$URL/api/standards/reviews" || echo -e "\n000")
+
+            BODY=$(printf "%s\n" "$RESP" | sed '$d')
+            CODE=$(printf "%s\n" "$RESP" | tail -n 1)
+
+            echo "HTTP code: $CODE"
+
+            if [ "$CODE" != "200" ]; then
+              echo "❌ /api/standards/reviews StatusCode != 200"
+              return 1
+            fi
+
+          # jq로 JSON 구조 검증 (실제 /api/standards/reviews 스키마 기준: ok + count + items)
+          if ! echo "$BODY" | jq -e '.ok == true' >/dev/null 2>&1; then
+            echo "❌ body.ok != true"
+            return 1
+          fi
+
+          # 최상위에 count, items 가 존재하는지 검사
+          if ! echo "$BODY" | jq -e '.count != null and .items != null' >/dev/null 2>&1; then
+            echo "❌ count/items 가 유효하지 않음"
+            return 1
+          fi
+
+          echo "✅ /api/standards/reviews JSON schema OK (ok=true, count, items)"
+
+
+            return 0
+          }
+
+          echo "== Single smoke: /api/standards/reviews =="
+          if ! smoke_once; then
+            echo "❌ /api/standards/reviews single smoke failed"
+            exit 1
+          fi
+
+          echo "== 10x repeated smoke: /api/standards/reviews =="
+          success=0
+          for i in $(seq 1 10); do
+            echo "[reviews] attempt $i/10"
+            if smoke_once; then
+              success=$((success+1))
+            else
+              echo "❌ /api/standards/reviews failed at attempt $i"
+              exit 1
+            fi
+            # 너무 빠른 연속 호출을 피하기 위한 짧은 대기 (선택사항)
+            sleep 1
+          done
+
+          echo "✅ /api/standards/reviews 10x smoke PASS (success ${success}/10)"
+
           
