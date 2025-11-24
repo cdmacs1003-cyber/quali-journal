@@ -200,10 +200,11 @@ jobs:
             fi
 
           # jq로 JSON 구조 검증 (실제 /api/standards/reviews 스키마 기준: ok + count + items)
-          if ! echo "$BODY" | jq -e '.ok == true' >/dev/null 2>&1; then
-            echo "❌ body.ok != true"
-            return 1
-          fi
+          # ※ 테스트 PR: 의도적으로 .ok == true 체크를 제거하여 SSOT Guard 실패를 유도
+          # if ! echo "$BODY" | jq -e '.ok == true' >/dev/null 2>&1; then
+          #   echo "❌ body.ok != true"
+          #   return 1
+          # fi
 
           # 최상위에 count, items 가 존재하는지 검사
           if ! echo "$BODY" | jq -e '.count != null and .items != null' >/dev/null 2>&1; then
@@ -211,7 +212,8 @@ jobs:
             return 1
           fi
 
-          echo "✅ /api/standards/reviews JSON schema OK (ok=true, count, items)"
+          echo "✅ /api/standards/reviews JSON schema OK (count, items only – .ok 체크는 테스트 PR에서 생략됨)"
+
 
 
             return 0
