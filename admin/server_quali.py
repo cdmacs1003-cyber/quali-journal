@@ -1073,6 +1073,96 @@ def _read_any_items(root: Path):
                 pass
     return [], None, None
 
+
+# ---------------------------------------------------------------------------
+# Standards Reviews storage helpers (standard_reviews.json)
+# ---------------------------------------------------------------------------
+
+def _reviews_file() -> Path:
+    """Return path to standard_reviews.json under logs directory (SSOT)."""
+    base = LOGS_DIR or (ROOT / "logs")
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return base / "standard_reviews.json"
+
+
+def _load_reviews() -> list[dict]:
+    """Load review tasks list from standard_reviews.json.
+
+    허용 구조:
+    - [ {...}, {...} ]
+    - {"items": [ ... ], ...}
+    - {"review_tasks": [ ... ], ...}
+    그 외 형식/파싱 실패 시 빈 리스트 반환.
+    """
+    path = _reviews_file()
+    obj = _read_json(path)
+    items: list[dict] = []
+    if isinstance(obj, list):
+        items = [x for x in obj if isinstance(x, dict)]
+    elif isinstance(obj, dict):
+        raw = obj.get("items") or obj.get("review_tasks") or []
+        if isinstance(raw, list):
+            items = [x for x in raw if isinstance(x, dict)]
+    return items
+
+
+def _save_reviews(items: list[dict]) -> None:
+    """Save review tasks list to standard_reviews.json with metadata."""
+    path = _reviews_file()
+    payload = {
+        "items": items,
+        "updated_at": int(time.time()),
+    }
+    _write_json(path, payload)
+
+
+def _normalize_review_task(task: dict, standard_id: str | None = None) -> dict:
+    """Ensure required fields for a review task with safe defaults."""
+    t: dict[str, Any] = dict(task or {})
+    if standard_id:
+        t.setdefault("standard_id", standard_id)
+    # decision / status
+    t["decision"] = (t.get("decision") or "HOLD").upper()
+    t["status"] = (t.get("status") or "HOLD").upper()
+    # required_reviewers
+    try:
+        req = int(t.get("required_reviewers", 2))
+        if req <= 0:
+            req = 2
+    except Exception:
+        req = 2
+    t["required_reviewers"] = req
+    # approved_by list
+    ab = t.get("approved_by")
+    if isinstance(ab, list):
+        lst = [str(x) for x in ab]
+    elif ab is None:
+        lst = []
+    else:
+        lst = [str(ab)]
+    t["approved_by"] = lst
+    # reason_short
+    t["reason_short"] = t.get("reason_short") or ""
+    # log list
+    log = t.get("log") or []
+    if isinstance(log, list):
+        t["log"] = log
+    else:
+        t["log"] = [log]
+    return t
+
+
+def _find_review_index(items: list[dict], standard_id: str) -> int | None:
+    """Find index of review task by standard_id in items list."""
+    for idx, it in enumerate(items):
+        if str(it.get("standard_id")) == str(standard_id):
+            return idx
+    return None
+
+
 # ---------------------------------------------------------------------------
 # In-memory Async Task Manager (+SSE)
 # ---------------------------------------------------------------------------
@@ -1688,6 +1778,168 @@ def api_tools_approve_top(
         "sync_log": sync,
         "top": n,
     }
+
+
+# ---------------------------------------------------------------------------
+# Standards Reviews API — protected
+# ---------------------------------------------------------------------------
+
+@app.get("/api/standards/reviews")
+def api_standards_reviews_list(
+    status: str | None = Query(None),
+    decision: str | None = Query(None),
+    authorized: bool = Depends(authorize),
+):
+    """리뷰 큐 목록 조회.
+
+    - standard_reviews.json 에 저장된 리뷰 태스크 목록을 반환
+    - 선택적으로 status/decision 으로 필터 가능
+    - 응답은 SSOT에서 요구하는 ok+data(count/items) 구조를 따른다.
+    """
+    items = [_normalize_review_task(it) for it in _load_reviews()]
+
+    s = (status or "").strip().upper()
+    d = (decision or "").strip().upper()
+
+    def _match(it: dict) -> bool:
+        if s and str(it.get("status","")).upper() != s:
+            return False
+        if d and str(it.get("decision","")).upper() != d:
+            return False
+        return True
+
+    items_filtered = [it for it in items if _match(it)]
+    body = {
+        "ok": True,
+        "name": "standards_reviews_list",
+        "data": {
+            "count": len(items_filtered),
+            "items": items_filtered,
+        },
+    }
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/standards/reviews/{standard_id}/approve")
+def api_standards_reviews_approve(
+    standard_id: str,
+    req: ReviewApproveReq,
+    authorized: bool = Depends(authorize),
+):
+    """2인 검수 승인 플로우.
+
+    - status=HOLD 인 태스크에 대해 reviewer_id 를 approved_by 에 추가
+    - approved_by 길이가 required_reviewers(기본 2)에 도달하면 status=REVIEWED
+    - REVIEWED/PUBLISHED 인 상태에서 재호출 시에는 상태를 바꾸지 않고 그대로 반환
+    """
+    if not req.reviewer_id:
+        raise HTTPException(status_code=400, detail="reviewer_id required")
+
+    items = [_normalize_review_task(it) for it in _load_reviews()]
+    idx = _find_review_index(items, standard_id)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="review task not found")
+
+    task = items[idx]
+    # 멱등성을 위해 동일 reviewer_id 중복 추가는 허용하지 않음
+    reviewer = str(req.reviewer_id).strip()
+    if reviewer and reviewer not in task["approved_by"]:
+        task["approved_by"].append(reviewer)
+
+    # 상태 전이: HOLD -> REVIEWED (필요 시)
+    status_now = str(task.get("status", "HOLD")).upper()
+    if status_now == "HOLD":
+        if len(task["approved_by"]) >= int(task.get("required_reviewers", 2)):
+            task["status"] = "REVIEWED"
+
+    # PUBLISHED 인 경우에는 상태를 바꾸지 않고 그대로 반환 (idempotent)
+    # REVIEWED 상태에서 추가 승인 요청이 와도 그대로 유지
+
+    # 로그 기록
+    task_log = task.get("log") or []
+    if not isinstance(task_log, list):
+        task_log = [task_log]
+    task_log.append({
+        "ts": int(time.time()),
+        "event": "approve",
+        "reviewer_id": reviewer,
+    })
+    task["log"] = task_log
+
+    # 저장
+    items[idx] = task
+    _save_reviews(items)
+
+    body = {
+        "ok": True,
+        "name": "standards_reviews_approve",
+        "data": {
+            "review_task": task,
+        },
+    }
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/standards/reviews/{standard_id}/publish")
+def api_standards_reviews_publish(
+    standard_id: str,
+    authorized: bool = Depends(authorize),
+):
+    """REVIEWED → PUBLISHED 발행 플로우.
+
+    - status=REVIEWED 인 태스크만 발행 허용
+    - 발행 시 status=PUBLISHED 로 변경
+    - 정책 A안: decision 을 PASS 로 승격 (SSOT 초안 기준)
+    """
+    items = [_normalize_review_task(it) for it in _load_reviews()]
+    idx = _find_review_index(items, standard_id)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="review task not found")
+
+    task = items[idx]
+    status_now = str(task.get("status", "HOLD")).upper()
+    if status_now not in ("REVIEWED", "PUBLISHED"):
+        # 아직 리뷰 미완료(HOLD 등) 상태에서 발행 시도
+        raise HTTPException(status_code=409, detail="review task not reviewed")
+
+    # 이미 PUBLISHED 면 멱등하게 그대로 반환
+    if status_now == "PUBLISHED":
+        body = {
+            "ok": True,
+            "name": "standards_reviews_publish",
+            "data": {
+                "review_task": task,
+            },
+        }
+        return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+    # REVIEWED -> PUBLISHED 전이 + decision 승격(A안)
+    task["status"] = "PUBLISHED"
+    # 정책 A안: 발행된 표준은 PASS 로 간주
+    task["decision"] = "PASS"
+
+    # 로그 기록
+    task_log = task.get("log") or []
+    if not isinstance(task_log, list):
+        task_log = [task_log]
+    task_log.append({
+        "ts": int(time.time()),
+        "event": "publish",
+    })
+    task["log"] = task_log
+
+    items[idx] = task
+    _save_reviews(items)
+
+    body = {
+        "ok": True,
+        "name": "standards_reviews_publish",
+        "data": {
+            "review_task": task,
+        },
+    }
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
 
 # ---------------------------------------------------------------------------
 # Selection Approvals — protected (work JSON <-> publish JSON)
