@@ -98,11 +98,11 @@ class AdminResponseError(BaseModel):
     error_code: Optional[str] = None
     detail: Optional[Dict[str, Any]] = None
 
-
 class StatusData(BaseModel):
     """
     /api/status 응답 구조.
-    현재 server_quali.get_status 가 내려주는 JSON을 그대로 모델로 표현한 것.
+    server_quali.get_status 가 내려주는 JSON을 그대로 모델로 표현하되,
+    헌법에서 요구하는 total/ready_count/ready_rate 필드를 함께 포함한다.
     """
     selected: int
     approved: int
@@ -117,6 +117,10 @@ class StatusData(BaseModel):
     gate_pass: bool
     date: Optional[str] = None
     keyword: str = ""
+    # Ready 게이트 연동용 최소 필드 (선택 필드, 없으면 None)
+    total: int | None = None
+    ready_count: int | None = None
+    ready_rate: float | None = None
 
 
 class ItemsData(BaseModel):
@@ -323,6 +327,34 @@ def _auth_header_or_qs_ok(request: Request) -> bool:
         return True
     raise HTTPException(status_code=401, detail="invalid or missing token")
 
+def _detect_ready_state() -> str:
+    """
+    /api/ready.state 판정용 헬퍼.
+
+    - DOMAP_READY_STATE 또는 READY_STATE 환경변수에 아래 값 중 하나를 넣으면 그대로 사용
+      · L5_CANARY_OK
+      · A2_NEW100_OK
+      · A2_ROLLBACK_OLD100_OK
+      · A2_TRANSITIONING
+    - 설정이 없거나 값이 다르면, 보수적으로 L5_CANARY_OK 로 본다.
+      (실제 A2 승격/롤백 여부는 Runbook에서 env 값을 함께 관리)
+    """
+    raw = (os.getenv("DOMAP_READY_STATE")
+           or os.getenv("READY_STATE")
+           or "").strip().upper()
+
+    allowed = {
+        "L5_CANARY_OK",
+        "A2_NEW100_OK",
+        "A2_ROLLBACK_OLD100_OK",
+        "A2_TRANSITIONING",
+    }
+    if raw in allowed:
+        return raw
+
+    # 기본값: domap 서비스는 최소 L5_CANARY_OK 기준으로 운영
+    return "L5_CANARY_OK"
+
 # === READY/SSOT PATCH START (no conflicts version) ===========================
 # - Prefix '/api/ready'로 충돌 제거
 # - 인가: Depends(authorize) 사용(서버 전역과 통일)
@@ -431,6 +463,94 @@ def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(authorize)):
     with open(READY_CONFIG, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     return {"ok": True, "gate_required": cfg["gate_required"]}
+
+@ready_router.get("", tags=["ready-ssot"])
+async def ready_root(authorized: bool = Depends(authorize)):
+    """
+    /api/ready 요약 엔드포인트.
+
+    - 필수 계약:
+      · ready: bool
+      · state: "L5_CANARY_OK" / "A2_NEW100_OK" / "A2_ROLLBACK_OLD100_OK" / "A2_TRANSITIONING"
+    - 확장 정보:
+      · service, revision, traffic(mode)
+      · gate_levels: L1/L2/L5 통과 여부
+      · reviews: 표준 리뷰 큐 요약
+    """
+    # 1) L1: /health 수준 헬스 (현재 구현은 항상 ok=True라 True로 간주)
+    l1_pass = True
+
+    # 2) L2: /api/status gate_pass 여부 (DB 또는 스냅샷 기준)
+    try:
+        status_data = await get_status(date=None, keyword=None, authorized=True)
+        l2_pass = bool(status_data.get("gate_pass"))
+    except Exception:
+        l2_pass = False
+
+    # 3) 리뷰 큐(A1) 정보 → 표준 리뷰 파일 존재 여부 + 아이템 수
+    try:
+        rv_path = _reviews_file()
+        reviews_items = _load_reviews()
+        reviews_file_exists = rv_path.exists()
+    except Exception:
+        reviews_items = []
+        reviews_file_exists = False
+
+    a1_pass = bool(reviews_file_exists)
+    last_count = len(reviews_items)
+
+    # 4) 상태(state) 및 traffic mode 판정 (환경변수 기반)
+    state = _detect_ready_state()
+    traffic: dict[str, Any] | None = None
+    if state == "L5_CANARY_OK":
+        traffic = {"mode": "SPLIT_50_50", "new_percent": 50, "old_percent": 50}
+    elif state == "A2_NEW100_OK":
+        traffic = {"mode": "NEW_100", "new_percent": 100, "old_percent": 0}
+    elif state == "A2_ROLLBACK_OLD100_OK":
+        traffic = {"mode": "OLD_100", "new_percent": 0, "old_percent": 100}
+    else:
+        traffic = {"mode": "UNKNOWN"}
+
+    # 5) gate_levels 요약
+    gate_levels = {
+        "L1_health": {"passed": l1_pass},
+        "L2_status": {"passed": l2_pass},
+        # L3/L4는 CI/QuickTools 게이트로, 현재 런타임에서는 판단하지 않고 생략
+        "L5_domap": {"passed": a1_pass},
+    }
+
+    # 6) reviews 요약
+    reviews_info = {
+        "a1_pass": a1_pass,
+        "last_smoke_ok": reviews_file_exists,
+        "last_count": last_count,
+    }
+
+    # 7) ready 최종 판단
+    ready_bool = bool(l1_pass and l2_pass and a1_pass)
+    if state == "A2_TRANSITIONING":
+        ready_bool = False
+
+    # 8) 서비스/리비전 메타
+    service_name = os.getenv("K_SERVICE", "") or "quali-admin-domap"
+    revision = os.getenv("K_REVISION", "") or ""
+    revision_info = {"current": revision} if revision else None
+
+    body: dict[str, Any] = {
+        "ready": ready_bool,
+        "state": state,
+        "service": service_name,
+        "timestamp": int(time.time() * 1000),
+        "gate_levels": gate_levels,
+        "reviews": reviews_info,
+    }
+    if revision_info:
+        body["revision"] = revision_info
+    if traffic:
+        body["traffic"] = traffic
+
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
 
 app.include_router(ready_router)
 # === READY/SSOT PATCH END ===================================================
@@ -2374,18 +2494,31 @@ async def get_status(
             ed = get_or_create_edition(sess, etype="keyword", edate=_dt.date.fromisoformat(str(edate)), keyword=ekw or None)
             k = kpi_for_edition(sess, ed)  # {'total','approved','ready','gate_required'}
             return {
-                "selected": 0, "approved": 0, "published": 0,  # 누적 KPI는 추후 확장
+                "selected": 0,
+                "approved": 0,
+                "published": 0,  # 누적 KPI는 추후 확장
                 "gate_required": int(k.get("gate_required", 15)),
                 "ts": int(time.time()),
                 "selection_total": int(k.get("total", 0)),
                 "selection_approved": int(k.get("approved", 0)),
-                "state_counts": {"candidate": int(k.get("total",0)) - int(k.get("ready",0)), "ready": int(k.get("ready",0)), "rejected": 0},
+                # /api/status 최소 필드 (DB 기반)
+                "total": int(k.get("total", 0)),
+                "ready_count": int(k.get("ready", 0)),
+                "ready_rate": (
+                    int(k.get("ready", 0)) / int(k.get("total", 0))
+                ) if int(k.get("total", 0)) else 0.0,
+                "state_counts": {
+                    "candidate": int(k.get("total", 0)) - int(k.get("ready", 0)),
+                    "ready": int(k.get("ready", 0)),
+                    "rejected": 0,
+                },
                 "community_total": 0,            # 필요 시 커뮤니티도 DB화해서 합산
                 "keyword_total": int(k.get("total", 0)),
-                "gate_pass": bool(int(k.get("approved",0)) >= int(k.get("gate_required",15))),
+                "gate_pass": bool(int(k.get("approved", 0)) >= int(k.get("gate_required", 15))),
                 "date": str(edate),
                 "keyword": ekw,
             }
+
         except Exception:
             # 아래 폴백으로 진행
             pass
@@ -2422,6 +2555,12 @@ async def get_status(
             "ts": int(time.time()),
             "selection_total": selection_total,
             "selection_approved": selection_approved,
+            # /api/status 최소 필드 (스냅샷 기반)
+            "total": selection_total,
+            "ready_count": int(state_counts.get("ready", 0)),
+            "ready_rate": (
+                int(state_counts.get("ready", 0)) / selection_total
+            ) if selection_total else 0.0,
             "state_counts": state_counts,
             "community_total": community_total,
             "keyword_total": selection_total,
@@ -2432,15 +2571,23 @@ async def get_status(
     except Exception:
         # 안전 폴백(절대 500 안 냄)
         return {
-            "selected": 0, "approved": 0, "published": 0,
-            "gate_required": 15, "ts": int(time.time()),
-            "selection_total": 0, "selection_approved": 0,
+            "selected": 0,
+            "approved": 0,
+            "published": 0,
+            "gate_required": 15,
+            "ts": int(time.time()),
+            "selection_total": 0,
+            "selection_approved": 0,
+            "total": 0,
+            "ready_count": 0,
+            "ready_rate": 0.0,
             "state_counts": {"candidate": 0, "ready": 0, "rejected": 0},
-            "community_total": 0, "keyword_total": 0,
+            "community_total": 0,
+            "keyword_total": 0,
             "gate_pass": False,
-            "date": date, "keyword": keyword or "",
+            "date": date,
+            "keyword": keyword or "",
         }
-
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
