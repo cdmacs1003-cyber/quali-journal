@@ -98,11 +98,11 @@ class AdminResponseError(BaseModel):
     error_code: Optional[str] = None
     detail: Optional[Dict[str, Any]] = None
 
-
 class StatusData(BaseModel):
     """
     /api/status 응답 구조.
-    현재 server_quali.get_status 가 내려주는 JSON을 그대로 모델로 표현한 것.
+    현재 server_quali.get_status 가 내려주는 JSON을 그대로 모델로 표현하되,
+    헌법에서 쓰는 total/ready_count/ready_rate 필드를 함께 포함한다.
     """
     selected: int
     approved: int
@@ -117,7 +117,10 @@ class StatusData(BaseModel):
     gate_pass: bool
     date: Optional[str] = None
     keyword: str = ""
-
+    # Ready 게이트 연동용 필드 (없으면 None)
+    total: int | None = None
+    ready_count: int | None = None
+    ready_rate: float | None = None
 
 class ItemsData(BaseModel):
     """
@@ -2374,18 +2377,31 @@ async def get_status(
             ed = get_or_create_edition(sess, etype="keyword", edate=_dt.date.fromisoformat(str(edate)), keyword=ekw or None)
             k = kpi_for_edition(sess, ed)  # {'total','approved','ready','gate_required'}
             return {
-                "selected": 0, "approved": 0, "published": 0,  # 누적 KPI는 추후 확장
+                "selected": 0,
+                "approved": 0,
+                "published": 0,  # 누적 KPI는 추후 확장
                 "gate_required": int(k.get("gate_required", 15)),
                 "ts": int(time.time()),
                 "selection_total": int(k.get("total", 0)),
                 "selection_approved": int(k.get("approved", 0)),
-                "state_counts": {"candidate": int(k.get("total",0)) - int(k.get("ready",0)), "ready": int(k.get("ready",0)), "rejected": 0},
+                # /api/status 최소 필드 (DB 기반)
+                "total": int(k.get("total", 0)),
+                "ready_count": int(k.get("ready", 0)),
+                "ready_rate": (
+                    int(k.get("ready", 0)) / int(k.get("total", 0))
+                ) if int(k.get("total", 0)) else 0.0,
+                "state_counts": {
+                    "candidate": int(k.get("total", 0)) - int(k.get("ready", 0)),
+                    "ready": int(k.get("ready", 0)),
+                    "rejected": 0,
+                },
                 "community_total": 0,            # 필요 시 커뮤니티도 DB화해서 합산
                 "keyword_total": int(k.get("total", 0)),
-                "gate_pass": bool(int(k.get("approved",0)) >= int(k.get("gate_required",15))),
+                "gate_pass": bool(int(k.get("approved", 0)) >= int(k.get("gate_required", 15))),
                 "date": str(edate),
                 "keyword": ekw,
             }
+
         except Exception:
             # 아래 폴백으로 진행
             pass
@@ -2422,6 +2438,12 @@ async def get_status(
             "ts": int(time.time()),
             "selection_total": selection_total,
             "selection_approved": selection_approved,
+            # /api/status 최소 필드 (스냅샷 기반)
+            "total": selection_total,
+            "ready_count": int(state_counts.get("ready", 0)),
+            "ready_rate": (
+                int(state_counts.get("ready", 0)) / selection_total
+            ) if selection_total else 0.0,
             "state_counts": state_counts,
             "community_total": community_total,
             "keyword_total": selection_total,
@@ -2429,16 +2451,26 @@ async def get_status(
             "date": date or work.get("date"),
             "keyword": (keyword or work.get("keyword", "")).strip(),
         }
+
     except Exception:
         # 안전 폴백(절대 500 안 냄)
         return {
-            "selected": 0, "approved": 0, "published": 0,
-            "gate_required": 15, "ts": int(time.time()),
-            "selection_total": 0, "selection_approved": 0,
+            "selected": 0,
+            "approved": 0,
+            "published": 0,
+            "gate_required": 15,
+            "ts": int(time.time()),
+            "selection_total": 0,
+            "selection_approved": 0,
+            "total": 0,
+            "ready_count": 0,
+            "ready_rate": 0.0,
             "state_counts": {"candidate": 0, "ready": 0, "rejected": 0},
-            "community_total": 0, "keyword_total": 0,
+            "community_total": 0,
+            "keyword_total": 0,
             "gate_pass": False,
-            "date": date, "keyword": keyword or "",
+            "date": date,
+            "keyword": keyword or "",
         }
 
 
