@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 from fastapi.testclient import TestClient
+import pytest  # A1/A2/A3 Gate 공통 테스트를 위해 추가
 
 # tests\*.py 기준으로 admin 루트를 sys.path에 추가
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -21,7 +22,22 @@ client = TestClient(app)
 
 # 헤더에 사용할 토큰은 ENV와 동일 값으로 사용
 ADMIN_TOKEN = os.environ["ADMIN_TOKEN"]
-STD_ID = "TEST-STD-1"
+
+# A1/A2/A3 Gate용 테스트 표준 ID 집합
+# - TEST-STD-1: A1 Gate (기존)
+# - TEST-STD-2: A2 Gate (테스트 전용)
+# - TEST-STD-3: A3 Gate (테스트 전용)
+STD_IDS = [
+    pytest.param("TEST-STD-1", id="gate-A1"),
+    pytest.param("TEST-STD-2", id="gate-A2"),
+    pytest.param("TEST-STD-3", id="gate-A3"),
+]
+
+
+def _headers():
+    # 헌법/Runbook 기준: X-Admin-Token 헤더 필수
+    return {"X-Admin-Token": ADMIN_TOKEN}
+
 
 
 def _headers():
@@ -29,9 +45,10 @@ def _headers():
     return {"X-Admin-Token": ADMIN_TOKEN}
 
 
-def test_a1_state_machine_flow():
+@pytest.mark.parametrize("std_id", STD_IDS)
+def test_a1_state_machine_flow(std_id):
     """
-    L3 표준 리뷰 A1 Gate – 상태머신 상수화 테스트.
+    L3 표준 리뷰 A1/A2/A3 Gate – 상태머신 상수화 테스트.
 
     Flow:
       1) test/init (reset=True)
@@ -45,7 +62,7 @@ def test_a1_state_machine_flow():
     # 1) 테스트 카드 시드 생성 (reset=true)
     resp = client.post(
         "/api/standards/reviews/test/init",
-        json={"standard_id": STD_ID, "reset": True},
+        json={"standard_id": std_id, "reset": True},
         headers=_headers(),
     )
     assert resp.status_code == 200
@@ -54,12 +71,12 @@ def test_a1_state_machine_flow():
     data = body.get("data", body)
     task = data.get("review_task", data)
 
-    assert task["standard_id"] == STD_ID
+    assert task["standard_id"] == std_id
     assert task["status"] == "HOLD"
     assert task.get("required_reviewers", 2) == 2
     assert task.get("approved_by", []) == []
 
-    # 2) HOLD 리스트에서 TEST-STD-1 확인 :contentReference[oaicite:5]{index=5}
+    # 2) HOLD 리스트에서 해당 STD 확인
     resp = client.get(
         "/api/standards/reviews?status=HOLD",
         headers=_headers(),
@@ -69,15 +86,15 @@ def test_a1_state_machine_flow():
     items = data.get("items", data.get("reviews", []))
 
     assert any(
-        it.get("standard_id") == STD_ID
+        it.get("standard_id") == std_id
         and it.get("status") == "HOLD"
         and it.get("approved_by", []) == []
         for it in items
     )
 
-    # 3) 1차 승인(r1) – 여전히 HOLD 유지 (required_reviewers=2) :contentReference[oaicite:6]{index=6}
+    # 3) 1차 승인(r1) – 여전히 HOLD 유지 (required_reviewers=2)
     resp = client.post(
-        f"/api/standards/reviews/{STD_ID}/approve",
+        f"/api/standards/reviews/{std_id}/approve",
         json={"reviewer_id": "r1"},
         headers=_headers(),
     )
@@ -89,13 +106,13 @@ def test_a1_state_machine_flow():
 
     # 4) 2차 승인(r2) – REVIEWED 전환
     resp = client.post(
-        f"/api/standards/reviews/{STD_ID}/approve",
+        f"/api/standards/reviews/{std_id}/approve",
         json={"reviewer_id": "r2"},
         headers=_headers(),
     )
     assert resp.status_code == 200
 
-    # REVIEWED 리스트에서 확인 :contentReference[oaicite:7]{index=7}
+    # REVIEWED 리스트에서 확인
     resp = client.get(
         "/api/standards/reviews?status=REVIEWED",
         headers=_headers(),
@@ -106,17 +123,17 @@ def test_a1_state_machine_flow():
 
     reviewed = [
         it for it in items
-        if it.get("standard_id") == STD_ID
+        if it.get("standard_id") == std_id
     ]
-    assert reviewed, "REVIEWED 리스트에 TEST-STD-1이 있어야 합니다."
+    assert reviewed, "REVIEWED 리스트에 테스트 STD가 있어야 합니다."
     task = reviewed[0]
     assert task["status"] == "REVIEWED"
     assert set(task.get("approved_by", [])) >= {"r1", "r2"}
     assert task.get("required_reviewers", 2) == 2
 
-    # 5) publish – PUBLISHED + PASS 승격 :contentReference[oaicite:8]{index=8} :contentReference[oaicite:9]{index=9}
+    # 5) publish – PUBLISHED + PASS 승격
     resp = client.post(
-        f"/api/standards/reviews/{STD_ID}/publish",
+        f"/api/standards/reviews/{std_id}/publish",
         headers={**_headers(), "Content-Length": "0"},
     )
     assert resp.status_code == 200
@@ -131,17 +148,19 @@ def test_a1_state_machine_flow():
 
     published = [
         it for it in items
-        if it.get("standard_id") == STD_ID
+        if it.get("standard_id") == std_id
     ]
-    assert published, "PUBLISHED 리스트에 TEST-STD-1이 있어야 합니다."
+    assert published, "PUBLISHED 리스트에 테스트 STD가 있어야 합니다."
     task = published[0]
     assert task["status"] == "PUBLISHED"
     assert set(task.get("approved_by", [])) >= {"r1", "r2"}
     assert task.get("decision") == "PASS"
 
-def test_a1_state_machine_error_cases():
+
+@pytest.mark.parametrize("std_id", STD_IDS)
+def test_a1_state_machine_error_cases(std_id):
     """
-    표준 리뷰 A1 Gate – 에러 케이스(B/C Gate) 상수화 테스트.
+    표준 리뷰 A1/A2/A3 Gate – 에러 케이스 상수화 테스트.
 
     케이스:
       1) 존재하지 않는 ID에 대한 approve → 404 + "review task not found"
@@ -150,10 +169,10 @@ def test_a1_state_machine_error_cases():
     """
 
     # 먼저 정상 테스트 카드가 있다는 것을 보장한다.
-    # reset=true 로 큐를 초기화하고 TEST-STD-1 HOLD 카드 1개만 남긴다.
+    # reset=true 로 큐를 초기화하고 해당 STD HOLD 카드 1개만 남긴다.
     resp = client.post(
         "/api/standards/reviews/test/init",
-        json={"standard_id": STD_ID, "reset": True},
+        json={"standard_id": std_id, "reset": True},
         headers=_headers(),
     )
     assert resp.status_code == 200
@@ -174,18 +193,19 @@ def test_a1_state_machine_error_cases():
     # 다시 한 번 reset=true 로 HOLD 상태를 보장한다.
     resp = client.post(
         "/api/standards/reviews/test/init",
-        json={"standard_id": STD_ID, "reset": True},
+        json={"standard_id": std_id, "reset": True},
         headers=_headers(),
     )
     assert resp.status_code == 200
 
     # 승인 없이 바로 publish 호출
     resp = client.post(
-        f"/api/standards/reviews/{STD_ID}/publish",
+        f"/api/standards/reviews/{std_id}/publish",
         headers={**_headers(), "Content-Length": "0"},
     )
     assert resp.status_code == 409
     body = resp.json()
     detail = body.get("detail") or body.get("error") or ""
     assert "review task not reviewed" in str(detail)
+
 
