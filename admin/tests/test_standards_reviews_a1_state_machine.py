@@ -138,3 +138,54 @@ def test_a1_state_machine_flow():
     assert task["status"] == "PUBLISHED"
     assert set(task.get("approved_by", [])) >= {"r1", "r2"}
     assert task.get("decision") == "PASS"
+
+def test_a1_state_machine_error_cases():
+    """
+    표준 리뷰 A1 Gate – 에러 케이스(B/C Gate) 상수화 테스트.
+
+    케이스:
+      1) 존재하지 않는 ID에 대한 approve → 404 + "review task not found"
+      2) HOLD 상태에서 바로 publish → 409 + "review task not reviewed"
+    C 헌법 Runbook 에 정의된 에러 규칙을 그대로 검증한다.
+    """
+
+    # 먼저 정상 테스트 카드가 있다는 것을 보장한다.
+    # reset=true 로 큐를 초기화하고 TEST-STD-1 HOLD 카드 1개만 남긴다.
+    resp = client.post(
+        "/api/standards/reviews/test/init",
+        json={"standard_id": STD_ID, "reset": True},
+        headers=_headers(),
+    )
+    assert resp.status_code == 200
+
+    # 1) 존재하지 않는 ID에 대한 approve → 404 + detail 메시지 확인
+    resp = client.post(
+        "/api/standards/reviews/NO-SUCH-ID/approve",
+        json={"reviewer_id": "rX"},
+        headers=_headers(),
+    )
+    assert resp.status_code == 404
+    body = resp.json()
+    # 공통 에러 스키마 {ok:false,error_code,...,detail} 를 감안해서 detail 필드를 중심으로 본다.
+    detail = body.get("detail") or body.get("error") or ""
+    assert "review task not found" in str(detail)
+
+    # 2) HOLD 상태에서 바로 publish → 409 + detail 메시지 확인
+    # 다시 한 번 reset=true 로 HOLD 상태를 보장한다.
+    resp = client.post(
+        "/api/standards/reviews/test/init",
+        json={"standard_id": STD_ID, "reset": True},
+        headers=_headers(),
+    )
+    assert resp.status_code == 200
+
+    # 승인 없이 바로 publish 호출
+    resp = client.post(
+        f"/api/standards/reviews/{STD_ID}/publish",
+        headers={**_headers(), "Content-Length": "0"},
+    )
+    assert resp.status_code == 409
+    body = resp.json()
+    detail = body.get("detail") or body.get("error") or ""
+    assert "review task not reviewed" in str(detail)
+
