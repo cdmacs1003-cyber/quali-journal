@@ -72,5 +72,13 @@ jobs:
           # 위치: admin/tests/test_tools_quick.py
           python -m pytest -q tests/test_tools_quick.py
 
+      - name: Run standards reviews A1 state-machine test
+        working-directory: admin
+        run: |
+          # 표준 리뷰 A1 Gate 상태머신 검증용 pytest
+          # 위치: admin/tests/test_standards_reviews_a1_state_machine.py
+          python -m pytest -q tests/test_standards_reviews_a1_state_machine.py -vv
+
+
 
 
