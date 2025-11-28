@@ -45,6 +45,16 @@ except Exception:
     _DB_READY = False
 # ============================================================================ 
 
+# === Optional GCS client (보고서 백업용; 없어도 동작) =========================
+try:
+    from google.cloud import storage  # type: ignore
+    _GCS_READY = True
+except Exception:  # pragma: no cover
+    # 라이브러리가 없거나 자격증명이 없으면 GCS 업로드는 비활성화
+    storage = None  # type: ignore
+    _GCS_READY = False
+# ============================================================================ 
+
 
 # SSOT: 서브프로세스도 이 파이썬으로 실행
 PYEXE = os.getenv("PYTHON_EXE") or sys.executable or "python"
@@ -194,6 +204,21 @@ class ReviewApproveReq(BaseModel):
     """
     reviewer_id: str = Field(..., description="검수자 ID (이름/이메일/계정)")
 
+class ReviewTestInitReq(BaseModel):
+    """
+    표준 리뷰 테스트 카드 시드를 위한 요청 스키마.
+
+    - standard_id: 테스트용 표준 ID (기본값 TEST-STD-1)
+    - reset: True 이면 기존 리뷰 큐를 비우고 이 카드 1개만 남긴다.
+    """
+    standard_id: str = Field(
+        default="TEST-STD-1",
+        description="테스트용 standard_id (기본값 TEST-STD-1)",
+    )
+    reset: bool = Field(
+        default=False,
+        description="기존 리뷰 큐를 지우고 이 테스트 카드 1개만 남길지 여부",
+    )
 
 class EnrichReq(BaseModel):
     date: Optional[str] = None
@@ -442,6 +467,14 @@ app.include_router(ready_router)
 # ---------------------------------------------------------------------------
 BASE = Path(__file__).resolve().parent  # admin/
 
+def _is_cloud() -> bool:
+    """Cloud Run 여부: K_SERVICE 환경변수 기준."""
+    try:
+        return bool(os.getenv("K_SERVICE"))
+    except Exception:
+        return False
+
+
 def _detect_root() -> Path:
     """
     Orchestrator root auto-detection:
@@ -451,7 +484,14 @@ def _detect_root() -> Path:
     for r in cands:
         if (r / "orchestrator.py").exists():
             return r
+    # orchestrator.py 가 하나도 없을 때:
+    # - Cloud Run(컨테이너): BASE(/app)를 ROOT로 사용
+    # - 로컬: BASE.parent(프로젝트 루트)를 ROOT로 사용
+    if _is_cloud():
+        return BASE
     return BASE.parent
+
+
 
 ROOT = _detect_root()
 # 로컬에서만 쓰는 기본 archive 경로(Cloud Run에서는 아래에서 /tmp로 치환)
@@ -464,12 +504,9 @@ SEL_COMM = ROOT / "selected_community.json"
 SEL_WORK = ROOT / "data" / "selected_keyword_articles.json"
 SEL_PUB  = ROOT / "selected_articles.json"
 
-# define early to avoid import-order NameError
-try:
-    import os as _os_for_cloud  # 로컬 import로 의존성 최소화
-    IS_CLOUD = bool(_os_for_cloud.getenv("K_SERVICE"))
-except Exception:
-    IS_CLOUD = False
+# Cloud Run 여부 플래그 (K_SERVICE 기준)
+IS_CLOUD = _is_cloud()
+
 
 ARCHIVE_CLOUD = Path("/tmp/archive")
 
@@ -503,6 +540,12 @@ CONFIG_FILE = ROOT / "config.json"
 # runtime small stores
 GATE = {"gate_required": 15}
 KPI = {}
+
+# 빌드 태그(Cloud Run /health 응답 확인용)
+# - 기본값: admin-20251126-A1
+# - 필요하면 Cloud Run 환경변수 QUALI_BUILD_TAG 로 덮어쓸 수 있음
+BUILD_TAG = os.getenv("QUALI_BUILD_TAG", "admin-20251127-R1")
+
 # === SAFE LOGGING (Cloud Run & local) =====================================
 # 여기서는 import를 새로 하지 않고, 파일 상단의
 # os / sys / logging / Path / IS_CLOUD 을 그대로 재사용한다.
@@ -523,6 +566,48 @@ logging.basicConfig(
 )
 logger = logging.getLogger("server")
 logger.info("server_quali logger initialized (file logging=%s)", bool(LOGS_DIR))
+
+def _upload_report_to_gcs(local_path: Path, rel_path: str) -> bool:
+    """
+    /api/report 결과물을 GCS 버킷으로 best-effort 업로드.
+    - 환경변수 GCS_BUCKET 이 비어 있거나 클라이언트가 없으면 False 반환.
+    - 업로드 실패해도 예외를 넘기지 않고 경고 로그만 남긴다.
+    - rel_path 는 'archive/reports/...' 같은 웹 경로를 기대하며,
+      GCS object name 으로 그대로 사용한다.
+    """
+    bucket_name = (os.getenv("GCS_BUCKET") or "").strip()
+    if not bucket_name or not _GCS_READY:
+        # GCS 사용 불가 상태 → 그냥 로컬 파일만 두고 종료
+        return False
+
+    # 앞쪽에 '/'가 붙어 있으면 제거하고 object 이름으로 사용
+    blob_name = rel_path.lstrip("/") or local_path.name
+
+    try:
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        blob.upload_from_filename(str(local_path))
+
+        try:
+            logger.info(
+                "REPORT_GCS_UPLOAD_OK bucket=%s blob=%s size=%s",
+                bucket_name,
+                blob_name,
+                local_path.stat().st_size,
+            )
+        except Exception:
+            # 로깅 실패는 조용히 무시
+            pass
+        return True
+    except Exception as e:
+        # 업로드 실패해도 /api/report 응답은 그대로 200 유지
+        try:
+            logger.warning("REPORT_GCS_UPLOAD_FAILED: %s", e)
+        except Exception:
+            pass
+        return False
+
 # =========================================================================
 # FastAPI app
 # ---------------------------------------------------------------------------
@@ -640,13 +725,11 @@ async def health():
     # Cloud Run / 로컬 모두 공통 사용:
     # - ok: 헬스 자체 OK 여부
     # - status: 이전 버전과의 호환용 플래그
-    return {"ok": True, "status": True}
-
+    return {"ok": True, "status": True, "build": BUILD_TAG}
 
 @app.get("/readyz", include_in_schema=False)
 async def readyz():
     return {"ready": True}
-
 
 @app.get("/api/db/mode")
 def db_mode():
@@ -1082,13 +1165,34 @@ def _read_any_items(root: Path):
 # ---------------------------------------------------------------------------
 
 def _reviews_file() -> Path:
-    """Return path to standard_reviews.json under logs directory (SSOT)."""
-    base = LOGS_DIR or (ROOT / "logs")
+    """Return path to standard_reviews.json under logs directory (SSOT).
+
+    Cloud Run:
+        - LOGS_DIR 가 설정되어 있으면: LOGS_DIR (보통 /tmp/logs)
+        - LOGS_DIR 가 없으면: /tmp/logs 로 강제
+    Local:
+        - LOGS_DIR 가 설정되어 있으면: LOGS_DIR
+        - LOGS_DIR 가 없으면: ROOT / "logs"
+    """
+    # 1) LOGS_DIR 우선 사용
+    if LOGS_DIR is not None:
+        base = LOGS_DIR
+    else:
+        # 2) Cloud Run 이면 무조건 /tmp/logs
+        if IS_CLOUD:
+            base = Path("/tmp/logs")
+        else:
+            # 3) 로컬에서는 프로젝트 루트/logs
+            base = ROOT / "logs"
+
     try:
         base.mkdir(parents=True, exist_ok=True)
     except Exception:
+        # 디렉터리 생성 실패가 나더라도 앱이 부팅은 되도록 방어
         pass
+
     return base / "standard_reviews.json"
+
 
 
 def _load_reviews() -> list[dict]:
@@ -1554,8 +1658,19 @@ def post_report(payload: dict | None = Body(default=None), authorized: bool = De
 
         out = reports_dir / f"{date}_{keyword}_report.md"
         out.write_text("\n".join(lines), encoding="utf-8")
+
+        # 웹에서 접근할 상대 경로 (로컬 /archive 정적 서빙 + GCS object path 공통 사용)
         rel = f"archive/reports/{out.name}"
+
+        # GCS_BUCKET 이 설정되어 있으면 best-effort 로 GCS에도 업로드
+        try:
+            _upload_report_to_gcs(out, rel)
+        except Exception:
+            # 업로드 중 문제는 /api/report 응답에 영향을 주지 않도록 삼킨다.
+            pass
+
         return _ok("report", path=rel, count=len(items), duration_ms=_now_ms() - t0)
+
     except Exception as e:
         # E2: 파일 쓰기 등 내부 오류 → ok=False + error_code
         return _err(
@@ -1943,6 +2058,109 @@ def api_standards_reviews_publish(
     }
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
+@app.post("/api/standards/reviews/test/init")
+def api_standards_reviews_test_init(
+    req: ReviewTestInitReq,
+    authorized: bool = Depends(authorize),
+):
+    """
+    테스트용 리뷰 카드 1개를 보장해 주는 Admin 전용 엔드포인트.
+
+    - reset=True  이면: 기존 큐를 모두 비우고 테스트 카드 1개만 남긴다.
+    - reset=False 이면: 같은 standard_id 카드가 있으면 그대로 normalize 해서 반환,
+                        없으면 새로 생성해서 큐에 추가한다.
+    """
+    std_id = (req.standard_id or "TEST-STD-1").strip() or "TEST-STD-1"
+
+    # 현재 큐 로드 + normalize
+    items = [_normalize_review_task(it) for it in _load_reviews()]
+
+    # reset 옵션 처리: 큐를 깨끗이 비우고 새로 시작
+    if req.reset:
+        items = []
+
+    # 이미 같은 standard_id 가 있는지 먼저 확인
+    for it in items:
+        sid = str(it.get("standard_id") or (it.get("item") or {}).get("id") or "")
+        if sid == std_id:
+            task = _normalize_review_task(it, standard_id=std_id)
+            _save_reviews(items)
+            return {
+                "ok": True,
+                "name": "standards_reviews_test_init",
+                "data": {
+                    "review_task": task,
+                    "created": False,
+                    "reset": req.reset,
+                },
+            }
+
+    # 여기까지 왔다는 것은: 해당 ID 카드가 없다는 뜻 → 새로 만든다.
+    now = int(time.time())
+
+    standard_key = {
+        "name": "QualiJournal-Admin-Standards-API",
+        "rev": "v1",
+        "date": "2025-11-19",
+    }
+
+    item = {
+        "id": std_id,
+        "title": "[TEST] HOLD→REVIEWED→PUBLISHED 상태머신 검증용 표준",
+        "url": "https://example.com/qualijournal/test-standard",
+        "standard_key": standard_key,
+        # 4축 스코어 예시: PASS 임계점보다 살짝 낮게 잡아서 기본 HOLD 유지
+        "score_regular": 3,
+        "score_applic": 3,
+        "score_evid": 3,
+        "score_trust": 3,
+        "score_total": 12,
+        "decision": "HOLD",
+        "reason_short": "[TEST] 자동 생성된 상태머신 검증용 카드",
+        "meta": {
+            "publisher": "QualiJournal-Test",
+            "published_at": None,
+            "language": "en",
+            "tags": ["TEST", "STATE_MACHINE"],
+        },
+        "log": {
+            "created_at": now,
+            "updated_at": now,
+            "created_by": "system",
+            "updated_by": "system",
+        },
+    }
+
+    task = {
+        "standard_id": std_id,
+        "status": "HOLD",
+        "decision": "HOLD",
+        "required_reviewers": 2,
+        "approved_by": [],
+        "item": item,
+        "log": {
+            "created_at": now,
+            "updated_at": now,
+            "history": [
+                {"ts": now, "event": "init_test_task", "by": "system"},
+            ],
+        },
+    }
+
+    # normalize 로 필수 필드/기본값 정리
+    task = _normalize_review_task(task, standard_id=std_id)
+    items.append(task)
+    _save_reviews(items)
+
+    return {
+        "ok": True,
+        "name": "standards_reviews_test_init",
+        "data": {
+            "review_task": task,
+            "created": True,
+            "reset": req.reset,
+        },
+    }
 
 # ---------------------------------------------------------------------------
 # Selection Approvals — protected (work JSON <-> publish JSON)
