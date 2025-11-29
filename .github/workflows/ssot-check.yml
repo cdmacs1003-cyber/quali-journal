@@ -137,10 +137,15 @@ jobs:
           fi
 
           # 5-4) .count/.items JSON 검증
-          if ! grep -qF "jq -e '.count != null and .items != null'" "$FILE"; then
+          # - 과거 버전: jq -e '.count != null and .items != null'
+          # - 현재 버전: jq -e '(.count != null and .items != null) or (.data.count != null and .data.items != null)'
+          # 두 경우 모두 '.count != null and .items != null' 서브스트링을 포함하므로,
+          # jq 전체 문자열 대신 이 서브스트링 기준으로만 검증한다.
+          if ! grep -qF ".count != null and .items != null" "$FILE"; then
             echo "::error ::smoke_once 내에 '.count != null and .items != null' JSON 검증이 없습니다."
             exit 1
           fi
+
 
           # 5-5) Single smoke 로그 + if ! smoke_once; then 패턴
           if ! grep -qF '== Single smoke: /api/standards/reviews ==' "$FILE"; then
