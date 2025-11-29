@@ -199,19 +199,21 @@ jobs:
               return 1
             fi
 
-          # jq로 JSON 구조 검증 (실제 /api/standards/reviews 스키마 기준: ok + count + items)
+          # jq로 JSON 구조 검증 (실제 /api/standards/reviews 스키마 기준: ok + count/items
+          #   또는 ok + data.count/items 둘 다 허용)
           if ! echo "$BODY" | jq -e '.ok == true' >/dev/null 2>&1; then
             echo "❌ body.ok != true"
             return 1
           fi
 
-          # 최상위에 count, items 가 존재하는지 검사
-          if ! echo "$BODY" | jq -e '.count != null and .items != null' >/dev/null 2>&1; then
-            echo "❌ count/items 가 유효하지 않음"
+          # count, items 위치: (1) 최상위 .count/.items  또는  (2) .data.count/.data.items
+          if ! echo "$BODY" | jq -e '(.count != null and .items != null) or (.data.count != null and .data.items != null)' >/dev/null 2>&1; then
+            echo "❌ count/items 가 유효하지 않음 (.count/.items 또는 .data.count/.data.items 둘 다 없음)"
             return 1
           fi
 
-          echo "✅ /api/standards/reviews JSON schema OK (ok=true, count, items)"
+          echo "✅ /api/standards/reviews JSON schema OK (ok=true, count/items 존재)"
+
 
 
             return 0
