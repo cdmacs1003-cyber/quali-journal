@@ -1,0 +1,93 @@
+name: L3 B-canary smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_revision:
+        description: "Cloud Run revision name (e.g. quali-admin-domap-00221-bsz)"
+        required: true
+        type: string
+      profile:
+        description: "L3 B안 프로파일 (S1_99_1 / S2_80_20 / S3_50_50 / S4_100_0)"
+        required: true
+        type: choice
+        options:
+          - S1_99_1
+          - S2_80_20
+          - S3_50_50
+          - S4_100_0
+        default: S4_100_0
+      base_url:
+        description: "Admin base URL"
+        required: false
+        default: "https://admin.standardai.co.kr"
+        type: string
+
+env:
+  PROJECT_ID: quali-journal-prod
+  REGION_TYO: asia-northeast1
+  SERVICE_LIVE: quali-admin-domap
+
+jobs:
+  l3-b-canary-smoke:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Install PowerShell 7
+        uses: PowerShell/PowerShell@v1
+        with:
+          pwsh-version: '7.4.x'
+
+      - name: Run L3 B-canary smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # SSOT 상수
+          $PROJECT   = "${{ env.PROJECT_ID }}"
+          $REGION_TYO = "${{ env.REGION_TYO }}"
+          $SERVICE   = "${{ env.SERVICE_LIVE }}"
+
+          # Admin 토큰: Secret Manager에서 조회하는 스크립트 사용
+          . "tools/smoke_stdreviews_A_gates.ps1"
+
+          # 프로젝트 ID는 스크립트 내부 SSOT(ProjectId)와 일치
+          Use-AdminTokenFromSecret -ProjectId $PROJECT
+
+          # L3 B안 프로파일 선택 (S1~S4)
+          Set-L3CanaryProfile -Profile "${{ inputs.profile }}"
+
+          # 기대 리비전 / 베이스 URL
+          $ExpectedRevision = "${{ inputs.expected_revision }}"
+          $BaseUrl          = "${{ inputs.base_url }}"
+
+          Write-Host "PROJECT   = $PROJECT"
+          Write-Host "SERVICE   = $SERVICE"
+          Write-Host "REGION_TYO= $REGION_TYO"
+          Write-Host "Expected  = $ExpectedRevision"
+          Write-Host "BaseUrl   = $BaseUrl"
+          Write-Host "Profile   = $($env:L3_MAX_ATTEMPTS)/$($env:L3_MIN_MATCHES)"
+
+          # L3 B안 REV_NEW 헤더 기반 스모크 실행
+          Test-StdReviewRevisionSample `
+            -BaseUrl         $BaseUrl `
+            -ExpectedRevision $ExpectedRevision `
+            -AdminToken      $env:ADMIN_TOKEN
