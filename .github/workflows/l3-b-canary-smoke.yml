@@ -51,11 +51,7 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      - name: Install PowerShell 7
-        uses: PowerShell/PowerShell@v1
-        with:
-          pwsh-version: '7.4.x'
-
+      
       - name: Run L3 B-canary smoke
         shell: pwsh
         run: |
