@@ -62,7 +62,10 @@ jobs:
           $SERVICE   = "${{ env.SERVICE_LIVE }}"
 
           # Admin 토큰: Secret Manager에서 조회하는 스크립트 사용
-          . "tools/smoke_stdreviews_A_gates.ps1"
+          $ScriptPath = Join-Path $PWD "tools/smoke_stdreviews_A_gates.ps1"
+          Write-Host "Loading L3 smoke script from $ScriptPath"
+          . $ScriptPath
+
 
           # 프로젝트 ID는 스크립트 내부 SSOT(ProjectId)와 일치
           Use-AdminTokenFromSecret -ProjectId $PROJECT
