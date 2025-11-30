@@ -2,6 +2,23 @@
 # L3/L5 표준 리뷰 게이트 공용 스모크 스크립트
 # - Test-StdReviewRevisionSample 함수만 정의
 # - GitHub Actions에서는 dot-source (. script.ps1) 로 불러서 사용
+function Use-AdminTokenFromSecret {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $ProjectId
+    )
+
+    # 🟡확인 필요: ADMIN_TOKEN 은 GitHub Secrets → env.ADMIN_TOKEN 으로 주입됨.
+    # L3 B-canary SSOT 설계에서는 별도 gcloud 호출 없이 이 값을 그대로 사용한다.
+    if (-not $env:ADMIN_TOKEN) {
+        throw "ADMIN_TOKEN environment variable is empty. Check GitHub Secrets / workflow env."
+    }
+
+    return $env:ADMIN_TOKEN
+}
+
+
 
 $ErrorActionPreference = "Stop"
 
