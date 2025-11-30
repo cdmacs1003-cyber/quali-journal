@@ -96,9 +96,6 @@ jobs:
           Write-Host "Loading L3 smoke script from $ScriptPath"
           . $ScriptPath
 
-          # L3 B안 프로파일 선택 (S1~S4)
-          Set-L3CanaryProfile -Profile "${{ inputs.profile }}"
-
           # 기대 리비전 / 베이스 URL
           $ExpectedRevision = "${{ inputs.expected_revision }}"
           $BaseUrl          = "${{ inputs.base_url }}"
