@@ -11,6 +11,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      
+      - name: SSOT – L3 B-canary workflow must exist and use stdreviews smoke script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $path = ".github/workflows/l3-b-canary-smoke.yml"
+
+          if (-not (Test-Path $path)) {
+            Write-Error "SSOT: L3 B-canary smoke workflow file '$path' must exist."
+            exit 1
+          }
+
+          $content = Get-Content $path -Raw
+
+          # 필수로 포함돼야 할 서브 문자열들만 느슨하게 체크
+          $required = @(
+            "name: L3 B-canary smoke",
+            "Run L3 B-canary smoke",
+            "smoke_stdreviews_A_gates.ps1",
+            "Test-StdReviewRevisionSample"
+          )
+
+          foreach ($pattern in $required) {
+            if ($content -notlike "*$pattern*") {
+              Write-Error "SSOT: L3 B-canary workflow must contain substring: $pattern"
+              exit 1
+            }
+          }
+
+          Write-Host "SSOT: L3 B-canary workflow structure OK."
+
 
       - name: Detect changed files
         id: changes
