@@ -54,6 +54,10 @@ jobs:
       
       - name: Run L3 B-canary smoke
         shell: pwsh
+        env:
+          PROJECT: quali-journal-prod
+          SERVICE: quali-admin-domap
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -91,11 +95,6 @@ jobs:
 
           Write-Host "Loading L3 smoke script from $ScriptPath"
           . $ScriptPath
-
-
-
-          # 프로젝트 ID는 스크립트 내부 SSOT(ProjectId)와 일치
-          Use-AdminTokenFromSecret -ProjectId $PROJECT
 
           # L3 B안 프로파일 선택 (S1~S4)
           Set-L3CanaryProfile -Profile "${{ inputs.profile }}"
