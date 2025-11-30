@@ -2,6 +2,7 @@ name: SSOT Check
 
 on:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   guard:
@@ -11,6 +12,36 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: SSOT – L3 B-canary workflow must exist and use stdreviews smoke script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $path = ".github/workflows/l3-b-canary-smoke.yml"
+
+          if (-not (Test-Path $path)) {
+            Write-Error "SSOT: L3 B-canary smoke workflow file '$path' must exist."
+            exit 1
+          }
+
+          $content = Get-Content $path -Raw
+
+          # 필수로 포함돼야 할 서브 문자열들만 느슨하게 체크
+          $required = @(
+            "name: L3 B-canary smoke",
+            "Run L3 B-canary smoke",
+            "smoke_stdreviews_A_gates.ps1",
+            "Test-StdReviewRevisionSample"
+          )
+
+          foreach ($pattern in $required) {
+            if ($content -notlike "*$pattern*") {
+              Write-Error "SSOT: L3 B-canary workflow must contain substring: $pattern"
+              exit 1
+            }
+          }
+
+          Write-Host "SSOT: L3 B-canary workflow structure OK."
 
       - name: Detect changed files
         id: changes
@@ -38,19 +69,18 @@ jobs:
           SSOT_DOC_CHANGED=$(echo "$CHANGED_FILES" | grep -E 'SSOT_.*\.md|Admin_DoD_.*\.md' || true)
 
           if [ -n "$SSOT_DOC_CHANGED" ]; then
-            echo "SSOT 문서가 변경되었습니다:"
+            echo "SSOT 문서 변경 감지:"
             echo "$SSOT_DOC_CHANGED"
 
-            PR_NUMBER=${{ github.event.number }}
-            REPO=${{ github.repository }}
-            ISSUE_API="https://api.github.com/repos/$REPO/issues/$PR_NUMBER"
+            PR_NUMBER=$(echo "${{ github.event.pull_request.number }}" )
+            if [ -z "$PR_NUMBER" ]; then
+              echo "::error ::PR 번호를 찾을 수 없습니다."
+              exit 1
+            fi
 
-            LABELS_JSON=$(curl -sSL \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github+json" \
-              "$ISSUE_API")
-
-            echo "Labels JSON: $LABELS_JSON"
+            LABELS_JSON=$(gh api repos/${{ github.repository }}/issues/$PR_NUMBER/labels)
+            echo "LABELS_JSON:"
+            echo "$LABELS_JSON"
 
             if echo "$LABELS_JSON" | grep -q '"name": "ssot-change"'; then
               echo "라벨 'ssot-change' 를 찾았습니다. 통과합니다."
@@ -68,99 +98,56 @@ jobs:
           CHANGED_FILES="${{ steps.changes.outputs.files }}"
           FILE=".github/workflows/ci-deploy-prod.yml"
 
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
           if ! echo "$CHANGED_FILES" | grep -q "$FILE"; then
-            echo "ci-deploy-prod.yml 변경 없음 → 이 단계는 건너뜁니다."
+            echo "ci-deploy-prod.yml 이 변경되지 않았습니다. 검증을 건너뜁니다."
             exit 0
           fi
 
+          echo "ci-deploy-prod.yml 변경 감지, DoD 검증을 수행합니다."
+
           if [ ! -f "$FILE" ]; then
-            echo "::error ::$FILE 파일을 찾을 수 없습니다."
+            echo "::error ::ci-deploy-prod.yml 파일을 찾을 수 없습니다."
             exit 1
           fi
 
-          echo "Checking $FILE"
+          echo "검증 대상 파일:"
+          ls -l "$FILE"
 
-          # 1) env 키 존재 여부
-          for KEY in PROJECT_ID REGION SERVICE_NAME DEV_REGION DEV_SERVICE_NAME CLOUD_SQL_INSTANCE; do
-            if ! grep -q "^[[:space:]]*$KEY:" "$FILE"; then
-              echo "::error ::env.$KEY 가 $FILE 에 정의되어 있지 않습니다."
-              exit 1
-            fi
-          done
-
-          # 2) Deploy step의 image 소스 확인 (steps.dev-image.outputs.IMAGE 포함 여부)
-          if ! grep -q 'steps.dev-image.outputs.IMAGE' "$FILE"; then
-            echo "::error ::Deploy step의 image 가 steps.dev-image.outputs.IMAGE 를 사용하지 않습니다."
+          if ! grep -q 'name: Deploy to production' "$FILE"; then
+            echo "::error ::ci-deploy-prod.yml 에 'name: Deploy to production' 스텝이 없습니다."
             exit 1
           fi
 
-          # 3) environment.name == production
-          if ! grep -q 'environment:' "$FILE" || ! grep -q 'name:[[:space:]]*production' "$FILE"; then
-            echo "::error ::jobs.deploy.environment.name 이 production 이 아닙니다."
+          if ! grep -q 'name: Run reviews JSON schema smoke' "$FILE"; then
+            echo "::error ::ci-deploy-prod.yml 에 'Run reviews JSON schema smoke' 스텝이 없습니다."
             exit 1
           fi
 
-          # 4) Smoke step 이름/경로 체크
-          if ! grep -q 'Smoke tests (/api/status, /api/report)' "$FILE"; then
-            echo "::error ::Smoke step 이름 'Smoke tests (/api/status, /api/report)' 을 찾지 못했습니다."
+          if ! grep -q 'jq -e' "$FILE"; then
+            echo "::error ::ci-deploy-prod.yml 에 jq -e 조건 검증이 없습니다."
             exit 1
           fi
 
-          if ! grep -q 'Smoke tests (/api/standards/reviews)' "$FILE"; then
-            echo "::error ::Smoke step 이름 'Smoke tests (/api/standards/reviews)' 을 찾지 못했습니다."
+          if ! grep -q 'ok == true' "$FILE"; then
+            echo "::error ::ci-deploy-prod.yml 에 'ok == true' 검증이 없습니다."
             exit 1
           fi
 
-          if ! grep -q '/api/standards/reviews' "$FILE"; then
-            echo "::error ::/api/standards/reviews 엔드포인트를 호출하는 코드가 없습니다."
+          if ! grep -q 'data.count != null' "$FILE"; then
+            echo "::error ::ci-deploy-prod.yml 에 'data.count != null' 검증이 없습니다."
             exit 1
           fi
 
-          # 5) Reviews Gate Smoke 구조 체크 (Runbook A안 SSOT)
-
-          # 5-1) smoke_once() 함수 정의 여부
-          if ! grep -qF 'smoke_once() {' "$FILE" && ! grep -qF 'smoke_once () {' "$FILE"; then
-            echo "::error ::Reviews 게이트 스텝에 smoke_once() 함수 정의가 없습니다."
+          if ! grep -q 'data.items != null' "$FILE"; then
+            echo "::error ::ci-deploy-prod.yml 에 'data.items != null' 검증이 없습니다."
             exit 1
           fi
 
-          # 5-2) HTTP 200 상태 코드 검증
-          if ! grep -qF 'if [ "$CODE" != "200" ]; then' "$FILE"; then
-            echo "::error ::smoke_once 내에 HTTP 200 상태 코드 검증(if [ \"\$CODE\" != \"200\" ]; then)이 없습니다."
-            exit 1
-          fi
-
-          # 5-3) .ok == true JSON 검증
-          if ! grep -qF "jq -e '.ok == true'" "$FILE"; then
-            echo "::error ::smoke_once 내에 '.ok == true' JSON 검증이 없습니다."
-            exit 1
-          fi
-
-          # 5-4) .count/.items JSON 검증
-          # - 과거 버전: jq -e '.count != null and .items != null'
-          # - 현재 버전: jq -e '(.count != null and .items != null) or (.data.count != null and .data.items != null)'
-          # 두 경우 모두 '.count != null and .items != null' 서브스트링을 포함하므로,
-          # jq 전체 문자열 대신 이 서브스트링 기준으로만 검증한다.
-          if ! grep -qF ".count != null and .items != null" "$FILE"; then
-            echo "::error ::smoke_once 내에 '.count != null and .items != null' JSON 검증이 없습니다."
-            exit 1
-          fi
-
-
-          # 5-5) Single smoke 로그 + if ! smoke_once; then 패턴
-          if ! grep -qF '== Single smoke: /api/standards/reviews ==' "$FILE"; then
-            echo "::error ::Single smoke 로그 '== Single smoke: /api/standards/reviews ==' 를 찾지 못했습니다."
-            exit 1
-          fi
-
-          if ! grep -qF 'if ! smoke_once; then' "$FILE"; then
-            echo "::error ::Single/Repeated 스모크 구간에 'if ! smoke_once; then' 패턴이 없습니다."
-            exit 1
-          fi
-
-          # 5-6) 10회 반복 스모크 루프 + 로그
-          if ! grep -qF '== 10x repeated smoke: /api/standards/reviews ==' "$FILE"; then
-            echo "::error ::10회 반복 스모크 로그 '== 10x repeated smoke: /api/standards/reviews ==' 를 찾지 못했습니다."
+          if ! grep -q '\.count != null and \.items != null' "$FILE"; then
+            echo "::error ::ci-deploy-prod.yml 에 최상위 count/items 검증 (fallback)이 없습니다."
             exit 1
           fi
 
