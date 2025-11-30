@@ -4,14 +4,18 @@ param(
     # B안: REV_NEW 헤더 기반 스모크용 (옵션)
     [string]$ExpectedRevision = $env:EXPECTED_REVISION
 )
+    $IsDotSourced = $MyInvocation.InvocationName -eq '.'
 
 
-if (-not $AdminToken) {
-    Write-Error "ADMIN_TOKEN 값을 -AdminToken 인자나 환경변수 ADMIN_TOKEN 으로 전달해야 합니다."
-    exit 1
+if (-not $IsDotSourced) {
+    if (-not $AdminToken) {
+        Write-Error "ADMIN_TOKEN 값을 -AdminToken 인자나 환경변수 ADMIN_TOKEN 으로 전달해야 합니다."
+        exit 1
+    }
+
+    $BaseUrl = $BaseUrl.TrimEnd('/')
 }
 
-$BaseUrl = $BaseUrl.TrimEnd('/')
 
 # A1/A2/A3 Gate용 테스트 전용 STD ID 매트릭스
 # - TEST-STD-1: A1 Gate (기존)
@@ -237,33 +241,36 @@ function Invoke-StdReviewGate {
     Write-Host "OK  [$Gate/$StdId] HOLD → REVIEWED → PUBLISHED(PASS) 스모크 통과" -ForegroundColor Green
 }
 
-$overallOk = $true
+if (-not $IsDotSourced) {
+    $overallOk = $true
 
-# B안: REV_NEW 헤더 기반 L3 스모크 (옵션)
-if ($ExpectedRevision) {
-    $revOk = Test-StdReviewRevisionSample `
-        -BaseUrl $BaseUrl `
-        -AdminToken $AdminToken `
-        -ExpectedRevision $ExpectedRevision
+    # B안: REV_NEW 헤더 기반 L3 스모크 (옵션)
+    if ($ExpectedRevision) {
+        $revOk = Test-StdReviewRevisionSample `
+            -BaseUrl $BaseUrl `
+            -AdminToken $AdminToken `
+            -ExpectedRevision $ExpectedRevision
 
-    if (-not $revOk) {
-        $overallOk = $false
+        if (-not $revOk) {
+            $overallOk = $false
+        }
+    }
+
+    foreach ($std in $StdMatrix) {
+        try {
+            Invoke-StdReviewGate -StdId $std.Id -Gate $std.Gate
+        } catch {
+            $overallOk = $false
+            Write-Error $_
+        }
+    }
+
+    if (-not $overallOk) {
+        Write-Error "일부 Gate 스모크가 실패했습니다."
+        exit 1
+    } else {
+        Write-Host ""
+        Write-Host "=== StdReviews A1/A2/A3 L3 스모크 전체 통과 ===" -ForegroundColor Green
     }
 }
 
-foreach ($std in $StdMatrix) {
-    try {
-        Invoke-StdReviewGate -StdId $std.Id -Gate $std.Gate
-    } catch {
-        $overallOk = $false
-        Write-Error $_
-    }
-}
-
-if (-not $overallOk) {
-    Write-Error "일부 Gate 스모크가 실패했습니다."
-    exit 1
-} else {
-    Write-Host ""
-    Write-Host "=== StdReviews A1/A2/A3 L3 스모크 전체 통과 ===" -ForegroundColor Green
-}
