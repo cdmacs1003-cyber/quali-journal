@@ -110,7 +110,8 @@ jobs:
 
           # L3 B안 REV_NEW 헤더 기반 스모크 실행
           # 1) SSOT 스크립트 로드 (Test-StdReviewRevisionSample 함수 포함)
-          . "$env:GITHUB_WORKSPACE/tools/smoke_stdreviews_A_gates.ps1"
+          . "tools/smoke_stdreviews_A_gates.ps1"
+
 
           $ok = Test-StdReviewRevisionSample `
             -BaseUrl          $BaseUrl `
