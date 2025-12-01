@@ -31,8 +31,6 @@ env:
 jobs:
   l3-b-canary-smoke:
     runs-on: ubuntu-latest
-    env:
-      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
 
     permissions:
       contents: read
@@ -53,71 +51,52 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      # ADMIN_TOKEN 이 실제로 들어오는지 길이만 체크
+      - name: Debug ADMIN_TOKEN presence
+        shell: pwsh
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          if ($env:ADMIN_TOKEN) {
+            Write-Host "ADMIN_TOKEN length = $($env:ADMIN_TOKEN.Length)"
+          } else {
+            Write-Host "ADMIN_TOKEN is EMPTY"
+          }
+
       - name: Run L3 B-canary smoke
         shell: pwsh
         env:
-          PROJECT: quali-journal-prod
-          SERVICE: quali-admin-domap
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+          REGION_TYO: ${{ env.REGION_TYO }}
+          SERVICE_LIVE: ${{ env.SERVICE_LIVE }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          # SSOT 상수
-          $PROJECT   = "${{ env.PROJECT_ID }}"
-          $REGION_TYO = "${{ env.REGION_TYO }}"
-          $SERVICE   = "${{ env.SERVICE_LIVE }}"
-
-          # Admin 토큰: Secret Manager에서 조회하는 스크립트 사용
-          # - tools/ 또는 admin/tools 에 있는 SSOT 스크립트를 자동 탐색
-          if ($env:GITHUB_WORKSPACE) {
-            $root = $env:GITHUB_WORKSPACE
-          } else {
-            $root = $PWD
+          # ===== 입력값 정리 =====
+          $baseUrl = "${{ github.event.inputs.base_url }}"
+          if (-not $baseUrl) {
+            $baseUrl = "https://admin.standardai.co.kr"
           }
 
-          $scriptPath1 = Join-Path $root "tools/smoke_stdreviews_A_gates.ps1"
-          $scriptPath2 = Join-Path $root "admin/tools/smoke_stdreviews_A_gates.ps1"
-
-          Write-Host "GITHUB_WORKSPACE = $root"
-          Write-Host "Candidate script paths:"
-          Write-Host " - $scriptPath1"
-          Write-Host " - $scriptPath2"
-
-          if (Test-Path $scriptPath1) {
-            $ScriptPath = $scriptPath1
-          } elseif (Test-Path $scriptPath2) {
-            $ScriptPath = $scriptPath2
-          } else {
-            Write-Host "smoke_stdreviews_A_gates.ps1 not found under workspace."
-            Write-Host "Listing workspace tree for debug..."
-            Get-ChildItem -Recurse $root
-            throw "L3 smoke script not found in tools/ or admin/tools under workspace."
+          $expectedRevision = "${{ github.event.inputs.expected_revision }}"
+          if (-not $expectedRevision) {
+            throw "expected_revision input is empty."
           }
 
-          Write-Host "Loading L3 smoke script from $ScriptPath"
-          . $ScriptPath
-
-          # 기대 리비전 / 베이스 URL
-          $ExpectedRevision = "${{ inputs.expected_revision }}"
-          $BaseUrl          = "${{ inputs.base_url }}"
-
-          Write-Host "PROJECT   = $PROJECT"
-          Write-Host "SERVICE   = $SERVICE"
-          Write-Host "REGION_TYO= $REGION_TYO"
-          Write-Host "Expected  = $ExpectedRevision"
-          Write-Host "BaseUrl   = $BaseUrl"
-          Write-Host "Profile   = $($env:L3_MAX_ATTEMPTS)/$($env:L3_MIN_MATCHES)"
-
-          # L3 B안 REV_NEW 헤더 기반 스모크 실행
-          # 1) SSOT 스크립트 로드 (Test-StdReviewRevisionSample 함수 포함)
-          . "tools/smoke_stdreviews_A_gates.ps1"
-
-
-          $ok = Test-StdReviewRevisionSample `
-            -BaseUrl          $BaseUrl `
-            -ExpectedRevision $ExpectedRevision `
-            -AdminToken       $env:ADMIN_TOKEN
-
-          if (-not $ok) {
-            throw "L3 B-canary REV_NEW 헤더 스모크 실패: ExpectedRevision=$ExpectedRevision"
+          if (-not $env:ADMIN_TOKEN) {
+            throw "ADMIN_TOKEN is empty."
           }
+
+          Write-Host "L3 B-canary smoke via clean script"
+          Write-Host "BaseUrl          = $baseUrl"
+          Write-Host "ExpectedRevision = $expectedRevision"
+          Write-Host "PROJECT_ID       = $env:PROJECT_ID"
+          Write-Host "REGION_TYO       = $env:REGION_TYO"
+          Write-Host "SERVICE_LIVE     = $env:SERVICE_LIVE"
+
+          # tools 폴더에서 새 L3B clean 스크립트 실행
+          & "tools/smoke_stdreviews_L3B_clean.ps1" `
+            -BaseUrl $baseUrl `
+            -ExpectedRevision $expectedRevision `
+            -AdminToken $env:ADMIN_TOKEN
