@@ -81,6 +81,13 @@ function Test-StdReviewRevisionSample {
             -ContentType "application/json" `
             -Body ($bodyObj | ConvertTo-Json -Depth 5) `
             -ErrorAction Stop
+        
+        # ==== 여기부터 응답 헤더 덤프 추가 ====
+        Write-Host "Response status code = $($response.StatusCode)"
+        Write-Host "Response headers:"
+        foreach ($h in $response.Headers.GetEnumerator()) {
+            Write-Host ("  {0}: {1}" -f $h.Name, ($h.Value -join ','))
+        }
     }
     catch {
         Write-Error "표준 리뷰 test/init 호출 실패: $($_.Exception.Message)"
