@@ -94,17 +94,32 @@ function Test-StdReviewRevisionSample {
         return $false
     }
 
-    # 🟡확인 필요: 서버에서 실제로 사용하는 헤더 이름
-    #   - 현재 가정: 응답 헤더에 'REV_NEW' 라는 커스텀 헤더로
-    #     Cloud Run 리비전 이름이 들어온다.
+    # 1차 시도: REV_NEW 커스텀 헤더 (서버에서 향후 설정 예정)
     $revHeader = $response.Headers["REV_NEW"]
 
+    # 2차 시도: Cloud Run 기본 리비전 헤더(x-cloud-run-revision) 사용 🟡실제 헤더 이름은 이후 확인 필요
     if (-not $revHeader) {
-        Write-Error "REV_NEW 헤더가 응답에 없습니다. (서버에서 REV_NEW 헤더를 설정하고 있는지 확인 필요)"
+        $revHeader = $response.Headers["x-cloud-run-revision"]
+        if ($revHeader) {
+            Write-Host "x-cloud-run-revision 헤더에서 리비전 값을 찾았습니다: $revHeader"
+        }
+    }
+
+    if (-not $revHeader) {
+        Write-Error "REV_NEW / x-cloud-run-revision 헤더가 응답에 없습니다. (서버에서 리비전 헤더를 설정하고 있는지 확인 필요)"
         return $false
     }
 
-    Write-Host "REV_NEW 헤더 = $revHeader"
+    Write-Host "L3 stdreviews 리비전 헤더 = $revHeader"
+
+
+    if (-not $revHeader) {
+        Write-Error "REV_NEW / x-cloud-run-revision 헤더가 응답에 없습니다. (서버에서 리비전 헤더를 설정하고 있는지 확인 필요)"
+        return $false
+    }
+
+    Write-Host "L3 stdreviews 리비전 헤더 = $revHeader"
+
 
     if ($revHeader -ne $ExpectedRevision) {
         Write-Error "REV_NEW 불일치: Expected=$ExpectedRevision, Actual=$revHeader"
