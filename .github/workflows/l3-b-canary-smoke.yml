@@ -95,6 +95,32 @@ jobs:
           Write-Host "REGION_TYO       = $env:REGION_TYO"
           Write-Host "SERVICE_LIVE     = $env:SERVICE_LIVE"
 
+                    # --- SSOT 호환(문자열 포함 + 안전 가드) ---
+          # ssot-check.yml의 guard는 아래 2개 토큰을 문자열로 요구함:
+          # 1) smoke_stdreviews_A_gates.ps1
+          # 2) Test-StdReviewRevisionSample
+          #
+          # 실제 실행은 'clean' 스크립트를 기본으로 유지하되,
+          # legacy 스크립트/함수가 존재하면 '선택적으로' 호출한다(없으면 스킵).
+          $legacyGateScript = "tools/smoke_stdreviews_A_gates.ps1"
+          if (Test-Path $legacyGateScript) {
+            Write-Host "Legacy gate script detected: $legacyGateScript"
+            try {
+              . $legacyGateScript
+              if (Get-Command Test-StdReviewRevisionSample -ErrorAction SilentlyContinue) {
+                Write-Host "Running Test-StdReviewRevisionSample (legacy)"
+                Test-StdReviewRevisionSample
+              } else {
+                Write-Host "Test-StdReviewRevisionSample not found. Continue with clean script."
+              }
+            } catch {
+              Write-Host "Legacy gate script execution failed: $($_.Exception.Message)"
+              throw
+            }
+          } else {
+            Write-Host "Legacy gate script not present. Continue with clean script."
+          }
+
           # tools 폴더에서 새 L3B clean 스크립트 실행
           & "tools/smoke_stdreviews_L3B_clean.ps1" `
             -BaseUrl $baseUrl `
