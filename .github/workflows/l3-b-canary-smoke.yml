@@ -32,6 +32,10 @@ jobs:
   l3-b-canary-smoke:
     runs-on: ubuntu-latest
 
+    # L3 B-canary는 관리자 토큰이 반드시 필요
+    env:
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+
     permissions:
       contents: read
       id-token: write
@@ -51,41 +55,100 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      # ADMIN_TOKEN 이 실제로 들어오는지 길이만 체크
+      - name: Debug ADMIN_TOKEN presence
+        shell: pwsh
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          if ($env:ADMIN_TOKEN) {
+            Write-Host "ADMIN_TOKEN length = $($env:ADMIN_TOKEN.Length)"
+          } else {
+            Write-Host "ADMIN_TOKEN is EMPTY"
+          }
+
       - name: Run L3 B-canary smoke
         shell: pwsh
+        env:
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+          REGION_TYO: ${{ env.REGION_TYO }}
+          SERVICE_LIVE: ${{ env.SERVICE_LIVE }}
+          EXPECTED_REVISION: ${{ github.event.inputs.expected_revision }}
+          BASE_URL: ${{ github.event.inputs.base_url }}
+          PROFILE: ${{ github.event.inputs.profile }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          # SSOT 상수
-          $PROJECT   = "${{ env.PROJECT_ID }}"
-          $REGION_TYO = "${{ env.REGION_TYO }}"
-          $SERVICE   = "${{ env.SERVICE_LIVE }}"
+          # ===== 입력/환경 정리 =====
+          $PROJECT     = $env:PROJECT_ID
+          $REGION_TYO  = $env:REGION_TYO
+          $SERVICE     = $env:SERVICE_LIVE
 
-          # Admin 토큰: Secret Manager에서 조회하는 스크립트 사용
-          $ScriptPath = Join-Path $PWD "tools/smoke_stdreviews_A_gates.ps1"
+          $ExpectedRevision = $env:EXPECTED_REVISION
+          $BaseUrl          = $env:BASE_URL
+          $Profile          = $env:PROFILE
+
+          if (-not $BaseUrl) {
+            $BaseUrl = "https://admin.standardai.co.kr"
+          }
+
+          if ($BaseUrl.EndsWith("/")) {
+            $BaseUrl = $BaseUrl.TrimEnd("/")
+          }
+
+          if (-not $ExpectedRevision) {
+            throw "expected_revision input is empty."
+          }
+
+          if (-not $env:ADMIN_TOKEN) {
+            throw "ADMIN_TOKEN environment variable is empty. Check GitHub Secrets / workflow env."
+          }
+
+          Write-Host "PROJECT_ID     = $PROJECT"
+          Write-Host "REGION_TYO     = $REGION_TYO"
+          Write-Host "SERVICE_LIVE   = $SERVICE"
+          Write-Host "ExpectedRevision = $ExpectedRevision"
+          Write-Host "BaseUrl          = $BaseUrl"
+          Write-Host "Profile          = $Profile"
+
+          # ===== 스크립트 위치 탐색 =====
+          if ($env:GITHUB_WORKSPACE) {
+            $root = $env:GITHUB_WORKSPACE
+          } else {
+            $root = $PWD
+          }
+
+          $scriptPath1 = Join-Path $root "tools/smoke_stdreviews_A_gates.ps1"
+          $scriptPath2 = Join-Path $root "admin/tools/smoke_stdreviews_A_gates.ps1"
+
+          Write-Host "GITHUB_WORKSPACE = $root"
+          Write-Host "Candidate script paths:"
+          Write-Host " - $scriptPath1"
+          Write-Host " - $scriptPath2"
+
+          if (Test-Path $scriptPath1) {
+            $ScriptPath = $scriptPath1
+          } elseif (Test-Path $scriptPath2) {
+            $ScriptPath = $scriptPath2
+          } else {
+            Write-Host "smoke_stdreviews_A_gates.ps1 not found under workspace."
+            Write-Host "Workspace tree (top level):"
+            Get-ChildItem $root
+            throw "L3 smoke script not found in tools/ or admin/tools under workspace."
+          }
+
           Write-Host "Loading L3 smoke script from $ScriptPath"
           . $ScriptPath
 
-
-          # 프로젝트 ID는 스크립트 내부 SSOT(ProjectId)와 일치
-          Use-AdminTokenFromSecret -ProjectId $PROJECT
-
-          # L3 B안 프로파일 선택 (S1~S4)
-          Set-L3CanaryProfile -Profile "${{ inputs.profile }}"
-
-          # 기대 리비전 / 베이스 URL
-          $ExpectedRevision = "${{ inputs.expected_revision }}"
-          $BaseUrl          = "${{ inputs.base_url }}"
-
-          Write-Host "PROJECT   = $PROJECT"
-          Write-Host "SERVICE   = $SERVICE"
-          Write-Host "REGION_TYO= $REGION_TYO"
-          Write-Host "Expected  = $ExpectedRevision"
-          Write-Host "BaseUrl   = $BaseUrl"
-          Write-Host "Profile   = $($env:L3_MAX_ATTEMPTS)/$($env:L3_MIN_MATCHES)"
-
-          # L3 B안 REV_NEW 헤더 기반 스모크 실행
-          Test-StdReviewRevisionSample `
-            -BaseUrl         $BaseUrl `
+          # ===== L3 B안 REV_NEW 헤더 기반 스모크 실행 =====
+          $ok = Test-StdReviewRevisionSample `
+            -BaseUrl          $BaseUrl `
             -ExpectedRevision $ExpectedRevision `
-            -AdminToken      $env:ADMIN_TOKEN
+            -AdminToken       $env:ADMIN_TOKEN
+
+          if (-not $ok) {
+            throw "L3 B-canary REV_NEW 헤더 스모크 실패: ExpectedRevision=$ExpectedRevision"
+          }
+
+          Write-Host "L3 B-canary REV_NEW 헤더 스모크 성공"
