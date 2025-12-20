@@ -6,30 +6,6 @@ on:
 
 jobs:
   guard:
-    contract_gate:
-    needs: guard
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Stage2 Contract Gate — workflow↔contract consistency
-        shell: pwsh
-        working-directory: admin
-        run: |
-          $ErrorActionPreference = "Stop"
-          if (-not (Test-Path ".\tools\gate_contract_check.ps1")) {
-            Write-Error "missing: admin/tools/gate_contract_check.ps1"
-            exit 1
-          }
-          pwsh -ExecutionPolicy Bypass -File .\tools\gate_contract_check.ps1
-
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
