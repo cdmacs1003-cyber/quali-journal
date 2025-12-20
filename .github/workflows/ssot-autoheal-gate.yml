@@ -1,0 +1,68 @@
+name: ssot-autoheal-gate
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR body + SSOT/Runbook/AGENTS sync
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo  = context.repo.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number, per_page: 100
+            });
+            const changed = files.map(f => f.filename);
+
+            // 1) 변경 감지(최소)
+            const touchedCode = changed.some(p =>
+              p.startsWith('admin/') || p.startsWith('tools/') || p.startsWith('feeds/')
+            );
+            const touchedOps = changed.some(p =>
+              p.startsWith('.github/workflows/') || p.startsWith('docs/infra/')
+            );
+
+            // 2) SSOT/Runbook/AGENTS 문서(동시 갱신 대상)
+            const touchedSsotDocs = changed.some(p =>
+              p === 'docs/SSOT_Admin_DoD.md' ||
+              p === 'docs/AGENTS.md' ||
+              p === '.github/workflows/AGENTS.md' ||
+              p === 'docs/QualiJournal_Constitution_C_Operations_Runbook_Gates_FINAL_20251126.md' ||
+              p === '.github/PULL_REQUEST_TEMPLATE.md'
+            );
+
+            // 3) PR 본문 1장 마커 확인
+            const body = (context.payload.pull_request.body || '');
+            const hasOnePager = body.includes('SSOT-AUTOHEAL-ONEPAGER START');
+
+            // 템플릿 도입/수정 PR은 예외 허용
+            const isIntroducingTemplate = changed.includes('.github/PULL_REQUEST_TEMPLATE.md');
+
+            const errors = [];
+
+            if (!hasOnePager && !isIntroducingTemplate) {
+              errors.push(
+                "PR 본문에 1장 자가치유 체크리스트가 없습니다. (마커: SSOT-AUTOHEAL-ONEPAGER START)"
+              );
+            }
+
+            if ((touchedCode || touchedOps) && !touchedSsotDocs) {
+              errors.push(
+                "코드/운영 변경이 감지됐지만 SSOT/Runbook/AGENTS 동시 갱신이 없습니다. " +
+                "같은 PR에서 docs/SSOT_Admin_DoD.md 또는 Runbook 또는 AGENTS 중 최소 1개를 갱신하세요."
+              );
+            }
+
+            if (errors.length) core.setFailed(errors.join("\\n\\n---\\n\\n"));
+            else core.info("PASS: autoheal gate satisfied");

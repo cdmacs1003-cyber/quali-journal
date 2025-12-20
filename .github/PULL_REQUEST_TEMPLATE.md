@@ -1,3 +1,42 @@
+<!-- SSOT-AUTOHEAL-ONEPAGER START -->
+# SSOT/헌법/Runbook/AGENTS 자가치유 체크리스트 (1장 고정)
+
+## 0) 변경 요약 (한 문장)
+- 
+
+## 1) 변경 유형 (하나 이상 체크)
+- [ ] 문서(SSOT/헌법/Runbook/AGENTS)만
+- [ ] 코드만
+- [ ] 운영/배포(CI/Cloud Run/Scheduler/Secret/IAM/Traffic)만
+- [ ] 혼합(문서+코드+운영)
+
+## 2) 영향 범위 (체크)
+- [ ] admin/
+- [ ] tools/
+- [ ] feeds/
+- [ ] .github/workflows/
+- [ ] docs/
+- [ ] docs/infra/ (인프라 정의/배포 자산)
+
+## 3) “문서→코드→AGENTS” 동시 갱신 (자가치유 핵심)
+- [ ] (문서) SSOT/DoD 업데이트: `docs/SSOT_Admin_DoD.md`
+- [ ] (문서) Runbook/헌법 업데이트: `docs/QualiJournal_Constitution_C_Operations_Runbook_Gates_FINAL_*.md`
+- [ ] (문서) AGENTS 업데이트: `docs/AGENTS.md` 또는 `.github/workflows/AGENTS.md`
+- [ ] (코드/운영) 변경이 있다면, 위 문서 중 최소 1개는 같은 PR에서 함께 갱신했다
+
+## 4) 검증 증거 (3줄 스모크 기록)
+- health: [ ] 200 OK
+- api/status: [ ] 200 OK(토큰) / [ ] 401~403(무토큰 기대동작)
+- api/report: [ ] 200 OK(토큰)
+
+## 5) 롤백 플랜(필수, 1~2줄)
+- 
+
+<!-- SSOT-AUTOHEAL-ONEPAGER END -->
+
+---
+
+
 <!-- QualiJournal PR Template v1 – Branch/Test-Branch Constitution Aware -->
 
 ## 1. 브랜치 & 변경 정보
