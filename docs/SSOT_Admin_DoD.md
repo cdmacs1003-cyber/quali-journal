@@ -1,233 +1,233 @@
 
-# QualiJournal 愿由ъ옄 紐⑤뱶 SSOT (Admin DoD v1.1)
+# QualiJournal 관리자 모드 SSOT (Admin DoD v1.1)
 
 > **Single Source of Truth (SSOT)**  
-> ??臾몄꽌??QualiJournal 愿由ъ옄 紐⑤뱶(Admin)??媛쒕컻쨌?뚯뒪?맞룸같??룹슫?곸쓣 ?꾪븳 ?⑥씪 湲곗?(Single Source of Truth)?대떎.  
-> 愿由ъ옄 紐⑤뱶 愿??紐⑤뱺 ?쇱쓽쨌寃곗젙쨌?묒뾽? ?꾨옒 ?댁슜??湲곕낯 ?꾩젣濡??쒕떎.
+> 이 문서는 QualiJournal 관리자 모드(Admin)의 개발·테스트·배포·운영을 위한 단일 기준(Single Source of Truth)이다.  
+> 관리자 모드 관련 모든 논의·결정·작업은 아래 내용을 기본 전제로 한다.
 
 ---
 
-## 0. 臾몄꽌 媛쒖슂
+## 0. 문서 개요
 
-### 0.1 紐⑹쟻
+### 0.1 목적
 
-- 愿由ъ옄 紐⑤뱶??**媛쒕컻 ?꾨즺 湲곗?(DoD, Definition of Done)** ????怨녹뿉 紐⑥븘 ?뺣━?쒕떎.
-- 湲곕뒫, 鍮꾧린?? ?댁쁺/?섍꼍, DevOps, Cloud SQL ?뺤콉, PR 泥댄겕由ъ뒪?몃? **?섎굹??湲곗???*?쇰줈 ?듯빀?쒕떎.
-- ?쒓?由ъ옄 紐⑤뱶 ?명겕由щ㉫?멸? Done?멸???앸? ?먮떒??????臾몄꽌瑜?媛??癒쇱? 李멸퀬?쒕떎.
+- 관리자 모드의 **개발 완료 기준(DoD, Definition of Done)** 을 한 곳에 모아 정리한다.
+- 기능, 비기능, 운영/환경, DevOps, Cloud SQL 정책, PR 체크리스트를 **하나의 기준선**으로 통합한다.
+- “관리자 모드 인크리먼트가 Done인가?”를 판단할 때 이 문서를 가장 먼저 참고한다.
 
-### 0.2 Ground Truth 臾몄꽌
+### 0.2 Ground Truth 문서
 
-??SSOT???ㅼ쓬 ?ㅼ꽢 臾몄꽌瑜?醫낇빀쨌?붿빟??寃껋씠??
+이 SSOT는 다음 다섯 문서를 종합·요약한 것이다.
 
-1. **??115 愿由ъ옄 紐⑤뱶 媛쒕컻 ?꾨즺 湲곗? ?뺤쓽?쒌?*  ?filecite?굏urn1file0?? 
-2. **?똃oD(Definition of Done) 異⑹” ?곹깭 ?먭? ?붿빟?쒌?*  ?filecite?굏urn1file1?? 
-3. **?똒ualiJournal Cloud SQL Stop Policy??*  ?filecite?굏urn1file2?? 
-4. **?똒ualiJournal_DoD_?곕턿_?몄닔?멸퀎_v1.1__2025-11-15.md??*  ?filecite?굏urn1file3?? 
-5. **?똒ualiJournal_PR_Template_DevOps_Checklist_v1_2025-11-15_1.md??*  ?filecite?굏urn1file4?? 
+1. **「1115 관리자 모드 개발 완료 기준 정의서」**  fileciteturn1file0  
+2. **「DoD(Definition of Done) 충족 상태 점검 요약서」**  fileciteturn1file1  
+3. **「QualiJournal Cloud SQL Stop Policy」**  fileciteturn1file2  
+4. **「QualiJournal_DoD_런북_인수인계_v1.1__2025-11-15.md」**  fileciteturn1file3  
+5. **「QualiJournal_PR_Template_DevOps_Checklist_v1_2025-11-15_1.md」**  fileciteturn1file4  
 
-?먮Ц??蹂寃쎈맆 寃쎌슦, ??SSOT瑜??④퍡 ?낅뜲?댄듃?댁빞 ?쒕떎.
-
----
-
-## 1. 湲곕뒫 DoD 泥댄겕由ъ뒪??(?붿빟)
-
-愿由ъ옄 紐⑤뱶???ㅼ쓬 湲곕뒫???쒖젙?섏꽌 湲곗??앹쑝濡??숈옉?댁빞 **湲곕뒫 DoD瑜?異⑹”**??寃껋쑝濡?蹂몃떎. ?filecite?굏urn1file0?? 
-
-### 1.1 KPI 諛??곹깭 ??쒕낫??(/api/status)
-
-- **?ㅻ챸**: ?꾩껜 湲곗궗 ?? ?뱀씤/?湲??? 寃뚯씠??湲곗?移? 寃뚯씠???듦낵 ?щ? ?깆쓣 ?쒕늿??蹂댁뿬二쇰뒗 愿由ъ슜 ??쒕낫??
-- **?꾨즺 湲곗?**
-  - 愿由ъ옄 UI ??쒕낫?쒖? `/api/status` ?묐떟 媛믪씠 ?쒕줈 ?쇨??쒕떎.
-  - 理쒖냼 ?꾨뱶: `total`, `ready_count`, `gate_required`, `ready_rate`, `gate_pass` ??
-- **寃利?諛⑸쾿**
-  - ?뚯뒪???곗씠???? 湲곗궗 100嫄?以?80嫄??뱀씤)瑜?以鍮꾪븳??
-  - `/api/status` ?묐떟?먯꽌 ???꾨뱶 媛믪씠 湲곕?媛믨낵 ?쇱튂?섎뒗吏 ?뺤씤?쒕떎.
-  - UI ??쒕낫???レ옄? API ?묐떟??援먯감 寃利앺븳??
-
-### 1.2 鍮꾨룞湲??뚮줈???ㅽ뻾 諛?濡쒓렇 ?뺤씤 (/api/flow/*, /api/tasks/flow)
-
-- **?ㅻ챸**: ?댁뒪 ?섏쭛, ?쇱씪 ?뚮줈?? ?ㅼ썙???뚮줈????諛깃렇?쇱슫???묒뾽???섎룞?쇰줈 ?ㅽ뻾?섍퀬, 寃곌낵 濡쒓렇瑜?議고쉶?섎뒗 湲곕뒫. ?filecite?굏urn1file0?굏urn1file1?? 
-- **?꾨즺 湲곗?**
-  - ?댁쁺?먭? ?쇱씪/?ㅼ썙???뚮줈?곕? 踰꾪듉 ?먮뒗 API濡??ㅽ뻾?????덈떎.
-  - ?뚮줈???ㅽ뻾 ?? ??묐릺??濡쒓렇 ?뚯씪??`/api/logs` 紐⑸줉???덈줈 ?앷릿??
-- **寃利?諛⑸쾿**
-  - `/api/flow/daily` ?먮뒗 `/api/tasks/flow?type=daily` 瑜??몄텧?쒕떎.
-  - ?묒뾽 ?꾨즺 ??`/api/logs` 瑜??몄텧???좉퇋 濡쒓렇媛 ?앹꽦?섏뿀?붿? ?뺤씤?쒕떎.
-  - ?꾩슂 ??`/api/tasks/{job_id}/stream` SSE濡?吏꾪뻾 濡쒓렇瑜??뺤씤?쒕떎.
-
-### 1.3 湲곗궗 紐⑸줉 ?뺤씤 諛??뱀씤/嫄곗젅/肄붾찘??
-
-- **?ㅻ챸**: ?섏쭛??湲곗궗 紐⑸줉???뺤씤?섍퀬, ?뱀씤/嫄곗젅 泥섎━ 諛??몄쭛??肄붾찘?몃? ??ν븯??湲곕뒫. ?filecite?굏urn1file0?? 
-- **?꾨즺 湲곗?**
-  - ?湲?以?ready ?? 湲곗궗 紐⑸줉??UI? API(`/api/items`, `/api/community`)?먯꽌 議고쉶?????덈떎.
-  - 媛?湲곗궗??????뱀씤/嫄곗젅??媛?ν븯硫? ?뱀씤 ???곹깭媛 ?쒖?鍮?ready)?앸줈 蹂寃쎈맂??
-  - 肄붾찘???낅젰 ???곗씠?곗뿉 ??λ맂??
-- **寃利?諛⑸쾿**
-  - ?뚯뒪?몄슜 湲곗궗 紐?媛쒕? 以鍮꾪븯怨??뱀씤/嫄곗젅 踰꾪듉???뚮윭蹂몃떎.
-  - 泥섎━ ???곹깭 ?꾨뱶? 肄붾찘??????щ?瑜?API ?묐떟 ?먮뒗 ?곗씠????μ냼?먯꽌 ?뺤씤?쒕떎.
-
-### 1.4 諛쒗뻾 諛?寃뚯씠???ㅼ젙 (/api/items/{id}/publish, /api/config/gate_required)
-
-- **?ㅻ챸**: ?뱀씤??湲곗궗瑜??ㅼ젣 ?ъ슜???쒕퉬?ㅼ뿉 諛쒗뻾?섍퀬, 諛쒗뻾 理쒖냼 湲곗?(寃뚯씠?????ㅼ젙쨌議곗젙?섎뒗 湲곕뒫. ?filecite?굏urn1file0?굏urn1file1?? 
-- **?꾨즺 湲곗?**
-  - `/api/items/{id}/publish` ?몄텧 ???대떦 湲곗궗媛 諛쒗뻾 ?곹깭濡?蹂寃쎈릺怨? ?ъ슜???붾㈃???몄텧?쒕떎.
-  - `/api/config/gate_required` 媛?蹂寃???`/api/status` ??`gate_required`媛 利됱떆 媛깆떊?쒕떎.
-- **寃利?諛⑸쾿**
-  - ?뱀젙 湲곗궗?????諛쒗뻾 API瑜??몄텧?????ъ슜???붾㈃ ?몄텧 ?щ?瑜??뺤씤?쒕떎.
-  - 寃뚯씠??媛믪쓣 10??5 ?깆쑝濡?蹂寃쏀븯怨?`/api/status` ?묐떟?먯꽌 媛믪씠 利됱떆 諛섏쁺?섎뒗吏 蹂몃떎.
-
-### 1.5 蹂닿퀬???앹꽦 諛?寃곌낵臾??대낫?닿린 (/api/report, /api/export/*)
-
-- **?ㅻ챸**: ?뱀젙 ?좎쭨/?ㅼ썙?쒖뿉 ????붿빟 蹂닿퀬?쒕? ?앹꽦?섍퀬, MD/CSV ?뚯씪濡??ㅼ슫濡쒕뱶?섎뒗 湲곕뒫. ?filecite?굏urn1file0?굏urn1file1?? 
-- **?꾨즺 湲곗?**
-  - `/api/report` ?몄텧 ??`ok=true`? ?④퍡 蹂닿퀬???뚯씪 寃쎈줈媛 諛섑솚?쒕떎.
-  - `/api/export/md`, `/api/export/csv` 濡??대떦 ?뚯씪???ㅼ젣濡??ㅼ슫濡쒕뱶?????덈떎.
-- **寃利?諛⑸쾿**
-  - 1?쇱튂 蹂닿퀬?쒕? ?앹꽦?섍퀬 諛섑솚??`path` 瑜??ъ슜??export API瑜??몄텧?쒕떎.
-  - ?ㅼ슫濡쒕뱶??MD/CSV ?댁슜??鍮꾩뼱 ?덉? ?딆?吏 ?뺤씤?쒕떎.
-
-### 1.6 濡쒓렇 諛?諛깆뾽 ?곹깭 ?뺤씤 (/api/logs, /api/backup/status)
-
-- **?ㅻ챸**: ?쒖뒪??濡쒓렇? 諛깆뾽 ?곹깭瑜?議고쉶?섍퀬, 理쒓렐 ?깃났/?ㅽ뙣 ?щ?瑜?紐⑤땲?곕쭅?쒕떎. ?filecite?굏urn1file0?굏urn1file1?? 
-- **?꾨즺 湲곗?**
-  - `/api/logs` ?먯꽌 濡쒓렇 ?뚯씪 紐⑸줉??JSON?쇰줈 議고쉶?쒕떎.
-  - `/api/logs/{name}`, `/api/logs/{name}/download` 濡?媛쒕퀎 濡쒓렇 ?대엺쨌?ㅼ슫濡쒕뱶媛 媛?ν븯??
-  - `/api/backup/status` ?먯꽌 理쒓렐 諛깆뾽 ?깃났/?ㅽ뙣 ?쒓컖怨?硫붿떆吏媛 ?몄텧?쒕떎.
-- **寃利?諛⑸쾿**
-  - `/api/logs` ?묐떟?????濡쒓렇 ?뚯씪 ?대쫫???ы븿?섎뒗吏 ?뺤씤?쒕떎.
-  - 洹?以??섎굹瑜??댁뼱 理쒖떊 ?댁슜??異쒕젰?섎뒗吏 蹂몃떎.
-  - `/api/backup/status` ?묐떟??留덉?留?諛깆뾽 ?깃낵 ?쒓컙???щ컮瑜닿쾶 ?쒖떆?섎뒗吏 ?뺤씤?쒕떎.
-
-### 1.7 ?ъ뒪泥댄겕 諛??붾쾭洹몄슜 API (/health, /api/debug/*)
-
-- **?ㅻ챸**: ?쒕퉬???곹깭瑜??먭??섎뒗 ?ъ뒪泥댄겕?, ?댁쁺 ?몄쓽瑜??꾪븳 ?붾쾭洹??뺣낫 ?쒓났??API. ?filecite?굏urn1file0?굏urn1file1?? 
-- **?꾨즺 湲곗?**
-  - `/health` ????긽 200 OK ? ?⑥닚???쐎k??硫붿떆吏瑜?諛섑솚?쒕떎.
-  - `/api/debug/*` 怨꾩뿴 ?붾뱶?ъ씤?몃뒗 ?고????ㅼ젙/硫뷀듃由??깆쓽 JSON ?뺣낫瑜??쒓났?쒕떎(?댁쁺/媛쒕컻 ?섍꼍?먯꽌留??ъ슜).
-- **寃利?諛⑸쾿**
-  - `/health` 瑜??щ윭 踰??몄텧??200 ?묐떟???뺤씤?쒕떎.
-  - ` /api/debug/runtime`, `/api/debug/config` ?깆쓣 ?몄텧???대? ?뺣낫媛 JSON?쇰줈 諛섑솚?섎뒗吏 ?뺤씤?쒕떎.
+원문이 변경될 경우, 이 SSOT를 함께 업데이트해야 한다.
 
 ---
 
-## 2. 鍮꾧린??DoD 泥댄겕由ъ뒪??(?붿빟)
+## 1. 기능 DoD 체크리스트 (요약)
 
-### 2.1 ?묐떟 JSON 援ъ“ 諛?HTTP ?곹깭 肄붾뱶 ?쇨???
+관리자 모드는 다음 기능이 “정의서 기준”으로 동작해야 **기능 DoD를 충족**한 것으로 본다. fileciteturn1file0  
 
-- **?붽뎄?ы빆** ?filecite?굏urn1file0?굏urn1file1?? 
-  - ?깃났: HTTP 200 + `{ ok: true, data: {...} }`
-  - ?ㅽ뙣: HTTP 4xx/5xx + `{ ok: false, error, error_code, detail? }`
-  - 紐⑤뱺 ?붾뱶?ъ씤?멸? ?뺤쓽???ㅽ궎留??꾨뱶紐끒룻???瑜?怨듭쑀?댁빞 ?쒕떎.
-- **寃利?*
-  - ???API ?щ윭 媛쒖뿉 ????깃났/?ㅽ뙣 耳?댁뒪瑜?留뚮뱾???묐떟 援ъ“? ?곹깭 肄붾뱶瑜?鍮꾧탳?쒕떎.
-  - Pydantic `BaseModel` ?깆쓣 ?쒖슜???묐떟 ?ㅽ궎留덈? 肄붾뱶濡쒕룄 媛뺤젣?쒕떎.
+### 1.1 KPI 및 상태 대시보드 (/api/status)
 
-### 2.2 ?몄쬆/沅뚰븳 ?덉쟾??
+- **설명**: 전체 기사 수, 승인/대기 수, 게이트 기준치, 게이트 통과 여부 등을 한눈에 보여주는 관리용 대시보드.
+- **완료 기준**
+  - 관리자 UI 대시보드와 `/api/status` 응답 값이 서로 일관된다.
+  - 최소 필드: `total`, `ready_count`, `gate_required`, `ready_rate`, `gate_pass` 등.
+- **검증 방법**
+  - 테스트 데이터(예: 기사 100건 중 80건 승인)를 준비한다.
+  - `/api/status` 응답에서 위 필드 값이 기대값과 일치하는지 확인한다.
+  - UI 대시보드 숫자와 API 응답을 교차 검증한다.
 
-- **?붽뎄?ы빆** ?filecite?굏urn1file0?굏urn1file3?? 
-  - 愿由ъ옄 紐⑤뱶 API???섍꼍 蹂??`ADMIN_TOKEN`(?먮뒗 ?숇벑??鍮꾨? 媛? 湲곕컲?쇰줈 蹂댄샇?쒕떎.
-  - 誘쇨컧 API??**?좏슚???좏겙 ?ㅻ뜑**(?? `Authorization: Bearer <token>`, `X-Admin-Token`)媛 ?덉뼱?쇰쭔 泥섎━?쒕떎.
-  - Cloud Run ?쒕퉬?ㅻ뒗 Invoker 沅뚰븳???뱀젙 ?쒕퉬??怨꾩젙 ?깆쑝濡??쒗븳??**private ?쒕퉬??*瑜?湲곕낯?쇰줈 ?쒕떎.
-- **寃利?*
-  - ?좏겙 ?놁씠 ?몄텧 ??401/403 ??諛섑솚?섎뒗吏 ?뺤씤?쒕떎.
-  - ?щ컮瑜??좏겙?쇰줈 ?몄텧 ??200 ?묐떟???섏삤?붿? ?뺤씤?쒕떎.
-  - Cloud Run 肄섏넄?먯꽌 Invoker 沅뚰븳???뱀젙 二쇱껜?먮쭔 遺?щ릺???덈뒗吏 ?먭??쒕떎.
+### 1.2 비동기 플로우 실행 및 로그 확인 (/api/flow/*, /api/tasks/flow)
 
-### 2.3 蹂닿퀬??諛??뚮줈???깅뒫
+- **설명**: 뉴스 수집, 일일 플로우, 키워드 플로우 등 백그라운드 작업을 수동으로 실행하고, 결과 로그를 조회하는 기능. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - 운영자가 일일/키워드 플로우를 버튼 또는 API로 실행할 수 있다.
+  - 플로우 실행 시, 대응되는 로그 파일이 `/api/logs` 목록에 새로 생긴다.
+- **검증 방법**
+  - `/api/flow/daily` 또는 `/api/tasks/flow?type=daily` 를 호출한다.
+  - 작업 완료 후 `/api/logs` 를 호출해 신규 로그가 생성되었는지 확인한다.
+  - 필요 시 `/api/tasks/{job_id}/stream` SSE로 진행 로그를 확인한다.
 
-- **?붽뎄?ы빆** ?filecite?굏urn1file0?굏urn1file1?? 
-  - ?쇰컲?곸씤 湲곗궗???섏떗 嫄?湲곗?)?먯꽌 蹂닿퀬???앹꽦? ??珥??댁뿉 ?앸굹???쒕떎.
-  - ?쇱씪/?ㅼ썙???뚮줈?????쇨큵 ?묒뾽??Cloud Run ??꾩븘??湲곕낯 15遺? ?곹븳 60遺? ?댁뿉???꾨즺?섏뼱???쒕떎.
-  - 硫붾え由??ъ슜?됱? ?ㅼ젙 ?쒕룄(?? 512MiB)瑜??섏? ?딆븘???쒕떎.
-- **寃利?*
-  - ?뚯뒪???곗씠??50~200嫄??뺣룄瑜?以鍮꾪빐 `/api/report`, `/api/flow/daily` 泥섎━ ?쒓컙怨?硫붾え由щ? 紐⑤땲?곕쭅?쒕떎.
-  - Cloud Run 濡쒓렇/紐⑤땲?곕쭅 ??쒕낫?쒖뿉????꾩븘?꺜텽OM(No) ?щ?瑜??뺤씤?쒕떎.
+### 1.3 기사 목록 확인 및 승인/거절/코멘트
 
-### 2.4 ?좎?蹂댁닔 媛?μ꽦
+- **설명**: 수집된 기사 목록을 확인하고, 승인/거절 처리 및 편집자 코멘트를 저장하는 기능. fileciteturn1file0  
+- **완료 기준**
+  - 대기 중(ready 전) 기사 목록을 UI와 API(`/api/items`, `/api/community`)에서 조회할 수 있다.
+  - 각 기사에 대해 승인/거절이 가능하며, 승인 시 상태가 “준비(ready)”로 변경된다.
+  - 코멘트 입력 시 데이터에 저장된다.
+- **검증 방법**
+  - 테스트용 기사 몇 개를 준비하고 승인/거절 버튼을 눌러본다.
+  - 처리 후 상태 필드와 코멘트 저장 여부를 API 응답 또는 데이터 저장소에서 확인한다.
 
-- **?붽뎄?ы빆** ?filecite?굏urn1file0?굏urn1file1?? 
-  - ?곗씠??紐⑤뜽怨??붿껌/?묐떟 ?ㅽ궎留덇? Pydantic 紐⑤뜽濡??쇨??섍쾶 ?좎뼵?섏뼱 ?덉뼱???쒕떎.
-  - ?곸닔쨌援ъ“??以묐났 ?놁씠 ?쒗븳 怨녹뿉?쒕쭔 ?뺤쓽?앺븯???⑥씪 ?뚯뒪 ?먯튃???곕Ⅸ??
-  - ?듭떖 湲곕뒫??????먮룞???뚯뒪?멸? 議댁옱??由ы뙥?좊쭅 ???뚭?瑜?鍮좊Ⅴ寃?諛쒓껄?????덉뼱???쒕떎.
-- **寃利?*
-  - ?덈줈???꾨뱶瑜?異붽??대룄 紐⑤뜽 ??怨노쭔 ?섏젙?섎㈃ ?꾩껜 ?뚯뒪?멸? ?듦낵?섎뒗吏 ?뺤씤?쒕떎.
-  - ?숈씪 ?곸닔媛 ?щ윭 ?뚯씪???섎뱶肄붾뵫???덉? ?딆?吏 肄붾뱶 由щ럭濡??먭??쒕떎.
+### 1.4 발행 및 게이트 설정 (/api/items/{id}/publish, /api/config/gate_required)
 
----
+- **설명**: 승인된 기사를 실제 사용자 서비스에 발행하고, 발행 최소 기준(게이트)을 설정·조정하는 기능. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - `/api/items/{id}/publish` 호출 시 해당 기사가 발행 상태로 변경되고, 사용자 화면에 노출된다.
+  - `/api/config/gate_required` 값 변경 시 `/api/status` 의 `gate_required`가 즉시 갱신된다.
+- **검증 방법**
+  - 특정 기사에 대해 발행 API를 호출한 뒤 사용자 화면 노출 여부를 확인한다.
+  - 게이트 값을 10→15 등으로 변경하고 `/api/status` 응답에서 값이 즉시 반영되는지 본다.
 
-## 3. ?댁쁺/?섍꼍 DoD 泥댄겕由ъ뒪??(?붿빟)
+### 1.5 보고서 생성 및 결과물 내보내기 (/api/report, /api/export/*)
 
-### 3.1 Cloud Run ?섍꼍 ?쒖빟 以??
+- **설명**: 특정 날짜/키워드에 대한 요약 보고서를 생성하고, MD/CSV 파일로 다운로드하는 기능. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - `/api/report` 호출 시 `ok=true`와 함께 보고서 파일 경로가 반환된다.
+  - `/api/export/md`, `/api/export/csv` 로 해당 파일을 실제로 다운로드할 수 있다.
+- **검증 방법**
+  - 1일치 보고서를 생성하고 반환된 `path` 를 사용해 export API를 호출한다.
+  - 다운로드된 MD/CSV 내용이 비어 있지 않은지 확인한다.
 
-- **?붽뎄?ы빆** ?filecite?굏urn1file0?굏urn1file1?? 
-  - 紐⑤뱺 ?붿껌 泥섎━媛 Cloud Run 理쒕? ??꾩븘???대궡???앸굹???쒕떎.
-  - 硫붾え由??ъ슜?됱씠 ?ㅼ젙 ?쒕룄瑜??섏? ?딆븘???쒕떎.
-  - 遺?섍? 嫄몃젮???몄뒪?댁뒪媛 ??꾩븘??OOM?쇰줈 ?먯＜ 二쎌? ?딅룄濡??ㅺ퀎?쒕떎.
-- **寃利?*
-  - ??⑸웾 ?쒕굹由ъ삤(湲곗궗 200嫄??섏?)瑜??ㅽ뻾??媛??湲??붿껌 ?쒓컙????꾩븘?껊낫??異⑸텇??吏㏃?吏 ?뺤씤?쒕떎.
-  - 紐⑤땲?곕쭅?먯꽌 CPU/硫붾え由?洹몃옒?꾨? ?뺤씤???ъ쑀瑜??뺤씤?쒕떎.
+### 1.6 로그 및 백업 상태 확인 (/api/logs, /api/backup/status)
 
-### 3.2 諛고룷 諛?IAM 援ъ꽦
+- **설명**: 시스템 로그와 백업 상태를 조회하고, 최근 성공/실패 여부를 모니터링한다. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - `/api/logs` 에서 로그 파일 목록이 JSON으로 조회된다.
+  - `/api/logs/{name}`, `/api/logs/{name}/download` 로 개별 로그 열람·다운로드가 가능하다.
+  - `/api/backup/status` 에서 최근 백업 성공/실패 시각과 메시지가 노출된다.
+- **검증 방법**
+  - `/api/logs` 응답에 대표 로그 파일 이름이 포함되는지 확인한다.
+  - 그 중 하나를 열어 최신 내용이 출력되는지 본다.
+  - `/api/backup/status` 응답에 마지막 백업 성과 시간이 올바르게 표시되는지 확인한다.
 
-- **?붽뎄?ы빆** ?filecite?굏urn1file0?굏urn1file3?? 
-  - GitHub Actions ??CI/CD ?뚯씠?꾨씪?몄씠 main 釉뚮옖移?蹂寃쎌쓣 ?먮룞?쇰줈 Cloud Run??諛고룷?쒕떎.
-  - 諛고룷 ??理쒖떊 由щ퉬?꾩뿉 100% ?몃옒?쎌씠 ?곌껐?섏뼱 ?덉뼱???쒕떎.
-  - Cloud Run Invoker 沅뚰븳? 諛고룷???댁쁺???쒕퉬??怨꾩젙?먮쭔 遺?ы븳??
-  - `ADMIN_TOKEN` ??鍮꾨?? Secret Manager瑜??듯빐 ?섍꼍 蹂?섎줈 ?덉쟾?섍쾶 二쇱엯?쒕떎.
-- **寃利?*
-  - ?뚯뒪??釉뚮옖移섏뿉??PR/癒몄? ???덈줈??由щ퉬?꾩씠 ?앹꽦?섍퀬 ?몃옒?쎌씠 ?뺤긽 ?꾪솚?섎뒗吏 ?뺤씤?쒕떎.
-  - Cloud Run IAM ??뿉??Invoker 踰붿쐞瑜??먭??쒕떎.
-  - ?섍꼍 蹂???붾㈃?먯꽌 鍮꾨? 媛믪씠 ?뺤긽 二쇱엯?섏뿀?붿? ?뺤씤?쒕떎.
+### 1.7 헬스체크 및 디버그용 API (/health, /api/debug/*)
 
----
-
-## 4. DoD 異⑹” ?곹깭 ?먭? ?붿빟 (?곕턿 v1.1 湲곕컲)
-
-?ㅼ쓬 ?댁슜? **DoD(Definition of Done) 異⑹” ?곹깭 ?먭? ?붿빟??+ ?몄닔?멸퀎 ?곕턿 v1.1** 瑜?諛뷀깢?쇰줈 ???쒖떎?됱슜 ?붿빟?앹씠?? ?filecite?굏urn1file1?굏urn1file3?? 
-
-### 4.1 ?④퀎蹂??ㅽ뻾 怨꾪쉷(Plan ???꾨＼?꾪듃 泥댁씠??愿??
-
-0?④퀎. **湲곗? ?뺥빀??*
-- ?낅젰: ?뺤쓽?? Q&A, ?꾩옱 Cloud Run 由щ퉬???몃옒???꾨찓?? ADMIN_TOKEN ?꾩튂.
-- ?곗텧臾? ?붾뱶?ъ씤?맞룹뒪?ㅻ쭏쨌HTTP 肄붾뱶쨌沅뚰븳 留? ?꾩옱 諛고룷 ?ㅻ깄??
-- ?ㅻえ?? `/health`, `/api/status(?좏겙????` ?뺤씤.
-
-1?④퀎. **API 紐낆꽭쨌?ㅽ궎留??뺥빀??*
-- 紐⑺몴: 紐⑤뱺 二쇱슂 API媛 怨듯넻 ?묐떟 援ъ“? HTTP 肄붾뱶 洹쒖빟???곕Ⅸ??
-- ?묒뾽: Pydantic ?묐떟 紐⑤뜽 ?뺤쓽, ?먮윭 肄붾뱶 ?뚯씠釉??묒꽦, ?붾뱶?ъ씤?몃퀎 ?ㅽ럺 ?쒖???
-
-2?④퀎. **蹂댁븞/IAM ?섎뱶??*
-- 紐⑺몴: ?좏겙+Cloud Run IAM 2以?諛⑹뼱.
-- ?묒뾽: ?듬챸 ?묎렐 李⑤떒, Invoker 理쒖냼?? Scheduler/SA 沅뚰븳 ?뺣━, ?좏겙 ?뚯쟾 ?덉감.
-
-3?④퀎. **濡쒓렇쨌諛깆뾽쨌?뚮줈??紐⑤땲?곕쭅**
-- 紐⑺몴: `/api/logs`, `/api/backup/status`, `/api/tasks/flow`媛 ?곌퀎??愿??泥닿퀎瑜?媛뽰텣??
-- ?묒뾽: 諛깆뾽 ?곹깭 ?묐떟 ?뺤떇 ?쒖??? 濡쒓렇/?ㅼ슫濡쒕뱶 耳?댁뒪 ?뺣━, ?뚮줈???ㅽ뻾?믩줈洹??곌껐 ?뺤씤.
-
-4?④퀎. **?깅뒫/由ъ냼?ㅒ룹슫???먮룞??*
-- 紐⑺몴: ??꾩븘??硫붾え由??쒕룄 ??泥섎━ + ?쒕━?꾪듃(由щ퉬?꽷룻듃?섑뵿) 諛⑹?.
-- ?묒뾽: ?깅뒫 痢≪젙, 遺???뚯뒪?? CI?먯꽌 `update-traffic --to-latest` ?뺣???
-
-5?④퀎. **由대━???먯젙(Go/No-Go)**
-- 紐⑺몴: 湲곕뒫/鍮꾧린??蹂댁븞/?댁쁺 湲곗?????踰덉뿉 蹂닿퀬 寃곗젙?쒕떎.
-- ?묒뾽: 李⑤떒 ?댁뒋 紐⑸줉怨??꾪솕梨??뺣━, Go/No-Go ???묒꽦.
+- **설명**: 서비스 상태를 점검하는 헬스체크와, 운영 편의를 위한 디버그 정보 제공용 API. fileciteturn1file0turn1file1  
+- **완료 기준**
+  - `/health` 는 항상 200 OK 와 단순한 “ok” 메시지를 반환한다.
+  - `/api/debug/*` 계열 엔드포인트는 런타임/설정/메트릭 등의 JSON 정보를 제공한다(운영/개발 환경에서만 사용).
+- **검증 방법**
+  - `/health` 를 여러 번 호출해 200 응답을 확인한다.
+  - ` /api/debug/runtime`, `/api/debug/config` 등을 호출해 내부 정보가 JSON으로 반환되는지 확인한다.
 
 ---
 
-## 5. Cloud SQL Stop Policy (?댁쁺 ?뺤콉 SSOT)
+## 2. 비기능 DoD 체크리스트 (요약)
 
-Cloud SQL 愿???댁슜? **蹂꾨룄 ?뺤콉 臾몄꽌**瑜?SSOT濡??쇰뒗?? ?filecite?굏urn1file2?? 
+### 2.1 응답 JSON 구조 및 HTTP 상태 코드 일관성
 
-### 5.1 湲곕낯 ?먯튃
+- **요구사항** fileciteturn1file0turn1file1  
+  - 성공: HTTP 200 + `{ ok: true, data: {...} }`
+  - 실패: HTTP 4xx/5xx + `{ ok: false, error, error_code, detail? }`
+  - 모든 엔드포인트가 정의된 스키마(필드명·타입)를 공유해야 한다.
+- **검증**
+  - 대표 API 여러 개에 대해 성공/실패 케이스를 만들어 응답 구조와 상태 코드를 비교한다.
+  - Pydantic `BaseModel` 등을 활용해 응답 스키마를 코드로도 강제한다.
 
-- Cloud SQL ?몄뒪?댁뒪 `quali-pg` ??**STOPPED + activationPolicy=NEVER** ?곹깭媛 ?쒓린蹂멤앹씠??
-- DB媛 ?꾩슂???묒뾽(諛고룷, 留덉씠洹몃젅?댁뀡, ?ㅽ궎留??먭? ?????덉쓣 ?뚮쭔 ?쇱떆?곸쑝濡?`ALWAYS` 濡?蹂寃쏀빐 ?ъ슜?쒕떎.
-- ?묒뾽 ??諛섎뱶???ㅼ떆 `NEVER` 濡??섎룎??STOP ?곹깭瑜??좎??쒕떎.
-- ?좏뵆由ъ??댁뀡?먮뒗 `DB_DISABLED=true` 瑜??ㅼ젙?? DB媛 爰쇱졇 ?덉뼱???먮윭 ?놁씠 ?숈옉?섎룄濡?諛⑹뼱?쒕떎.
+### 2.2 인증/권한 안전성
 
-### 5.2 ?쇱긽 ?ㅻえ??留ㅼ씪 3以?
+- **요구사항** fileciteturn1file0turn1file3  
+  - 관리자 모드 API는 환경 변수 `ADMIN_TOKEN`(또는 동등한 비밀 값) 기반으로 보호한다.
+  - 민감 API는 **유효한 토큰 헤더**(예: `Authorization: Bearer <token>`, `X-Admin-Token`)가 있어야만 처리한다.
+  - Cloud Run 서비스는 Invoker 권한이 특정 서비스 계정 등으로 제한된 **private 서비스**를 기본으로 한다.
+- **검증**
+  - 토큰 없이 호출 시 401/403 이 반환되는지 확인한다.
+  - 올바른 토큰으로 호출 시 200 응답이 나오는지 확인한다.
+  - Cloud Run 콘솔에서 Invoker 권한이 특정 주체에만 부여되어 있는지 점검한다.
 
-- Cloud SQL ?곹깭, Cloud Run ?몃옒?? Admin ?꾨찓??HTML????踰덉뿉 ?뺤씤?쒕떎.
+### 2.3 보고서 및 플로우 성능
+
+- **요구사항** fileciteturn1file0turn1file1  
+  - 일반적인 기사량(수십 건 기준)에서 보고서 생성은 수 초 내에 끝나야 한다.
+  - 일일/키워드 플로우 등 일괄 작업도 Cloud Run 타임아웃(기본 15분, 상한 60분) 내에서 완료되어야 한다.
+  - 메모리 사용량은 설정 한도(예: 512MiB)를 넘지 않아야 한다.
+- **검증**
+  - 테스트 데이터 50~200건 정도를 준비해 `/api/report`, `/api/flow/daily` 처리 시간과 메모리를 모니터링한다.
+  - Cloud Run 로그/모니터링 대시보드에서 타임아웃·OOM(No) 여부를 확인한다.
+
+### 2.4 유지보수 가능성
+
+- **요구사항** fileciteturn1file0turn1file1  
+  - 데이터 모델과 요청/응답 스키마가 Pydantic 모델로 일관되게 선언되어 있어야 한다.
+  - 상수·구조는 중복 없이 “한 곳에서만 정의”하는 단일 소스 원칙을 따른다.
+  - 핵심 기능에 대한 자동화 테스트가 존재해 리팩토링 시 회귀를 빠르게 발견할 수 있어야 한다.
+- **검증**
+  - 새로운 필드를 추가해도 모델 한 곳만 수정하면 전체 테스트가 통과하는지 확인한다.
+  - 동일 상수가 여러 파일에 하드코딩돼 있지 않은지 코드 리뷰로 점검한다.
+
+---
+
+## 3. 운영/환경 DoD 체크리스트 (요약)
+
+### 3.1 Cloud Run 환경 제약 준수
+
+- **요구사항** fileciteturn1file0turn1file1  
+  - 모든 요청 처리가 Cloud Run 최대 타임아웃 이내에 끝나야 한다.
+  - 메모리 사용량이 설정 한도를 넘지 않아야 한다.
+  - 부하가 걸려도 인스턴스가 타임아웃/OOM으로 자주 죽지 않도록 설계한다.
+- **검증**
+  - 대용량 시나리오(기사 200건 수준)를 실행해 가장 긴 요청 시간이 타임아웃보다 충분히 짧은지 확인한다.
+  - 모니터링에서 CPU/메모리 그래프를 확인해 여유를 확인한다.
+
+### 3.2 배포 및 IAM 구성
+
+- **요구사항** fileciteturn1file0turn1file3  
+  - GitHub Actions 등 CI/CD 파이프라인이 main 브랜치 변경을 자동으로 Cloud Run에 배포한다.
+  - 배포 후 최신 리비전에 100% 트래픽이 연결되어 있어야 한다.
+  - Cloud Run Invoker 권한은 배포용/운영용 서비스 계정에만 부여한다.
+  - `ADMIN_TOKEN` 등 비밀은 Secret Manager를 통해 환경 변수로 안전하게 주입한다.
+- **검증**
+  - 테스트 브랜치에서 PR/머지 후 새로운 리비전이 생성되고 트래픽이 정상 전환되는지 확인한다.
+  - Cloud Run IAM 탭에서 Invoker 범위를 점검한다.
+  - 환경 변수 화면에서 비밀 값이 정상 주입되었는지 확인한다.
+
+---
+
+## 4. DoD 충족 상태 점검 요약 (런북 v1.1 기반)
+
+다음 내용은 **DoD(Definition of Done) 충족 상태 점검 요약서 + 인수인계 런북 v1.1** 를 바탕으로 한 “실행용 요약”이다. fileciteturn1file1turn1file3  
+
+### 4.1 단계별 실행 계획(Plan – 프롬프트 체이닝 관점)
+
+0단계. **기준 정합화**
+- 입력: 정의서, Q&A, 현재 Cloud Run 리비전/트래픽/도메인, ADMIN_TOKEN 위치.
+- 산출물: 엔드포인트·스키마·HTTP 코드·권한 맵, 현재 배포 스냅샷.
+- 스모크: `/health`, `/api/status(토큰有/無)` 확인.
+
+1단계. **API 명세·스키마 정합화**
+- 목표: 모든 주요 API가 공통 응답 구조와 HTTP 코드 규약을 따른다.
+- 작업: Pydantic 응답 모델 정의, 에러 코드 테이블 작성, 엔드포인트별 스펙 표준화.
+
+2단계. **보안/IAM 하드닝**
+- 목표: 토큰+Cloud Run IAM 2중 방어.
+- 작업: 익명 접근 차단, Invoker 최소화, Scheduler/SA 권한 정리, 토큰 회전 절차.
+
+3단계. **로그·백업·플로우 모니터링**
+- 목표: `/api/logs`, `/api/backup/status`, `/api/tasks/flow`가 연계된 관제 체계를 갖춘다.
+- 작업: 백업 상태 응답 형식 표준화, 로그/다운로드 케이스 정리, 플로우 실행→로그 연결 확인.
+
+4단계. **성능/리소스·운영 자동화**
+- 목표: 타임아웃/메모리 한도 내 처리 + 드리프트(리비전·트래픽) 방지.
+- 작업: 성능 측정, 부하 테스트, CI에서 `update-traffic --to-latest` 정례화.
+
+5단계. **릴리스 판정(Go/No-Go)**
+- 목표: 기능/비기능/보안/운영 기준을 한 번에 보고 결정한다.
+- 작업: 차단 이슈 목록과 완화책 정리, Go/No-Go 표 작성.
+
+---
+
+## 5. Cloud SQL Stop Policy (운영 정책 SSOT)
+
+Cloud SQL 관련 내용은 **별도 정책 문서**를 SSOT로 삼는다. fileciteturn1file2  
+
+### 5.1 기본 원칙
+
+- Cloud SQL 인스턴스 `quali-pg` 는 **STOPPED + activationPolicy=NEVER** 상태가 “기본”이다.
+- DB가 필요한 작업(배포, 마이그레이션, 스키마 점검 등)이 있을 때만 일시적으로 `ALWAYS` 로 변경해 사용한다.
+- 작업 후 반드시 다시 `NEVER` 로 되돌려 STOP 상태를 유지한다.
+- 애플리케이션에는 `DB_DISABLED=true` 를 설정해, DB가 꺼져 있어도 에러 없이 동작하도록 방어한다.
+
+### 5.2 일상 스모크(매일 3줄)
+
+- Cloud SQL 상태, Cloud Run 트래픽, Admin 도메인 HTML을 한 번에 확인한다.
 
 ```bash
 gcloud sql instances list --format="table(name,region,state,settings.activationPolicy)"
@@ -235,14 +235,14 @@ gcloud run services describe quali-admin-domap --region asia-northeast1 --format
 Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" -Headers @{"Cache-Control"="no-cache"} -OutFile "deployed_index.html"
 ```
 
-- 湲곕? 寃곌낵
+- 기대 결과
   - SQL: `STOPPED / NEVER`
   - Run: `percent: 100`
-  - HTML: ?뺤긽 ?ㅼ슫濡쒕뱶
+  - HTML: 정상 다운로드
 
-### 5.3 諛고룷 李⑤떒 ??CI)
+### 5.3 배포 차단 훅(CI)
 
-- SQL??STOP ?곹깭?대㈃ **諛고룷瑜??ㅽ뙣**?쒗궎???낆쓣 CI??異붽??쒕떎.
+- SQL이 STOP 상태이면 **배포를 실패**시키는 훅을 CI에 추가한다.
 
 ```bash
 STATE=$(gcloud sql instances describe quali-pg --format="value(state)")
@@ -254,114 +254,114 @@ fi
 
 ---
 
-## 6. DevOps ?덉쭏 寃뚯씠??(DoD v1.1 ??Admin Tests + main 釉뚮옖移?蹂댄샇)
+## 6. DevOps 품질 게이트 (DoD v1.1 – Admin Tests + main 브랜치 보호)
 
-???덉? **QualiJournal 愿由ъ옄 紐⑤뱶 ??DevOps ?덉쭏 寃뚯씠???⑦궎吏 v1.1** ???댁슜??DoD 愿?먯뿉???붿빟??寃껋씠?? ?filecite?굏urn1file3?? 
+이 절은 **QualiJournal 관리자 모드 – DevOps 품질 게이트 패키지 v1.1** 의 내용을 DoD 관점에서 요약한 것이다. fileciteturn1file3  
 
-### 6.1 Admin Tests (?먮룞???뚯뒪???덉쭏 寃뚯씠??
+### 6.1 Admin Tests (자동화 테스트 품질 게이트)
 
-- **紐⑹쟻**
-  - 愿由ъ옄 紐⑤뱶 諛고룷 ??理쒖냼 ?숈옉??蹂댁옣?섎뒗 **?먮룞???ㅻえ???뚯뒪??*.
-  - Admin Tests 媛 ?ㅽ뙣?섎㈃ main 釉뚮옖移섏뿉 蹂묓빀?????녿떎.
-- **?꾩닔 議곌굔**
-  - GitHub Actions ?뚰겕?뚮줈 `Admin Tests (pytest only)` ??`test-admin` ?≪씠 ?깃났 ?곹깭?ъ빞 ?쒕떎.
-  - `POST /api/report` ?????
+- **목적**
+  - 관리자 모드 배포 전 최소 동작을 보장하는 **자동화 스모크 테스트**.
+  - Admin Tests 가 실패하면 main 브랜치에 병합할 수 없다.
+- **필수 조건**
+  - GitHub Actions 워크플로 `Admin Tests (pytest only)` 의 `test-admin` 잡이 성공 상태여야 한다.
+  - `POST /api/report` 에 대해:
     - HTTP 200 OK
-    - `ok=true`, `op="report"`, ?좏슚??`path`, ?뺤닔??`count` ?꾨뱶 議댁옱
-  - ?대떦 `path` 濡?`GET /api/archive/{path}` ?몄텧 ??
+    - `ok=true`, `op="report"`, 유효한 `path`, 정수형 `count` 필드 존재
+  - 해당 `path` 로 `GET /api/archive/{path}` 호출 시:
     - 200 OK
-    - `Content-Type` ??text/markdown 怨꾩뿴
-    - 蹂몃Ц??鍮꾩뼱 ?덉? ?딆? 由ы룷?몄뿬???쒕떎.
-- **泥댄겕由ъ뒪??*
-  - [ ] 理쒖떊 PR?먯꽌 `test-admin` ???깃났 ?곹깭??
-  - [ ] `/api/report` ??`/api/archive/{path}` 源뚯? ?섎룞 ?ㅻえ??寃곌낵媛 湲곕?? 媛숇떎.
+    - `Content-Type` 이 text/markdown 계열
+    - 본문이 비어 있지 않은 리포트여야 한다.
+- **체크리스트**
+  - [ ] 최신 PR에서 `test-admin` 이 성공 상태다.
+  - [ ] `/api/report` → `/api/archive/{path}` 까지 수동 스모크 결과가 기대와 같다.
 
-### 6.2 main 釉뚮옖移?蹂댄샇(釉뚮옖移??덉쭏 寃뚯씠??
+### 6.2 main 브랜치 보호(브랜치 품질 게이트)
 
-- **紐⑹쟻**
-  - main 釉뚮옖移섎? 愿由ъ옄 紐⑤뱶 諛고룷??**?⑥씪 吏꾩떎 ?뚯뒪(SSOT)** 濡?蹂댄샇?쒕떎.
-  - 吏곸젒 push 瑜?留됯퀬, ?덉쭏 寃뚯씠?몃? ?듦낵??PR留?蹂묓빀?섍쾶 ?쒕떎.
-- **?꾩닔 ?ㅼ젙(GitHub Branch Protection)**
-  - ?쏳equire a pull request before merging??= ON
-  - ?쏳equire status checks to pass before merging??= ON
-    - ?꾩닔 status check 紐⑸줉??`test-admin` ?ы븿
-  - ?쏳equire signed commits??= ON (紐⑤뱺 而ㅻ컠 Verified)
-  - ?쏳equire linear history??= ON (squash/rebase 湲곕컲 ?좏삎 ?덉뒪?좊━)
-- **泥댄겕由ъ뒪??*
-  - [ ] main ??吏곸젒 push ?섏? ?딄퀬 PR濡쒕쭔 蹂寃쏀븳??
-  - [ ] `test-admin` ???꾩닔 status check 濡??ㅼ젙?섏뼱 ?덈떎.
-  - [ ] main 而ㅻ컠??紐⑤몢 Verified ?대떎.
-  - [ ] 濡쒓렇媛 ?좏삎 ?덉뒪?좊━濡??좎??섍퀬 ?덈떎.
+- **목적**
+  - main 브랜치를 관리자 모드 배포의 **단일 진실 소스(SSOT)** 로 보호한다.
+  - 직접 push 를 막고, 품질 게이트를 통과한 PR만 병합하게 한다.
+- **필수 설정(GitHub Branch Protection)**
+  - “Require a pull request before merging” = ON
+  - “Require status checks to pass before merging” = ON
+    - 필수 status check 목록에 `test-admin` 포함
+  - “Require signed commits” = ON (모든 커밋 Verified)
+  - “Require linear history” = ON (squash/rebase 기반 선형 히스토리)
+- **체크리스트**
+  - [ ] main 에 직접 push 하지 않고 PR로만 변경한다.
+  - [ ] `test-admin` 이 필수 status check 로 설정되어 있다.
+  - [ ] main 커밋이 모두 Verified 이다.
+  - [ ] 로그가 선형 히스토리로 유지되고 있다.
 
-### 6.3 DevOps ?덉쭏 寃뚯씠???좎뼵
+### 6.3 DevOps 품질 게이트 선언
 
-愿由ъ옄 紐⑤뱶 ?명겕由щ㉫?멸? **?쏡one??* ?쇰줈 ?몄젙?섎젮硫?諛섎뱶???꾨옒 ??議곌굔???숈떆??留뚯”?댁빞 ?쒕떎.
+관리자 모드 인크리먼트가 **“Done”** 으로 인정되려면 반드시 아래 두 조건을 동시에 만족해야 한다.
 
-1. 6.1 ??Admin Tests 瑜??듦낵?쒕떎.  
-2. 6.2 ??main 釉뚮옖移?蹂댄샇 洹쒖튃??異⑹”?섎뒗 PR???듯빐 main ??蹂묓빀?쒕떎.
+1. 6.1 의 Admin Tests 를 통과한다.  
+2. 6.2 의 main 브랜치 보호 규칙을 충족하는 PR을 통해 main 에 병합된다.
 
 ---
 
-## 7. PR ?쒗뵆由???DevOps 泥댄겕由ъ뒪??v1 (?붿빟)
+## 7. PR 템플릿 – DevOps 체크리스트 v1 (요약)
 
-**紐⑹쟻**: 媛쒕컻?먭? PR??留뚮뱾 ??DoD-DevOps 湲곗???媛꾨떒???ㅼ떆 ?뺤씤?섎룄濡??뺣뒗 ?쒗뵆由우씠?? ?filecite?굏urn1file4?? 
+**목적**: 개발자가 PR을 만들 때 DoD-DevOps 기준을 간단히 다시 확인하도록 돕는 템플릿이다. fileciteturn1file4  
 
-### 7.1 PR 湲곕낯 ?뺣낫 ?뱀뀡
+### 7.1 PR 기본 정보 섹션
 
-- ?쒕ぉ, 愿???댁뒋, 蹂寃??좏삎(?좉퇋 湲곕뒫/踰꾧렇 ?섏젙/由ы뙥?곕쭅/?ㅼ젙 蹂寃?, 二쇱슂 蹂寃??댁슜 3以? ?곹뼢 踰붿쐞 ?깆쓣 媛꾨떒???곷뒗??
+- 제목, 관련 이슈, 변경 유형(신규 기능/버그 수정/리팩터링/설정 변경), 주요 변경 내용 3줄, 영향 범위 등을 간단히 적는다.
 
-### 7.2 DevOps ?좏샇??泥댄겕由ъ뒪??
+### 7.2 DevOps 신호등 체크리스트
 
 1. **Admin Tests**
-   - [ ] Actions ??뿉??`Admin Tests (pytest only)` / `test-admin` ??green/passed ?몄? ?뺤씤?덈떎.
-2. **main 釉뚮옖移?蹂댄샇**
-   - [ ] main ??吏곸젒 push ?섏? ?딄퀬 PR???ъ슜?덈떎.
-   - [ ] main 蹂댄샇 洹쒖튃??耳쒖졇 ?덈뒗 ?붾㈃???뺤씤?덈떎.
-3. **?쒕챸 而ㅻ컠**
-   - [ ] PR???ы븿??而ㅻ컠??GitHub ?먯꽌 Verified 濡?蹂댁씠?붿? ?뺤씤?덈떎.
-4. **?좏삎 ?덉뒪?좊━**
-   - [ ] 癒몄? ???쏶quash and merge???먮뒗 ?쏳ebase and merge??留??ъ슜?쒕떎.
+   - [ ] Actions 탭에서 `Admin Tests (pytest only)` / `test-admin` 이 green/passed 인지 확인했다.
+2. **main 브랜치 보호**
+   - [ ] main 에 직접 push 하지 않고 PR을 사용했다.
+   - [ ] main 보호 규칙이 켜져 있는 화면을 확인했다.
+3. **서명 커밋**
+   - [ ] PR에 포함된 커밋이 GitHub 에서 Verified 로 보이는지 확인했다.
+4. **선형 히스토리**
+   - [ ] 머지 시 “Squash and merge” 또는 “Rebase and merge” 만 사용한다.
 
 ---
 
-## 8. 由대━??Go / No-Go 湲곗?
+## 8. 릴리스 Go / No-Go 기준
 
-?ㅼ쓬 ?쒕뒗 DoD ?먭? 寃곌낵瑜?湲곕컲?쇰줈 由대━???щ?瑜?寃곗젙?????ъ슜?섎뒗 ?곸쐞 湲곗??대떎. ?filecite?굏urn1file1?? 
+다음 표는 DoD 점검 결과를 기반으로 릴리스 여부를 결정할 때 사용하는 상위 기준이다. fileciteturn1file1  
 
-| ?곸뿭 | Go 湲곗? | No-Go(李⑤떒) | 湲곕낯 議곗튂 |
+| 영역 | Go 기준 | No-Go(차단) | 기본 조치 |
 |------|---------|-------------|-----------|
-| 湲곕뒫 | ?뺤쓽?쒖쓽 湲곕뒫 ??ぉ??紐⑤몢 ?듦낵 | 二쇱슂 ?붾뱶?ъ씤??1媛쒕씪???ㅽ뙣 | ?ロ뵿???먮뒗 濡ㅻ갚 |
-| ?묐떟/肄붾뱶 | 怨듯넻 JSON ?ㅽ궎留댟텵TTP 肄붾뱶 ?쇱튂 | ?붾뱶?ъ씤?몃쭏??援ъ“媛 ?쒓컖媛?| ?묐떟 紐⑤뜽 ?뺣퉬 ???щ같??|
-| 蹂댁븞/IAM | ?좏겙+Invoker 理쒖냼 沅뚰븳, 401/403 ?먮쫫 ?뺤긽 | 怨듦컻 Invoker, ?좏겙 誘몄쟻??| 沅뚰븳 ?ъ꽕?빧룹씡紐?李⑤떒 |
-| 諛고룷/?꾨찓??| 理쒖떊 由щ퉬??100% ?몃옒?? 理쒖떊 HTML/JS | 援щ쾭??UI/JS ?몄텧 | ?몃옒??理쒖떊?붋룹틦??臾댁떆 ?щ같??|
-| ?ㅼ?以꾨윭 | 7???곗냽 ?먮룞 蹂닿퀬???깃났瑜???99% | ??? ?ㅽ뙣 ?먮뒗 401 | ?좏겙 ?뚯쟾쨌???섏젙 |
-| 諛깆뾽 | ?곹깭 OK, 踰꾩???蹂댁〈 ?뺤콉 ?곸슜 | 留덉?留??깃났 ?쒓컖 ?놁쓬 | 諛깆뾽 ???뺤콉 蹂닿컯 |
-| Cloud SQL | STOP ?뺤콉 以??湲곕낯 STOP) | ?쒖꽦 ?곹깭 諛⑹튂 | STOP 蹂듦뎄쨌李⑤떒 ???곸슜 |
+| 기능 | 정의서의 기능 항목을 모두 통과 | 주요 엔드포인트 1개라도 실패 | 핫픽스 또는 롤백 |
+| 응답/코드 | 공통 JSON 스키마·HTTP 코드 일치 | 엔드포인트마다 구조가 제각각 | 응답 모델 정비 후 재배포 |
+| 보안/IAM | 토큰+Invoker 최소 권한, 401/403 흐름 정상 | 공개 Invoker, 토큰 미적용 | 권한 재설정·익명 차단 |
+| 배포/도메인 | 최신 리비전 100% 트래픽, 최신 HTML/JS | 구버전 UI/JS 노출 | 트래픽 최신화·캐시 무시 재배포 |
+| 스케줄러 | 7일 연속 자동 보고서 성공률 ≥ 99% | 잦은 실패 또는 401 | 토큰 회전·잡 수정 |
+| 백업 | 상태 OK, 버저닝/보존 정책 적용 | 마지막 성공 시각 없음 | 백업 잡/정책 보강 |
+| Cloud SQL | STOP 정책 준수(기본 STOP) | 활성 상태 방치 | STOP 복구·차단 훅 적용 |
 
 ---
 
-## 9. ?섑뵆 紐낅졊 紐⑥쓬 (諛쒖톸)
+## 9. 샘플 명령 모음 (발췌)
 
-### 9.1 ?ъ뒪쨌?곹깭쨌?뚮줈?걔룸낫怨좎꽌 (cURL)
+### 9.1 헬스·상태·플로우·보고서 (cURL)
 
 ```bash
-# ?ъ뒪 泥댄겕
+# 헬스 체크
 curl -i "https://<DOMAIN>/health"
 
-# ?곹깭(KPI) ???깃났/?ㅽ뙣 鍮꾧탳
+# 상태(KPI) – 성공/실패 비교
 curl -s "https://<DOMAIN>/api/status" -H "Authorization: Bearer DUMMY_ADMIN_TOKEN"
-curl -s "https://<DOMAIN>/api/status"  # 湲곕?: 401
+curl -s "https://<DOMAIN>/api/status"  # 기대: 401
 
-# ?뚮줈???몃━嫄?
+# 플로우 트리거
 curl -s -X POST "https://<DOMAIN>/api/tasks/flow?type=daily" -H "Authorization: Bearer DUMMY_ADMIN_TOKEN"
 
-# 蹂닿퀬???앹꽦 ???대낫?닿린
+# 보고서 생성 → 내보내기
 curl -s -X POST "https://<DOMAIN>/api/report" -H "Authorization: Bearer DUMMY_ADMIN_TOKEN"
 curl -s "https://<DOMAIN>/api/export/md?date=YYYY-MM-DD"  -H "Authorization: Bearer DUMMY_ADMIN_TOKEN" -o report.md
 curl -s "https://<DOMAIN>/api/export/csv?date=YYYY-MM-DD" -H "Authorization: Bearer DUMMY_ADMIN_TOKEN" -o report.csv
 ```
 
-### 9.2 Cloud Run ?몃옒??理쒖떊??& 罹먯떆 ?고쉶 (PowerShell)
+### 9.2 Cloud Run 트래픽 최신화 & 캐시 우회 (PowerShell)
 
 ```powershell
 $SERVICE="quali-admin-domap"
@@ -374,21 +374,21 @@ Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" -Headers @{"
 
 ---
 
-## 10. ?댁쁺?먭? ??臾몄꽌瑜??대뼸寃??ъ슜?섎㈃ 醫뗭?吏
+## 10. 운영자가 이 문서를 어떻게 사용하면 좋은지
 
-1. **??湲곕뒫 媛쒕컻 ?쒖옉 ??*  
-   - 1~3?μ쓣 ?쎄퀬 ?쒖씠踰?蹂寃쎌씠 ?대뒓 DoD ??ぉ怨?愿?⑤뤌 ?덈뒗吏???쒖떆?쒕떎.
-2. **PR ?닿린 ??*  
-   - 6~7?μ쓽 DevOps 泥댄겕由ъ뒪?몃? ?곕씪 Admin Tests, 釉뚮옖移?蹂댄샇, ?쒕챸 而ㅻ컠 ?곹깭瑜??뺤씤?쒕떎.
-3. **由대━????理쒖쥌 ?먭?**  
-   - 4???ㅽ뻾 怨꾪쉷)怨?8??Go/No-Go 湲곗?)??湲곕컲?쇰줈 泥댄겕由ъ뒪?몃? 梨꾩슦怨? No-Go ??ぉ???녿뒗吏 ?뺤씤?쒕떎.
-4. **?μ븷/?댁뒋 諛쒖깮 ??*  
-   - 1~3?μ쑝濡?湲곕뒫/?섍꼍 ?붽뎄瑜??ㅼ떆 ?뺤씤?섍퀬, 5~6?μ쑝濡?Cloud SQL쨌DevOps 履??ㅼ젙???닿툔?섏? ?딆븯?붿? ?먭??쒕떎.
+1. **새 기능 개발 시작 전**  
+   - 1~3장을 읽고 “이번 변경이 어느 DoD 항목과 관련돼 있는지” 표시한다.
+2. **PR 열기 전**  
+   - 6~7장의 DevOps 체크리스트를 따라 Admin Tests, 브랜치 보호, 서명 커밋 상태를 확인한다.
+3. **릴리스 전 최종 점검**  
+   - 4장(실행 계획)과 8장(Go/No-Go 기준)을 기반으로 체크리스트를 채우고, No-Go 항목이 없는지 확인한다.
+4. **장애/이슈 발생 시**  
+   - 1~3장으로 기능/환경 요구를 다시 확인하고, 5~6장으로 Cloud SQL·DevOps 쪽 설정이 어긋나지 않았는지 점검한다.
 
-??臾몄꽌???쒓?由ъ옄 紐⑤뱶 媛쒕컻쨌?댁쁺??湲곗??졻앹쑝濡??ъ슜?섎ŉ, 蹂寃쎌씠 ?꾩슂??寃쎌슦 **諛섎뱶??PR + 由щ럭 + DevOps ?덉쭏 寃뚯씠??*瑜?嫄곗퀜 媛깆떊?쒕떎.
-<!-- SSOT 蹂寃??뚯뒪??v2 (?쇰꺼 ?놁씠 CI 諛섏쓳 ?뺤씤?? -->
+이 문서는 “관리자 모드 개발·운영의 기준선”으로 사용되며, 변경이 필요할 경우 **반드시 PR + 리뷰 + DevOps 품질 게이트**를 거쳐 갱신한다.
+<!-- SSOT 변경 테스트 v2 (라벨 없이 CI 반응 확인용) -->
 
-<!-- SSOT-CLOUDSQL-AUTOHEAL START -->
-### SSOT — Cloud SQL STOP Guardrail 자가치유(운영 상수)
-Guardrail - Cloud SQL STOP Policy로 배포/테스트가 차단되면, Cloud SQL 인스턴스를 ctivationPolicy=ALWAYS로 전환(기동)한 뒤 GitHub Actions를 Re-run하여 통과를 확인하고, 완료 후에는 ctivationPolicy=NEVER로 되돌려 비용을 절약한다. (명령 예: gcloud sql instances patch <INSTANCE> --activation-policy=ALWAYS  Re-run  ... --activation-policy=NEVER)
-<!-- SSOT-CLOUDSQL-AUTOHEAL END -->
+<!-- SSOT-GH-CLI-GH_TOKEN START -->
+### SSOT — GitHub CLI(gh) 사용 시 토큰 규칙
+- GitHub Actions에서 `gh`를 사용하는 step은 반드시 `env: GH_TOKEN: ${{ github.token }}`(또는 `${{ secrets.GITHUB_TOKEN }}`)을 설정한다.
+<!-- SSOT-GH-CLI-GH_TOKEN END -->

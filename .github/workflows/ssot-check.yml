@@ -59,14 +59,17 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      
       - name: Guard SSOT docs with label
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           CHANGED_FILES="${{ steps.changes.outputs.files }}"
           echo "CHANGED_FILES:"
           echo "$CHANGED_FILES"
-
           SSOT_DOC_CHANGED=$(echo "$CHANGED_FILES" | grep -E 'SSOT_.*\.md|Admin_DoD_.*\.md' || true)
+
 
           if [ -n "$SSOT_DOC_CHANGED" ]; then
             echo "SSOT 문서 변경 감지:"
