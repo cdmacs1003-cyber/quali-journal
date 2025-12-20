@@ -1,117 +1,117 @@
-# QualiJournal 운영·런북·게이트 헌법 (SSOT)
+# QualiJournal ?댁쁺쨌?곕턿쨌寃뚯씠???뚮쾿 (SSOT)
 
-### 1. 개요(목적/적용 범위)
+### 1. 媛쒖슂(紐⑹쟻/?곸슜 踰붿쐞)
 
-이 헌법은 **운영자·SRE·플랫폼 엔지니어**가
+???뚮쾿? **?댁쁺?먃톁RE쨌?뚮옯???붿??덉뼱**媛
 
-- 오늘 배포해도 되는지,  
-- Traffic 50/50 전환을 어떻게 하는지,  
-- `/api/standards/reviews` / Quick Tools / Cloud SQL Stop / SSOT Check 를  
-  어떤 순서로 실행·검증해야 하는지
+- ?ㅻ뒛 諛고룷?대룄 ?섎뒗吏,  
+- Traffic 50/50 ?꾪솚???대뼸寃??섎뒗吏,  
+- `/api/standards/reviews` / Quick Tools / Cloud SQL Stop / SSOT Check 瑜? 
+  ?대뼡 ?쒖꽌濡??ㅽ뻾쨌寃利앺빐???섎뒗吏
 
-를 한 문서로 파악할 수 있도록 정리한 “운영 실행 헌법”입니다.
+瑜???臾몄꽌濡??뚯븙?????덈룄濡??뺣━???쒖슫???ㅽ뻾 ?뚮쾿?앹엯?덈떎.
 
-- 대상 환경: Cloud Run domap(prod) + Cloud SQL `quali-pg` + GitHub Actions
+- ????섍꼍: Cloud Run domap(prod) + Cloud SQL `quali-pg` + GitHub Actions
 
 ---
 
-### 2. 본문
+### 2. 蹂몃Ц
 
-#### 2.1 게이트 스택(레벨별 Gate 개요)
+#### 2.1 寃뚯씠???ㅽ깮(?덈꺼蹂?Gate 媛쒖슂)
 
-운영 관점에서 게이트를 **L0 ~ L5** 계층으로 이해하면 편합니다.
+?댁쁺 愿?먯뿉??寃뚯씠?몃? **L0 ~ L5** 怨꾩링?쇰줈 ?댄빐?섎㈃ ?명빀?덈떎.
 
-- **L0 – 인프라 상태 게이트**
-  - Cloud SQL Stop Policy / Cloud Run 서비스 상태 / 도메인 Ready 상태
-- **L1 – Ready/Status 게이트**
+- **L0 ???명봽???곹깭 寃뚯씠??*
+  - Cloud SQL Stop Policy / Cloud Run ?쒕퉬???곹깭 / ?꾨찓??Ready ?곹깭
+- **L1 ??Ready/Status 寃뚯씠??*
   - `/health`, `/api/status`, `/api/ready`
-- **L2 – Release DoD 스모크**
+- **L2 ??Release DoD ?ㅻえ??*
   - `/api/report`, `/api/standards/score-test`
-- **L3 – 표준 리뷰 A1 게이트**
-  - `/api/standards/reviews` 1회 + 10회 스모크 + 상태머신 pytest(`tests/test_standards_reviews_a1_state_machine.py`) + CI `ci-test-admin.yml` / `test-admin`
+- **L3 ???쒖? 由щ럭 A1 寃뚯씠??*
+  - `/api/standards/reviews` 1??+ 10???ㅻえ??+ ?곹깭癒몄떊 pytest(`tests/test_standards_reviews_a1_state_machine.py`) + CI `ci-test-admin.yml` / `test-admin`
 
-- **L4 – Quick Tools Gate**
-  - `/api/tools/approve_top`, `/api/tools/repair` 정상 동작 여부
-- **L5 – PR/CI SSOT 게이트**
-  - Admin Tests / SSOT Check / domap 배포 파이프라인 구조
+- **L4 ??Quick Tools Gate**
+  - `/api/tools/approve_top`, `/api/tools/repair` ?뺤긽 ?숈옉 ?щ?
+- **L5 ??PR/CI SSOT 寃뚯씠??*
+  - Admin Tests / SSOT Check / domap 諛고룷 ?뚯씠?꾨씪??援ъ“
 
-운영자는 “L0 → L1 → L2 → L3 → L4 → L5” 순으로 체크한다고 생각하면 됩니다.
+?댁쁺?먮뒗 ?쏬0 ??L1 ??L2 ??L3 ??L4 ??L5???쒖쑝濡?泥댄겕?쒕떎怨??앷컖?섎㈃ ?⑸땲??
 
-##### 2.1.1 A1 운영 세션 워크플로우(0~6단계)
+##### 2.1.1 A1 ?댁쁺 ?몄뀡 ?뚰겕?뚮줈??0~6?④퀎)
 
-운영자는 QualiJournal Admin 관련 모든 세션(배포/장애/점검/테스트)을  
-다음 **A1 운영 세션 워크플로우(0~6단계)** 기준으로 진행합니다.
+?댁쁺?먮뒗 QualiJournal Admin 愿??紐⑤뱺 ?몄뀡(諛고룷/?μ븷/?먭?/?뚯뒪???? 
+?ㅼ쓬 **A1 ?댁쁺 ?몄뀡 ?뚰겕?뚮줈??0~6?④퀎)** 湲곗??쇰줈 吏꾪뻾?⑸땲??
 
-0) **준비(Preparation)**  
-   - 운영자 SSOT 카드(프로젝트/서비스/도메인/버킷/시크릿/스케줄러 7축)를 확인하고,  
-   - PowerShell 공통 헤더(프로젝트/리전/서비스/도메인/버킷/토큰)를 세션 시작 시 항상 실행한다.
+0) **以鍮?Preparation)**  
+   - ?댁쁺??SSOT 移대뱶(?꾨줈?앺듃/?쒕퉬???꾨찓??踰꾪궥/?쒗겕由??ㅼ?以꾨윭 7異?瑜??뺤씤?섍퀬,  
+   - PowerShell 怨듯넻 ?ㅻ뜑(?꾨줈?앺듃/由ъ쟾/?쒕퉬???꾨찓??踰꾪궥/?좏겙)瑜??몄뀡 ?쒖옉 ????긽 ?ㅽ뻾?쒕떎.
 
-1) **Gate 스냅샷 (L0~L5 Before)**  
-   - L0 인프라: Cloud Run SRC/LIVE, 도메인, Scheduler `daily-report`, Secret `ADMIN_TOKEN`, 버킷 존재 여부를 확인한다.  
-   - L1 Ready: `/health`, `/api/status`, `/api/ready` 3종 스모크를 실행해 HTTP 코드와 상태를 기록한다.  
-   - L2 Release: `/api/report` 및 표준/큐레이션 스모크(`/api/standards/score-test` 등)를 실행해 Release DoD를 확인한다.  
-   - L3~L5는 필요 시(리뷰/도구/CI 이슈가 있을 때) A1 Runbook 해당 절을 참고해 추가 스모크를 수행한다.
+1) **Gate ?ㅻ깄??(L0~L5 Before)**  
+   - L0 ?명봽?? Cloud Run SRC/LIVE, ?꾨찓?? Scheduler `daily-report`, Secret `ADMIN_TOKEN`, 踰꾪궥 議댁옱 ?щ?瑜??뺤씤?쒕떎.  
+   - L1 Ready: `/health`, `/api/status`, `/api/ready` 3醫??ㅻえ?щ? ?ㅽ뻾??HTTP 肄붾뱶? ?곹깭瑜?湲곕줉?쒕떎.  
+   - L2 Release: `/api/report` 諛??쒖?/?먮젅?댁뀡 ?ㅻえ??`/api/standards/score-test` ??瑜??ㅽ뻾??Release DoD瑜??뺤씤?쒕떎.  
+   - L3~L5???꾩슂 ??由щ럭/?꾧뎄/CI ?댁뒋媛 ?덉쓣 ?? A1 Runbook ?대떦 ?덉쓣 李멸퀬??異붽? ?ㅻえ?щ? ?섑뻾?쒕떎.
 
-2) **문제 정의 및 가설 정리**  
-   - 이슈 정의 카드 A1에 “어떤 Gate(L0~L5)를 다루는 세션인지”와  
-     현재 증상/로그/에러 코드를 요약해 적는다.  
+2) **臾몄젣 ?뺤쓽 諛?媛???뺣━**  
+   - ?댁뒋 ?뺤쓽 移대뱶 A1???쒖뼱??Gate(L0~L5)瑜??ㅻ（???몄뀡?몄??앹?  
+     ?꾩옱 利앹긽/濡쒓렇/?먮윭 肄붾뱶瑜??붿빟???곷뒗??  
 
-3) **전략 A/B/C + 롤백 설계**  
-   - 전략 A/B/C(예: 인프라 우선, 문서/SSOT 우선, 혼합 전략)를 정리하고,  
-     실패 시 사용할 롤백 방법(이전 리비전/이전 설정 복원)을 함께 적어 둔다.
+3) **?꾨왂 A/B/C + 濡ㅻ갚 ?ㅺ퀎**  
+   - ?꾨왂 A/B/C(?? ?명봽???곗꽑, 臾몄꽌/SSOT ?곗꽑, ?쇳빀 ?꾨왂)瑜??뺣━?섍퀬,  
+     ?ㅽ뙣 ???ъ슜??濡ㅻ갚 諛⑸쾿(?댁쟾 由щ퉬???댁쟾 ?ㅼ젙 蹂듭썝)???④퍡 ?곸뼱 ?붾떎.
 
-4) **실행 루프 (Git/배포/수정/롤백)**  
-   - Git 브랜치·테스트 헌법(B)에 따라 테스트 브랜치를 만들고,  
-     수정 후 CI/게이트 결과를 확인하면서 필요한 경우 Traffic50 Runbook에 따라 트래픽을 전환한다.  
+4) **?ㅽ뻾 猷⑦봽 (Git/諛고룷/?섏젙/濡ㅻ갚)**  
+   - Git 釉뚮옖移샕룻뀒?ㅽ듃 ?뚮쾿(B)???곕씪 ?뚯뒪??釉뚮옖移섎? 留뚮뱾怨?  
+     ?섏젙 ??CI/寃뚯씠??寃곌낵瑜??뺤씤?섎㈃???꾩슂??寃쎌슦 Traffic50 Runbook???곕씪 ?몃옒?쎌쓣 ?꾪솚?쒕떎.  
 
-5) **Gate 재검증 (L0~L5 After)**  
-   - 동일한 스모크 세트를 다시 실행해 L0~L5 상태를 Before/After로 비교하고,  
-     Gate 관점에서 PASS/HOLD/BAD 여부를 판단한다.
+5) **Gate ?ш?利?(L0~L5 After)**  
+   - ?숈씪???ㅻえ???명듃瑜??ㅼ떆 ?ㅽ뻾??L0~L5 ?곹깭瑜?Before/After濡?鍮꾧탳?섍퀬,  
+     Gate 愿?먯뿉??PASS/HOLD/BAD ?щ?瑜??먮떒?쒕떎.
 
-6) **인수인계 정리**  
-   - 세션 종료 시, `QualiJournal_Admin_Handover_YYYYMMDD.md` 템플릿에  
-     - Gate 상태 Before/After  
-     - 실행한 명령/변경 사항  
-     - 확정된 SSOT/정책 변경  
-     - 다음 세션 TODO  
-     를 정리해 남긴다.
-
----
-
-##### 2.1.2 이슈 정의 카드 A1 템플릿(운영 세션용)
-
-운영·배포·장애 대응 세션에서 사용하는 **이슈 정의 카드 A1** 템플릿은 다음과 같습니다.
-
-1) **기본 정보**  
-- 이슈 제목: (예) `QualiJournal Admin prod – domap /api/status 500`  
-- 이슈 유형: 인프라 / 코드 / 표준 큐레이션 / CI·게이트 / 문서 중 선택 또는 복수 선택  
-- 세션 목적·배경: 왜 지금 이 이슈를 다루는지 한 줄 요약  
-
-2) **목표 / DoD**  
-- 이 세션에서 “끝났다고 인정할 기준(정량/정성)”을 3~5줄로 명시  
-- 예: `/health 200 / /api/status 200 / /api/report 200`, Traffic50 전환 완료, 문서/SSOT 정렬 등
-
-3) **Gate 레벨(L0~L5)**  
-- 이슈에 직접 관련된 Gate에 체크  
-  - L0 인프라 / L1 Ready / L2 Release / L3 Reviews / L4 Quick Tools / L5 CI SSOT
-
-4) **원인 후보(2~3개)**  
-- 로그/증상을 바탕으로 가능한 원인 후보를 2~3개 나열  
-  - 예: 도메인 인증서 지연, ADMIN_TOKEN 만료, GCS 버킷 권한 문제 등
-
-5) **전략 A/B/C + 추천안 + 롤백**  
-- 전략 A/B/C 요약(예: 인프라 우선, 코드 패치 우선, 문서/SSOT 개정 우선)  
-- 추천 전략 1개 선택  
-- 실패 시 롤백 플랜(OLD_REV 100%, 이전 설정 복원, SSOT 재되돌리기 등)을 함께 기술
+6) **?몄닔?멸퀎 ?뺣━**  
+   - ?몄뀡 醫낅즺 ?? `QualiJournal_Admin_Handover_YYYYMMDD.md` ?쒗뵆由우뿉  
+     - Gate ?곹깭 Before/After  
+     - ?ㅽ뻾??紐낅졊/蹂寃??ы빆  
+     - ?뺤젙??SSOT/?뺤콉 蹂寃? 
+     - ?ㅼ쓬 ?몄뀡 TODO  
+     瑜??뺣━???④릿??
 
 ---
 
-#### 2.2 Cloud SQL Stop Policy – 운영 Runbook 관점
+##### 2.1.2 ?댁뒋 ?뺤쓽 移대뱶 A1 ?쒗뵆由??댁쁺 ?몄뀡??
 
-1) **일일 스모크(매일 아침 3줄)**
+?댁쁺쨌諛고룷쨌?μ븷 ????몄뀡?먯꽌 ?ъ슜?섎뒗 **?댁뒋 ?뺤쓽 移대뱶 A1** ?쒗뵆由우? ?ㅼ쓬怨?媛숈뒿?덈떎.
 
-- 목적: “지금은 Cloud SQL OFF 상태가 기본 모드”가 잘 유지되는지 확인
-- 실행:
+1) **湲곕낯 ?뺣낫**  
+- ?댁뒋 ?쒕ぉ: (?? `QualiJournal Admin prod ??domap /api/status 500`  
+- ?댁뒋 ?좏삎: ?명봽??/ 肄붾뱶 / ?쒖? ?먮젅?댁뀡 / CI쨌寃뚯씠??/ 臾몄꽌 以??좏깮 ?먮뒗 蹂듭닔 ?좏깮  
+- ?몄뀡 紐⑹쟻쨌諛곌꼍: ??吏湲????댁뒋瑜??ㅻ（?붿? ??以??붿빟  
+
+2) **紐⑺몴 / DoD**  
+- ???몄뀡?먯꽌 ?쒕걹?щ떎怨??몄젙??湲곗?(?뺣웾/?뺤꽦)?앹쓣 3~5以꾨줈 紐낆떆  
+- ?? `/health 200 / /api/status 200 / /api/report 200`, Traffic50 ?꾪솚 ?꾨즺, 臾몄꽌/SSOT ?뺣젹 ??
+
+3) **Gate ?덈꺼(L0~L5)**  
+- ?댁뒋??吏곸젒 愿?⑤맂 Gate??泥댄겕  
+  - L0 ?명봽??/ L1 Ready / L2 Release / L3 Reviews / L4 Quick Tools / L5 CI SSOT
+
+4) **?먯씤 ?꾨낫(2~3媛?**  
+- 濡쒓렇/利앹긽??諛뷀깢?쇰줈 媛?ν븳 ?먯씤 ?꾨낫瑜?2~3媛??섏뿴  
+  - ?? ?꾨찓???몄쬆??吏?? ADMIN_TOKEN 留뚮즺, GCS 踰꾪궥 沅뚰븳 臾몄젣 ??
+
+5) **?꾨왂 A/B/C + 異붿쿇??+ 濡ㅻ갚**  
+- ?꾨왂 A/B/C ?붿빟(?? ?명봽???곗꽑, 肄붾뱶 ?⑥튂 ?곗꽑, 臾몄꽌/SSOT 媛쒖젙 ?곗꽑)  
+- 異붿쿇 ?꾨왂 1媛??좏깮  
+- ?ㅽ뙣 ??濡ㅻ갚 ?뚮옖(OLD_REV 100%, ?댁쟾 ?ㅼ젙 蹂듭썝, SSOT ?щ릺?뚮━湲??????④퍡 湲곗닠
+
+---
+
+#### 2.2 Cloud SQL Stop Policy ???댁쁺 Runbook 愿??
+
+1) **?쇱씪 ?ㅻえ??留ㅼ씪 ?꾩묠 3以?**
+
+- 紐⑹쟻: ?쒖?湲덉? Cloud SQL OFF ?곹깭媛 湲곕낯 紐⑤뱶?앷? ???좎??섎뒗吏 ?뺤씤
+- ?ㅽ뻾:
 
 ```bash
 gcloud sql instances list   --format="table(name,region,state,settings.activationPolicy)"
@@ -123,14 +123,14 @@ Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" `
   -OutFile "deployed_index.html"
 ```
 
-- 기대 결과:
+- 湲곕? 寃곌낵:
   - SQL: `STOPPED / NEVER`
-  - Run: 하나의 리비전에 100% 트래픽
-  - HTML: 정상 다운로드
+  - Run: ?섎굹??由щ퉬?꾩뿉 100% ?몃옒??
+  - HTML: ?뺤긽 ?ㅼ슫濡쒕뱶
 
-2) **플래그 파일 관리**
+2) **?뚮옒洹??뚯씪 愿由?*
 
-- `infra/FLAGS/CLOUDSQL_STOPPED.yaml` 예시:
+- `infra/FLAGS/CLOUDSQL_STOPPED.yaml` ?덉떆:
   - `instance: quali-pg`
   - `intent: stopped`
   - `since: 2025-11-03T12:00+09:00`
@@ -138,7 +138,7 @@ Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" `
   - `owner: platform`
   - `reason: cost_hold`
 
-3) **배포 전 가드레일 (CI 훅)**
+3) **諛고룷 ??媛?쒕젅??(CI ??**
 
 ```bash
 STATE=$(gcloud sql instances describe quali-pg --format="value(state)")
@@ -148,28 +148,28 @@ if [ "$STATE" = "STOPPED" ]; then
 fi
 ```
 
-4) **정책·SSOT 간 유의점**
+4) **?뺤콉쨌SSOT 媛??좎쓽??*
 
-- Stop Policy 문서는 STOP/NEVER를 “기본 모드”로 규정.  
-- SSOT_Check_Guide 4.2.1 에서는 domap 배포 설명 시 `state=RUNNABLE, activationPolicy=ALWAYS` 를 가정.  
+- Stop Policy 臾몄꽌??STOP/NEVER瑜??쒓린蹂?紐⑤뱶?앸줈 洹쒖젙.  
+- SSOT_Check_Guide 4.2.1 ?먯꽌??domap 諛고룷 ?ㅻ챸 ??`state=RUNNABLE, activationPolicy=ALWAYS` 瑜?媛??  
 
-→ **운영자 관점**에서는
+??**?댁쁺??愿??*?먯꽌??
 
-- 배포/마이그레이션이 필요할 때만 `ALWAYS + RUNNABLE` 로 전환 → 작업 → 다시 STOP  
-- CI 가드가 STOP 상태에서의 “실수 배포”를 막아준다고 이해하면 됩니다.  
-- 장기 정책은 오너와 재합의 필요(`TODO`).
+- 諛고룷/留덉씠洹몃젅?댁뀡???꾩슂???뚮쭔 `ALWAYS + RUNNABLE` 濡??꾪솚 ???묒뾽 ???ㅼ떆 STOP  
+- CI 媛?쒓? STOP ?곹깭?먯꽌???쒖떎??諛고룷?앸? 留됱븘以?ㅺ퀬 ?댄빐?섎㈃ ?⑸땲??  
+- ?κ린 ?뺤콉? ?ㅻ꼫? ?ы빀???꾩슂(`TODO`).
 
 ---
 
 #### 2.3 domap Traffic 50/50 A1 Runbook
 
-Traffic50 Runbook A1 기준 domap 트래픽 전환 절차:
+Traffic50 Runbook A1 湲곗? domap ?몃옒???꾪솚 ?덉감:
 
-1) **사전 준비**
+1) **?ъ쟾 以鍮?*
 
-- OLD_REV: 현재 안정 리비전 이름 (예: `quali-admin-domap-00173-vvq`)
-- NEW_REV: 새 표준 리뷰 API 리비전 이름 (예: `quali-admin-domap-00174-jm8`)
-- 현재 트래픽 분포 확인:
+- OLD_REV: ?꾩옱 ?덉젙 由щ퉬???대쫫 (?? `quali-admin-domap-00173-vvq`)
+- NEW_REV: ???쒖? 由щ럭 API 由щ퉬???대쫫 (?? `quali-admin-domap-00174-jm8`)
+- ?꾩옱 ?몃옒??遺꾪룷 ?뺤씤:
 
 ```powershell
 gcloud run services describe $SERVICE `
@@ -178,11 +178,11 @@ gcloud run services describe $SERVICE `
   --format="yaml(status.traffic,status.latestReadyRevisionName,metadata.name)"
 ```
 
-2) **트래픽 50/50 전환**
+2) **?몃옒??50/50 ?꾪솚**
 
 ```powershell
-$OLD_REV = "quali-admin-domap-00173-vvq"  # 실제 값으로 교체
-$NEW_REV = "quali-admin-domap-00174-jm8"  # 실제 값으로 교체
+$OLD_REV = "quali-admin-domap-00173-vvq"  # ?ㅼ젣 媛믪쑝濡?援먯껜
+$NEW_REV = "quali-admin-domap-00174-jm8"  # ?ㅼ젣 媛믪쑝濡?援먯껜
 
 gcloud run services update-traffic $SERVICE `
   --project=$PROJECT `
@@ -190,11 +190,11 @@ gcloud run services update-traffic $SERVICE `
   --to-revisions $OLD_REV=50,$NEW_REV=50
 ```
 
-3) **health/status/report 스모크**
+3) **health/status/report ?ㅻえ??*
 
 ```powershell
-$BASE_URL = "https://admin.standardai.co.kr"  # domap 운영 도메인
-$ADMIN_TOKEN = "<관리자 토큰>"
+$BASE_URL = "https://admin.standardai.co.kr"  # domap ?댁쁺 ?꾨찓??
+$ADMIN_TOKEN = "<愿由ъ옄 ?좏겙>"
 
 # /health
 Invoke-WebRequest "$BASE_URL/health" -Method GET
@@ -211,60 +211,60 @@ Invoke-WebRequest "$BASE_URL/api/report" -Method POST -Headers @{
 } -Body "" | Out-Null
 ```
 
-4) **/api/standards/reviews 스모크 (1회 + 10회)**
+4) **/api/standards/reviews ?ㅻえ??(1??+ 10??**
 
-- 단일 호출 1회 + 반복 호출 10회 스모크는  
-  **Reviews A1 Runbook** 의 PowerShell 코드를 그대로 사용합니다.
+- ?⑥씪 ?몄텧 1??+ 諛섎났 ?몄텧 10???ㅻえ?щ뒗  
+  **Reviews A1 Runbook** ??PowerShell 肄붾뱶瑜?洹몃?濡??ъ슜?⑸땲??
 
-5) **롤백/재전환 전략**
+5) **濡ㅻ갚/?ъ쟾???꾨왂**
 
-- NEW_REV 관련 에러 발생 시
-  - `update-traffic` 명령으로 OLD_REV 100%로 롤백
-  - 로그·스택트레이스를 수집한 뒤, 테스트 브랜치에서 재현/수정 (브랜치 헌법 B 참조)
+- NEW_REV 愿???먮윭 諛쒖깮 ??
+  - `update-traffic` 紐낅졊?쇰줈 OLD_REV 100%濡?濡ㅻ갚
+  - 濡쒓렇쨌?ㅽ깮?몃젅?댁뒪瑜??섏쭛???? ?뚯뒪??釉뚮옖移섏뿉???ы쁽/?섏젙 (釉뚮옖移??뚮쾿 B 李몄“)
 
 ---
 
-#### 2.4 /api/standards/reviews A1 Runbook & CI 스모크
+#### 2.4 /api/standards/reviews A1 Runbook & CI ?ㅻえ??
 
-**QualiJournal_Admin_Reviews_Smoke_Runbook_A1_CI_20251124** 기준  
-/`api/standards/reviews` 스모크는 다음 PowerShell 코드로 정의되며,  
-이 코드가 **운영 Runbook + CI의 SSOT**입니다.
+**QualiJournal_Admin_Reviews_Smoke_Runbook_A1_CI_20251124** 湲곗?  
+/`api/standards/reviews` ?ㅻえ?щ뒗 ?ㅼ쓬 PowerShell 肄붾뱶濡??뺤쓽?섎ŉ,  
+??肄붾뱶媛 **?댁쁺 Runbook + CI??SSOT**?낅땲??
 
-1) **공통 설정 헤더**
+1) **怨듯넻 ?ㅼ젙 ?ㅻ뜑**
 
 ```powershell
-# === 공통 설정: domap BASE_URL + 헤더 ===
+# === 怨듯넻 ?ㅼ젙: domap BASE_URL + ?ㅻ뜑 ===
 
-# 1) domap 서비스 URL
+# 1) domap ?쒕퉬??URL
 $BASE_URL = "https://quali-admin-domap-xxxxxxxxxx.xx.run.app"
 
-# 2) 관리자 토큰
-$ADMIN_TOKEN = "<ADMIN_TOKEN_여기에_붙여넣기>"
+# 2) 愿由ъ옄 ?좏겙
+$ADMIN_TOKEN = "<ADMIN_TOKEN_?ш린??遺숈뿬?ｊ린>"
 
-# 3) 공통 헤더
+# 3) 怨듯넻 ?ㅻ뜑
 $headers = @{
   "X-Admin-Token" = $ADMIN_TOKEN
 }
 
-# ※ 필요 시 ID 토큰 병행 사용 가능
-# $ID_TOKEN = "<ID_TOKEN_여기에_붙여넣기>"
+# ???꾩슂 ??ID ?좏겙 蹂묓뻾 ?ъ슜 媛??
+# $ID_TOKEN = "<ID_TOKEN_?ш린??遺숈뿬?ｊ린>"
 # $headers["Authorization"] = "Bearer $ID_TOKEN"
 
-##### 2.4.x 표준 리뷰 테스트 카드 시드 & 상태머신 검증 Runbook(A안)
+##### 2.4.x ?쒖? 由щ럭 ?뚯뒪??移대뱶 ?쒕뱶 & ?곹깭癒몄떊 寃利?Runbook(A??
 
-이 Runbook은 표준 리뷰 상태머신(HOLD → REVIEWED → PUBLISHED, 2인 검수)을
-로컬 및 domap(prod) 환경에서 반복 검증하기 위한 절차다.
-테스트 카드는 `standard_id = "TEST-STD-1"` 기준으로 생성한다.
+??Runbook? ?쒖? 由щ럭 ?곹깭癒몄떊(HOLD ??REVIEWED ??PUBLISHED, 2??寃????
+濡쒖뺄 諛?domap(prod) ?섍꼍?먯꽌 諛섎났 寃利앺븯湲??꾪븳 ?덉감??
+?뚯뒪??移대뱶??`standard_id = "TEST-STD-1"` 湲곗??쇰줈 ?앹꽦?쒕떎.
 
-###### (0) 공통 변수 설정
+###### (0) 怨듯넻 蹂???ㅼ젙
 
 ```powershell
-# domap 기준 예시
+# domap 湲곗? ?덉떆
 $BASE   = "https://admin.standardai.co.kr"
-$TOKEN  = "<ADMIN_TOKEN 실제 값>"          # Secret Manager ADMIN_TOKEN latest
+$TOKEN  = "<ADMIN_TOKEN ?ㅼ젣 媛?"          # Secret Manager ADMIN_TOKEN latest
 $STD_ID = "TEST-STD-1"
 
-(1) 테스트 리뷰 카드 시드 (reset = true)
+(1) ?뚯뒪??由щ럭 移대뱶 ?쒕뱶 (reset = true)
 $bodyObj = @{
   standard_id = $STD_ID
   reset       = $true
@@ -279,7 +279,7 @@ Invoke-RestMethod `
   ConvertTo-Json -Depth 5
 
 
-기대:
+湲곕?:
 
 ok: true
 
@@ -291,7 +291,7 @@ status == "HOLD", approved_by == [], required_reviewers == 2
 
 data.created == true, data.reset == true
 
-(2) HOLD 상태 확인
+(2) HOLD ?곹깭 ?뺤씤
 Invoke-RestMethod `
   -Method Get `
   -Uri "$BASE/api/standards/reviews?status=HOLD" `
@@ -299,13 +299,13 @@ Invoke-RestMethod `
   ConvertTo-Json -Depth 5
 
 
-기대:
+湲곕?:
 
 count >= 1
 
-대상 카드의 standard_id == "TEST-STD-1", status == "HOLD", approved_by == []
+???移대뱶??standard_id == "TEST-STD-1", status == "HOLD", approved_by == []
 
-(3) 1차 승인(r1) – 여전히 HOLD 유지
+(3) 1李??뱀씤(r1) ???ъ쟾??HOLD ?좎?
 $bodyObj = @{ reviewer_id = "r1" }
 
 Invoke-RestMethod `
@@ -316,13 +316,13 @@ Invoke-RestMethod `
   -Body ($bodyObj | ConvertTo-Json)
 
 
-기대:
+湲곕?:
 
-응답 data.review_task.approved_by 에 "r1" 포함
+?묐떟 data.review_task.approved_by ??"r1" ?ы븿
 
-status == "HOLD" (required_reviewers=2 이므로 아직 REVIEWED 아님)
+status == "HOLD" (required_reviewers=2 ?대?濡??꾩쭅 REVIEWED ?꾨떂)
 
-(4) 2차 승인(r2) – REVIEWED 전환
+(4) 2李??뱀씤(r2) ??REVIEWED ?꾪솚
 $bodyObj = @{ reviewer_id = "r2" }
 
 Invoke-RestMethod `
@@ -339,17 +339,17 @@ Invoke-RestMethod `
   ConvertTo-Json -Depth 5
 
 
-기대:
+湲곕?:
 
 count >= 1
 
-대상 카드의 status == "REVIEWED"
+???移대뱶??status == "REVIEWED"
 
-approved_by 에 "r1", "r2" 두 명 포함
+approved_by ??"r1", "r2" ??紐??ы븿
 
 required_reviewers == 2
 
-(5) 발행(publish) – PUBLISHED + PASS 승격
+(5) 諛쒗뻾(publish) ??PUBLISHED + PASS ?밴꺽
 Invoke-RestMethod `
   -Method Post `
   -Uri "$BASE/api/standards/reviews/$STD_ID/publish" `
@@ -362,21 +362,21 @@ Invoke-RestMethod `
   ConvertTo-Json -Depth 5
 
 
-기대:
+湲곕?:
 
 count >= 1
 
 status == "PUBLISHED"
 
-approved_by 에 "r1", "r2"
+approved_by ??"r1", "r2"
 
-item.decision == "PASS" (발행 시 PASS 승격 규칙)
+item.decision == "PASS" (諛쒗뻾 ??PASS ?밴꺽 洹쒖튃)
 
-(6) 에러 케이스 상수화(선택)
+(6) ?먮윭 耳?댁뒪 ?곸닔???좏깮)
 
-다음 케이스는 상태머신/에러코드가 SSOT와 맞는지 확인하기 위한 선택 테스트다.
+?ㅼ쓬 耳?댁뒪???곹깭癒몄떊/?먮윭肄붾뱶媛 SSOT? 留욌뒗吏 ?뺤씤?섍린 ?꾪븳 ?좏깮 ?뚯뒪?몃떎.
 
-존재하지 않는 ID에 대한 승인/발행
+議댁옱?섏? ?딅뒗 ID??????뱀씤/諛쒗뻾
 
 $bodyObj = @{ reviewer_id = "rX" }
 
@@ -386,47 +386,47 @@ Invoke-RestMethod `
   -Headers @{ "X-Admin-Token" = $TOKEN } `
   -ContentType "application/json" `
   -Body ($bodyObj | ConvertTo-Json)
-# 기대: HTTP 404, body.detail == "review task not found"
+# 湲곕?: HTTP 404, body.detail == "review task not found"
 
 
-HOLD 상태에서 곧바로 publish 시도
+HOLD ?곹깭?먯꽌 怨㏓컮濡?publish ?쒕룄
 
 Invoke-RestMethod `
   -Method Post `
   -Uri "$BASE/api/standards/reviews/$STD_ID/publish" `
   -Headers @{ "X-Admin-Token" = $TOKEN; "Content-Length" = "0" }
-# 기대: HTTP 409, body.detail == "review task not reviewed"
+# 湲곕?: HTTP 409, body.detail == "review task not reviewed"
 
 
-이 Runbook은 L3 표준 리뷰 A1 Gate 에서 상태머신 검증을 수행할 때 사용하며,
-CI의 /api/standards/reviews 스모크(1회 + 10회 GET)와 함께 운영 Gate PASS 여부를 판단하는 기준으로 삼는다.
+??Runbook? L3 ?쒖? 由щ럭 A1 Gate ?먯꽌 ?곹깭癒몄떊 寃利앹쓣 ?섑뻾?????ъ슜?섎ŉ,
+CI??/api/standards/reviews ?ㅻえ??1??+ 10??GET)? ?④퍡 ?댁쁺 Gate PASS ?щ?瑜??먮떒?섎뒗 湲곗??쇰줈 ?쇰뒗??
 
-이 블록만 C 헌법에 넣으면,
+??釉붾줉留?C ?뚮쾿???ｌ쑝硫?
 
-- domap 기준 **상태머신 검증 절차**가 문서화되고,   
-- 지금까지 PowerShell로 실행한 내용과 1:1로 매칭돼서  
-  이후 인수인계/다른 운영자도 그대로 따라 할 수 있어.
+- domap 湲곗? **?곹깭癒몄떊 寃利??덉감**媛 臾몄꽌?붾릺怨?   
+- 吏湲덇퉴吏 PowerShell濡??ㅽ뻾???댁슜怨?1:1濡?留ㅼ묶?쇱꽌  
+  ?댄썑 ?몄닔?멸퀎/?ㅻⅨ ?댁쁺?먮룄 洹몃?濡??곕씪 ?????덉뼱.
 
-###### 2.4.y pytest 및 CI 연계 규칙
+###### 2.4.y pytest 諛?CI ?곌퀎 洹쒖튃
 
-- 표준 리뷰 A1 상태머신은 **pytest 케이스** `tests/test_standards_reviews_a1_state_machine.py` 로도 동일하게 검증한다.
-- GitHub Actions 워크플로 **`ci-test-admin.yml`** 의 `test-admin` 잡 안에서  
-  `Run standards reviews A1 state-machine test` 스텝이 이 pytest를 실행한다.
-- 운영자는 다음 두 가지만 확인하면 L3 A1 Gate 상태머신이 SSOT와 일치하는지 빠르게 판단할 수 있다.
-  - 로컬 점검: `pytest -q tests/test_standards_reviews_a1_state_machine.py -vv`
-  - CI 점검: PR 의 `Admin Tests (pytest only) / test-admin` 체크가 초록(PASS) 상태인지
+- ?쒖? 由щ럭 A1 ?곹깭癒몄떊? **pytest 耳?댁뒪** `tests/test_standards_reviews_a1_state_machine.py` 濡쒕룄 ?숈씪?섍쾶 寃利앺븳??
+- GitHub Actions ?뚰겕?뚮줈 **`ci-test-admin.yml`** ??`test-admin` ???덉뿉?? 
+  `Run standards reviews A1 state-machine test` ?ㅽ뀦????pytest瑜??ㅽ뻾?쒕떎.
+- ?댁쁺?먮뒗 ?ㅼ쓬 ??媛吏留??뺤씤?섎㈃ L3 A1 Gate ?곹깭癒몄떊??SSOT? ?쇱튂?섎뒗吏 鍮좊Ⅴ寃??먮떒?????덈떎.
+  - 濡쒖뺄 ?먭?: `pytest -q tests/test_standards_reviews_a1_state_machine.py -vv`
+  - CI ?먭?: PR ??`Admin Tests (pytest only) / test-admin` 泥댄겕媛 珥덈줉(PASS) ?곹깭?몄?
 
 ---
 
-## 3. 추가로 건드릴 필요 없는 부분
+## 3. 異붽?濡?嫄대뱶由??꾩슂 ?녿뒗 遺遺?
 
-- **헌법 B(브랜치/테스트)** 쪽은 이번 변경으로 새 규칙이 생긴 건 아니라서  
-  그대로 두어도 충분하다.  
-- `/api/status`, `/api/report`, Cloud SQL Stop Policy, Quick Tools Gate 등은  
-  이미 A/C 헌법에 잘 정리돼 있어서 **추가 조항 없이 지금 SSOT랑 맞는다.**  
+- **?뚮쾿 B(釉뚮옖移??뚯뒪??** 履쎌? ?대쾲 蹂寃쎌쑝濡???洹쒖튃???앷릿 嫄??꾨땲?쇱꽌  
+  洹몃?濡??먯뼱??異⑸텇?섎떎.  
+- `/api/status`, `/api/report`, Cloud SQL Stop Policy, Quick Tools Gate ?깆?  
+  ?대? A/C ?뚮쾿?????뺣━???덉뼱??**異붽? 議고빆 ?놁씠 吏湲?SSOT??留욌뒗??**  
 ```
 
-2) **단일 스모크 (1회 호출)**
+2) **?⑥씪 ?ㅻえ??(1???몄텧)**
 
 ```powershell
 Write-Host "== Smoke: GET /api/standards/reviews (single) =="
@@ -437,26 +437,26 @@ $resp = Invoke-WebRequest `
   -Method GET
 
 if ($resp.StatusCode -ne 200) {
-  Write-Host "❌ StatusCode != 200 : $($resp.StatusCode)"
+  Write-Host "??StatusCode != 200 : $($resp.StatusCode)"
   exit 1
 }
 
 $body = $resp.Content | ConvertFrom-Json
 
 if (-not $body.ok) {
-  Write-Host "❌ ok=false"
+  Write-Host "??ok=false"
   exit 1
 }
 
 if ($null -eq $body.count -or $null -eq $body.items) {
-  Write-Host "❌ count 또는 items 없음"
+  Write-Host "??count ?먮뒗 items ?놁쓬"
   exit 1
 }
 
-Write-Host "✅ 단일 스모크 PASS (count=$($body.count))"
+Write-Host "???⑥씪 ?ㅻえ??PASS (count=$($body.count))"
 ```
 
-3) **반복 스모크 (10회 호출)**
+3) **諛섎났 ?ㅻえ??(10???몄텧)**
 
 ```powershell
 Write-Host "== Smoke: GET /api/standards/reviews (loop x10) =="
@@ -474,146 +474,151 @@ for ($i = 1; $i -le 10; $i++) {
     if ($resp.StatusCode -eq 200) {
       $successCount++
     } else {
-      Write-Host "❌ StatusCode != 200 : $($resp.StatusCode)"
+      Write-Host "??StatusCode != 200 : $($resp.StatusCode)"
       exit 1
     }
   } catch {
-    Write-Host "❌ 예외 발생: $_"
+    Write-Host "???덉쇅 諛쒖깮: $_"
     exit 1
   }
 }
 
 if ($successCount -ne 10) {
-  Write-Host "❌ 10회 연속 200이 아님"
+  Write-Host "??10???곗냽 200???꾨떂"
   exit 1
 }
 
-Write-Host "✅ 10회 반복 스모크 PASS"
+Write-Host "??10??諛섎났 ?ㅻえ??PASS"
 ```
 
-4) **운영 ↔ CI 동기화**
+4) **?댁쁺 ??CI ?숆린??*
 
-- Admin DoD v1.1에서는 **이 PowerShell 블록이 코드 SSOT**이며,  
-  Traffic50 Runbook과 `ci-deploy-prod.yml` 의  
-  `Smoke tests (/api/standards/reviews)` 스텝은 이 코드를 그대로 미러링해야 함.
-
----
-
-#### 2.5 Quick Tools Gate – 운영 관점 스모크
-
-Traffic50 Runbook에는 Quick Tools B-mode 스모크가 포함됩니다. (요약)
-
-- 핵심 아이디어:
-  - `/api/tools/approve_top` 호출 후
-    - **정상 케이스**: rc=0, ok=true
-    - **B-mode 케이스**: rc=127, ok=true, sync_log.ok=true
-  - `/api/tools/repair` 호출 후에도 같은 기준 적용
-- 운영자는 A1 Runbook 체크리스트에
-  - Quick Tools 호출 결과와 rc 값,
-  - sync_log.ok, count 값 등을 기록해두어야 합니다.
-
-※ 실제 PowerShell/cURL 스크립트는 Admin DoD 및 Traffic50 Runbook 원문을 참조해  
-레포 내 `tools_quick_smoke.ps1` 등으로 유지하는 것을 권장합니다.
+- Admin DoD v1.1?먯꽌??**??PowerShell 釉붾줉??肄붾뱶 SSOT**?대ŉ,  
+  Traffic50 Runbook怨?`ci-deploy-prod.yml` ?? 
+  `Smoke tests (/api/standards/reviews)` ?ㅽ뀦? ??肄붾뱶瑜?洹몃?濡?誘몃윭留곹빐????
 
 ---
 
-#### 2.6 A1 운영 세션 워크플로우 연계 규칙
+#### 2.5 Quick Tools Gate ???댁쁺 愿???ㅻえ??
 
-이 Git/브랜치 헌법은 QualiJournal 레포의 브랜치·PR·테스트 규칙을 정의하고,  
-운영·배포·장애 대응 세션에서 사용하는 **A1 운영 세션 워크플로우**와 함께 적용한다.
+Traffic50 Runbook?먮뒗 Quick Tools B-mode ?ㅻえ?ш? ?ы븿?⑸땲?? (?붿빟)
 
-1) 세션 시작 시 브랜치 전략
+- ?듭떖 ?꾩씠?붿뼱:
+  - `/api/tools/approve_top` ?몄텧 ??
+    - **?뺤긽 耳?댁뒪**: rc=0, ok=true
+    - **B-mode 耳?댁뒪**: rc=127, ok=true, sync_log.ok=true
+  - `/api/tools/repair` ?몄텧 ?꾩뿉??媛숈? 湲곗? ?곸슜
+- ?댁쁺?먮뒗 A1 Runbook 泥댄겕由ъ뒪?몄뿉
+  - Quick Tools ?몄텧 寃곌낵? rc 媛?
+  - sync_log.ok, count 媛??깆쓣 湲곕줉?대몢?댁빞 ?⑸땲??
 
-- 운영자는 새로운 작업 세션을 시작하기 전에 **A1 이슈 카드**에  
-  - 다루는 Gate(L0~L5)  
-  - 예상 변경 범위(코드/설정/문서)  
-  - 사용할 브랜치 유형(feature/fix/test/docs 등)을 먼저 적는다.
-- 실제 작업 브랜치는 원칙적으로  
-  - `main-signed-ssot` 최신 상태에서  
-  - `feature/...`, `fix/...`, `feature/test-...`, `docs/...` 형태로 분기한다.
+???ㅼ젣 PowerShell/cURL ?ㅽ겕由쏀듃??Admin DoD 諛?Traffic50 Runbook ?먮Ц??李몄“?? 
+?덊룷 ??`tools_quick_smoke.ps1` ?깆쑝濡??좎??섎뒗 寃껋쓣 沅뚯옣?⑸땲??
 
-2) Git 실행 루프와 Gate 연동
+---
 
-- A1 워크플로우 4단계(실행 루프)에서 Git 작업은 다음 순서를 따른다.  
-  1. `main-signed-ssot` 동기화 → 새 작업 브랜치 생성  
-  2. 작은 단위의 변경 + 로컬 테스트/pytest  
-  3. PR 생성 후 **필수 체크(테스트 + SSOT Check + Deploy)** 통과 여부 확인  
-  4. 필요 시 수정 → 재실행 → 모든 Gate PASS 후 main에 머지
-- PR 설명에는 이 이슈가  
-  - 어떤 A1 이슈 카드 번호/제목과 연결되는지,  
-  - 어떤 Gate(L0~L5)에 영향을 주는지 간단히 적는다.
+#### 2.6 A1 ?댁쁺 ?몄뀡 ?뚰겕?뚮줈???곌퀎 洹쒖튃
 
-3) 테스트 브랜치와 위험 동작
+??Git/釉뚮옖移??뚮쾿? QualiJournal ?덊룷??釉뚮옖移샕텾R쨌?뚯뒪??洹쒖튃???뺤쓽?섍퀬,  
+?댁쁺쨌諛고룷쨌?μ븷 ????몄뀡?먯꽌 ?ъ슜?섎뒗 **A1 ?댁쁺 ?몄뀡 ?뚰겕?뚮줈??*? ?④퍡 ?곸슜?쒕떎.
 
-- `feature/test-*` 브랜치는  
-  - A1 이슈 카드에서 “실험/재현/검증 목적”으로 명시된 경우에만 사용한다.  
-  - 한 실험 = 한 브랜치 = 한 파일 = 한 목적 원칙을 따른다.
-- 모든 브랜치에서 다음 동작은 금지하거나, **A1 카드에 사전 기록 후에만 예외적으로 사용**한다.  
+1) ?몄뀡 ?쒖옉 ??釉뚮옖移??꾨왂
+
+- ?댁쁺?먮뒗 ?덈줈???묒뾽 ?몄뀡???쒖옉?섍린 ?꾩뿉 **A1 ?댁뒋 移대뱶**?? 
+  - ?ㅻ（??Gate(L0~L5)  
+  - ?덉긽 蹂寃?踰붿쐞(肄붾뱶/?ㅼ젙/臾몄꽌)  
+  - ?ъ슜??釉뚮옖移??좏삎(feature/fix/test/docs ????癒쇱? ?곷뒗??
+- ?ㅼ젣 ?묒뾽 釉뚮옖移섎뒗 ?먯튃?곸쑝濡? 
+  - `main-signed-ssot` 理쒖떊 ?곹깭?먯꽌  
+  - `feature/...`, `fix/...`, `feature/test-...`, `docs/...` ?뺥깭濡?遺꾧린?쒕떎.
+
+2) Git ?ㅽ뻾 猷⑦봽? Gate ?곕룞
+
+- A1 ?뚰겕?뚮줈??4?④퀎(?ㅽ뻾 猷⑦봽)?먯꽌 Git ?묒뾽? ?ㅼ쓬 ?쒖꽌瑜??곕Ⅸ??  
+  1. `main-signed-ssot` ?숆린???????묒뾽 釉뚮옖移??앹꽦  
+  2. ?묒? ?⑥쐞??蹂寃?+ 濡쒖뺄 ?뚯뒪??pytest  
+  3. PR ?앹꽦 ??**?꾩닔 泥댄겕(?뚯뒪??+ SSOT Check + Deploy)** ?듦낵 ?щ? ?뺤씤  
+  4. ?꾩슂 ???섏젙 ???ъ떎????紐⑤뱺 Gate PASS ??main??癒몄?
+- PR ?ㅻ챸?먮뒗 ???댁뒋媛  
+  - ?대뼡 A1 ?댁뒋 移대뱶 踰덊샇/?쒕ぉ怨??곌껐?섎뒗吏,  
+  - ?대뼡 Gate(L0~L5)???곹뼢??二쇰뒗吏 媛꾨떒???곷뒗??
+
+3) ?뚯뒪??釉뚮옖移섏? ?꾪뿕 ?숈옉
+
+- `feature/test-*` 釉뚮옖移섎뒗  
+  - A1 ?댁뒋 移대뱶?먯꽌 ?쒖떎???ы쁽/寃利?紐⑹쟻?앹쑝濡?紐낆떆??寃쎌슦?먮쭔 ?ъ슜?쒕떎.  
+  - ???ㅽ뿕 = ??釉뚮옖移?= ???뚯씪 = ??紐⑹쟻 ?먯튃???곕Ⅸ??
+- 紐⑤뱺 釉뚮옖移섏뿉???ㅼ쓬 ?숈옉? 湲덉??섍굅?? **A1 移대뱶???ъ쟾 湲곕줉 ?꾩뿉留??덉쇅?곸쑝濡??ъ슜**?쒕떎.  
   - `git reset --hard ...`, `git clean -fdx`  
-  - 대량 포맷팅/자동 정리 툴로 인한 광범위 변경  
-  - 다른 브랜치의 파일을 통째로 복사·덮어쓰기
-- 이상 징후(브랜치 보호 체크 사라짐, 이해 안 되는 충돌 등)를 발견하면  
-  - 추가 Git 명령을 중단하고,  
-  - 상태 스냅샷(스크린샷/`git status`)을 남긴 뒤 A1 이슈 카드와 인수인계 문서에 기록한다.
+  - ????щ㎎???먮룞 ?뺣━ ?대줈 ?명븳 愿묐쾾??蹂寃? 
+  - ?ㅻⅨ 釉뚮옖移섏쓽 ?뚯씪???듭㎏濡?蹂듭궗쨌??뼱?곌린
+- ?댁긽 吏뺥썑(釉뚮옖移?蹂댄샇 泥댄겕 ?щ씪吏? ?댄빐 ???섎뒗 異⑸룎 ??瑜?諛쒓껄?섎㈃  
+  - 異붽? Git 紐낅졊??以묐떒?섍퀬,  
+  - ?곹깭 ?ㅻ깄???ㅽ겕由곗꺑/`git status`)???④릿 ??A1 ?댁뒋 移대뱶? ?몄닔?멸퀎 臾몄꽌??湲곕줉?쒕떎.
 
-4) 인수인계와 “정상 PR 1사이클” 재현
+4) ?몄닔?멸퀎? ?쒖젙??PR 1?ъ씠?닳??ы쁽
 
-- A1 워크플로우 6단계(인수인계)에서 운영자는  
-  - 사용한 브랜치 이름,  
-  - 주요 커밋/PR 번호,  
-  - 통과한 CI 체크 목록을 인수인계 md에 남긴다.
-- Git/브랜치 헌법의 “정상 PR 1사이클” 예시는  
-  - 새 작업 세션에서도 그대로 재현 가능한지  
-  - A1 이슈 카드와 함께 주기적으로 점검한다.
+- A1 ?뚰겕?뚮줈??6?④퀎(?몄닔?멸퀎)?먯꽌 ?댁쁺?먮뒗  
+  - ?ъ슜??釉뚮옖移??대쫫,  
+  - 二쇱슂 而ㅻ컠/PR 踰덊샇,  
+  - ?듦낵??CI 泥댄겕 紐⑸줉???몄닔?멸퀎 md???④릿??
+- Git/釉뚮옖移??뚮쾿???쒖젙??PR 1?ъ씠?닳??덉떆?? 
+  - ???묒뾽 ?몄뀡?먯꽌??洹몃?濡??ы쁽 媛?ν븳吏  
+  - A1 ?댁뒋 移대뱶? ?④퍡 二쇨린?곸쑝濡??먭??쒕떎.
 
 
-#### 2.7 SSOT Check FAIL 시 운영 대응 Runbook
+#### 2.7 SSOT Check FAIL ???댁쁺 ???Runbook
 
-SSOT_Check_Guide 기준 FAIL 시 운영 절차 요약:
+SSOT_Check_Guide 湲곗? FAIL ???댁쁺 ?덉감 ?붿빟:
 
-1. PR 화면에서 **SSOT Check / guard → Details** 클릭
-2. 로그의 `::error` 메시지 확인
-3. 오류 유형에 따른 대응
-   - SSOT 문서 관련:
-     - PR에 `ssot-change` 라벨 추가
-     - 필요한 경우 SSOT 문서 본문을 업데이트하고, 변경 이유를 명시
-   - `ci-deploy-prod.yml` 구조 관련:
-     - Admin DoD 문서의 12장(파이프라인)과 비교하여  
-       env 키, job 수, smoke step 이름, image 출처 등을 수정
-4. 수정 후 다시 push → 워크플로 자동 재실행
-5. 여전히 FAIL이면 SRE/오너와 함께 원인 재분석 후,  
-   SSOT Check 규칙 자체를 업데이트할지 검토
+1. PR ?붾㈃?먯꽌 **SSOT Check / guard ??Details** ?대┃
+2. 濡쒓렇??`::error` 硫붿떆吏 ?뺤씤
+3. ?ㅻ쪟 ?좏삎???곕Ⅸ ???
+   - SSOT 臾몄꽌 愿??
+     - PR??`ssot-change` ?쇰꺼 異붽?
+     - ?꾩슂??寃쎌슦 SSOT 臾몄꽌 蹂몃Ц???낅뜲?댄듃?섍퀬, 蹂寃??댁쑀瑜?紐낆떆
+   - `ci-deploy-prod.yml` 援ъ“ 愿??
+     - Admin DoD 臾몄꽌??12???뚯씠?꾨씪??怨?鍮꾧탳?섏뿬  
+       env ?? job ?? smoke step ?대쫫, image 異쒖쿂 ?깆쓣 ?섏젙
+4. ?섏젙 ???ㅼ떆 push ???뚰겕?뚮줈 ?먮룞 ?ъ떎??
+5. ?ъ쟾??FAIL?대㈃ SRE/?ㅻ꼫? ?④퍡 ?먯씤 ?щ텇????  
+   SSOT Check 洹쒖튃 ?먯껜瑜??낅뜲?댄듃?좎? 寃??
 
-운영자는 **배포 전 마지막 게이트**로 SSOT Check를 활용한다고 이해하면 됩니다.
-
----
-
-#### 2.8 Admin Runbook FINAL & 마무리 가이드 연동
-
-기존 Admin Runbook과 마무리 가이드는 다음 항목을 운영 루틴에 포함:
-
-- 도메인 매핑 상태 점검 및 인증서 지연 시 재생성
-- Workload Identity Federation(WIF) 설정 확인
-- `/health`, `/api/status`, `/api/report` 스모크 및 주요 장애 패턴 대응
-- 스케줄러(`/api/report` 일일 보고서 생성) 설정 및 실패 시 재시도
-
-이 헌법 C에서는 **표준 리뷰/Quick Tools/Cloud SQL/SSOT Check** 중심으로 정리했고,  
-기타 도메인·WIF·Export/Backup 관련 운영은 기존 Runbook을 그대로 따릅니다.
+?댁쁺?먮뒗 **諛고룷 ??留덉?留?寃뚯씠??*濡?SSOT Check瑜??쒖슜?쒕떎怨??댄빐?섎㈃ ?⑸땲??
 
 ---
 
-### 3. 체크리스트
+#### 2.8 Admin Runbook FINAL & 留덈Т由?媛?대뱶 ?곕룞
 
-운영자가 배포/트래픽 전환/스모크를 수행할 때 사용할 수 있는 체크리스트입니다.
+湲곗〈 Admin Runbook怨?留덈Т由?媛?대뱶???ㅼ쓬 ??ぉ???댁쁺 猷⑦떞???ы븿:
 
-| 항목 | 설명 | 예시 |
+- ?꾨찓??留ㅽ븨 ?곹깭 ?먭? 諛??몄쬆??吏?????ъ깮??
+- Workload Identity Federation(WIF) ?ㅼ젙 ?뺤씤
+- `/health`, `/api/status`, `/api/report` ?ㅻえ??諛?二쇱슂 ?μ븷 ?⑦꽩 ???
+- ?ㅼ?以꾨윭(`/api/report` ?쇱씪 蹂닿퀬???앹꽦) ?ㅼ젙 諛??ㅽ뙣 ???ъ떆??
+
+???뚮쾿 C?먯꽌??**?쒖? 由щ럭/Quick Tools/Cloud SQL/SSOT Check** 以묒떖?쇰줈 ?뺣━?덇퀬,  
+湲고? ?꾨찓?맞톆IF쨌Export/Backup 愿???댁쁺? 湲곗〈 Runbook??洹몃?濡??곕쫭?덈떎.
+
+---
+
+### 3. 泥댄겕由ъ뒪??
+
+?댁쁺?먭? 諛고룷/?몃옒???꾪솚/?ㅻえ?щ? ?섑뻾?????ъ슜?????덈뒗 泥댄겕由ъ뒪?몄엯?덈떎.
+
+| ??ぉ | ?ㅻ챸 | ?덉떆 |
 | --- | --- | --- |
-| Cloud SQL Stop 일일 스모크 | 아침마다 3줄 스모크를 실행해 SQL/Cloud Run/HTML 상태를 기록했는지 | gcloud list 결과 `quali-pg STOPPED/NEVER`, domap 100%, HTML 파일 정상 다운로드 로그 캡처 |
-| Cloud SQL 플래그 파일 | `infra/FLAGS/CLOUDSQL_STOPPED.yaml` 값이 현재 정책과 일치하는지 | intent=stopped, until=YYYY-MM-DD가 실제 운영 계획과 맞는지 |
-| 배포 전 SQL 가드레일 | CI에서 STOP 상태일 때 배포가 차단되는지, 배포 전 SQL 상태를 RUNNABLE로 맞췄는지 | 배포 직전 `gcloud sql instances describe` 로 state 확인, STOP이면 정책에 따라 작업 연기 |
-| Traffic 50/50 전환 기록 | OLD_REV/NEW_REV 이름과 전환 시각·담당자를 기록했는지 | Runbook 체크리스트에 `OLD_REV=..., NEW_REV=..., 50/50 전환 시각` 메모 |
-| health/status/report 스모크 | 트래픽 전환 후 `/health`, `/api/status`, `/api/report` 3종 스모크를 실행했는지 | 3개 모두 200 코드, `/api/status` 의 지표가 정상 범위인지 |
-| `/api/standards/reviews` A1 스모크 | 단일 호출 1회 + 10회 반복 스모크를 모두 실행했고, 200/ok/count/items 기준을 만족했는지 | PowerShell 스크립트 로그에 “단일 스모크 PASS, 10회 반복 스모크 PASS” 메시지가 찍혔는지 |
-| Quick Tools Gate 스모크 | approve_top/repair 호출 결과 rc/ok/sync_log가 Gate 기준을 충족하는지 | B-mode 케이스에서 rc=127이면서 sync_log.ok=true 인지 |
-| SSOT Check / guard 상태 | 배포 직전 PR에서 SSOT Check가 PASS인지, FAIL일 경우 원인을 해결했는지 | FAIL 로그를 기반으로 ssot-change 라벨 추가 또는 YAML 구조 수정 후 재실행한 기록 |
-| Admin Runbook 항목 점검 | 도메인·WIF·스케줄러·백업 등 기존 Runbook의 Top 항목을 완료했는지 | `/health 405`, `/api/status 401`, 도메인 Ready 지연 등 주요 장애 처리 플레이북을 적용했는지 |
+| Cloud SQL Stop ?쇱씪 ?ㅻえ??| ?꾩묠留덈떎 3以??ㅻえ?щ? ?ㅽ뻾??SQL/Cloud Run/HTML ?곹깭瑜?湲곕줉?덈뒗吏 | gcloud list 寃곌낵 `quali-pg STOPPED/NEVER`, domap 100%, HTML ?뚯씪 ?뺤긽 ?ㅼ슫濡쒕뱶 濡쒓렇 罹≪쿂 |
+| Cloud SQL ?뚮옒洹??뚯씪 | `infra/FLAGS/CLOUDSQL_STOPPED.yaml` 媛믪씠 ?꾩옱 ?뺤콉怨??쇱튂?섎뒗吏 | intent=stopped, until=YYYY-MM-DD媛 ?ㅼ젣 ?댁쁺 怨꾪쉷怨?留욌뒗吏 |
+| 諛고룷 ??SQL 媛?쒕젅??| CI?먯꽌 STOP ?곹깭????諛고룷媛 李⑤떒?섎뒗吏, 諛고룷 ??SQL ?곹깭瑜?RUNNABLE濡?留욎톬?붿? | 諛고룷 吏곸쟾 `gcloud sql instances describe` 濡?state ?뺤씤, STOP?대㈃ ?뺤콉???곕씪 ?묒뾽 ?곌린 |
+| Traffic 50/50 ?꾪솚 湲곕줉 | OLD_REV/NEW_REV ?대쫫怨??꾪솚 ?쒓컖쨌?대떦?먮? 湲곕줉?덈뒗吏 | Runbook 泥댄겕由ъ뒪?몄뿉 `OLD_REV=..., NEW_REV=..., 50/50 ?꾪솚 ?쒓컖` 硫붾え |
+| health/status/report ?ㅻえ??| ?몃옒???꾪솚 ??`/health`, `/api/status`, `/api/report` 3醫??ㅻえ?щ? ?ㅽ뻾?덈뒗吏 | 3媛?紐⑤몢 200 肄붾뱶, `/api/status` ??吏?쒓? ?뺤긽 踰붿쐞?몄? |
+| `/api/standards/reviews` A1 ?ㅻえ??| ?⑥씪 ?몄텧 1??+ 10??諛섎났 ?ㅻえ?щ? 紐⑤몢 ?ㅽ뻾?덇퀬, 200/ok/count/items 湲곗???留뚯”?덈뒗吏 | PowerShell ?ㅽ겕由쏀듃 濡쒓렇???쒕떒???ㅻえ??PASS, 10??諛섎났 ?ㅻえ??PASS??硫붿떆吏媛 李랁삍?붿? |
+| Quick Tools Gate ?ㅻえ??| approve_top/repair ?몄텧 寃곌낵 rc/ok/sync_log媛 Gate 湲곗???異⑹”?섎뒗吏 | B-mode 耳?댁뒪?먯꽌 rc=127?대㈃??sync_log.ok=true ?몄? |
+| SSOT Check / guard ?곹깭 | 諛고룷 吏곸쟾 PR?먯꽌 SSOT Check媛 PASS?몄?, FAIL??寃쎌슦 ?먯씤???닿껐?덈뒗吏 | FAIL 濡쒓렇瑜?湲곕컲?쇰줈 ssot-change ?쇰꺼 異붽? ?먮뒗 YAML 援ъ“ ?섏젙 ???ъ떎?됲븳 湲곕줉 |
+| Admin Runbook ??ぉ ?먭? | ?꾨찓?맞톆IF쨌?ㅼ?以꾨윭쨌諛깆뾽 ??湲곗〈 Runbook??Top ??ぉ???꾨즺?덈뒗吏 | `/health 405`, `/api/status 401`, ?꾨찓??Ready 吏????二쇱슂 ?μ븷 泥섎━ ?뚮젅?대턿???곸슜?덈뒗吏 |
+
+<!-- SSOT-CLOUDSQL-AUTOHEAL START -->
+### SSOT — Cloud SQL STOP Guardrail 자가치유(운영 상수)
+Guardrail - Cloud SQL STOP Policy로 배포/테스트가 차단되면, Cloud SQL 인스턴스를 ctivationPolicy=ALWAYS로 전환(기동)한 뒤 GitHub Actions를 Re-run하여 통과를 확인하고, 완료 후에는 ctivationPolicy=NEVER로 되돌려 비용을 절약한다. (명령 예: gcloud sql instances patch <INSTANCE> --activation-policy=ALWAYS  Re-run  ... --activation-policy=NEVER)
+<!-- SSOT-CLOUDSQL-AUTOHEAL END -->

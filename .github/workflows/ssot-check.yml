@@ -59,14 +59,17 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      
       - name: Guard SSOT docs with label
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           CHANGED_FILES="${{ steps.changes.outputs.files }}"
           echo "CHANGED_FILES:"
           echo "$CHANGED_FILES"
-
           SSOT_DOC_CHANGED=$(echo "$CHANGED_FILES" | grep -E 'SSOT_.*\.md|Admin_DoD_.*\.md' || true)
+
 
           if [ -n "$SSOT_DOC_CHANGED" ]; then
             echo "SSOT 문서 변경 감지:"
@@ -82,7 +85,7 @@ jobs:
             echo "LABELS_JSON:"
             echo "$LABELS_JSON"
 
-            if echo "$LABELS_JSON" | grep -q '"name": "ssot-change"'; then
+            if echo "$LABELS_JSON" | grep -Eq '"name"[[:space:]]*:[[:space:]]*"ssot-change"'; then
               echo "라벨 'ssot-change' 를 찾았습니다. 통과합니다."
             else
               echo "::error ::SSOT 파일이 변경되었지만 'ssot-change' 라벨이 없습니다."

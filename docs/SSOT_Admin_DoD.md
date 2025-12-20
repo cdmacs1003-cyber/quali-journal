@@ -387,3 +387,8 @@ Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" -Headers @{"
 
 이 문서는 “관리자 모드 개발·운영의 기준선”으로 사용되며, 변경이 필요할 경우 **반드시 PR + 리뷰 + DevOps 품질 게이트**를 거쳐 갱신한다.
 <!-- SSOT 변경 테스트 v2 (라벨 없이 CI 반응 확인용) -->
+
+<!-- SSOT-GH-CLI-GH_TOKEN START -->
+### SSOT — GitHub CLI(gh) 사용 시 토큰 규칙
+- GitHub Actions에서 `gh`를 사용하는 step은 반드시 `env: GH_TOKEN: ${{ github.token }}`(또는 `${{ secrets.GITHUB_TOKEN }}`)을 설정한다.
+<!-- SSOT-GH-CLI-GH_TOKEN END -->
