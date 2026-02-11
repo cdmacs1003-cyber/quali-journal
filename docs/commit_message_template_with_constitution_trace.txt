@@ -1,0 +1,6 @@
+﻿<type>(<scope>): <subject>
+
+<body: 왜/무엇/어떻게>
+
+Constitution-Doc: 전자제조산업 표준AI 개발_헌법
+Constitution-Trace: <조항ID/제목>  <이번 변경이 헌법 완성에 기여하는 한 문장>
