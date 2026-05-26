@@ -1,0 +1,67 @@
+﻿PWD=H:\a\퀄리저널_07SD_clean
+TIME=20260527_045050
+--- git status --short ---
+?? AGENTS.md
+?? COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md
+?? PROJECT_DEVELOPMENT_MEMORY.md
+?? docs/addendum/
+--- addendum files ---
+
+
+    디렉터리: H:\a\퀄리저널_07SD_clean\docs\addendum
+
+
+Mode                 LastWriteTime         Length Name                                                                                                                                                                                                                        
+----                 -------------         ------ ----                                                                                                                                                                                                                        
+-a----        2026-05-26   오후 7:34           5387 PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md                                                                                                                       
+
+
+--- verification strings ---
+
+AGENTS.md:39:## 2. Repository State Gate
+AGENTS.md:65:UNTRACKED_FILE_IS_NOT_CANONICAL=true
+AGENTS.md:121:5. Apply the Repository State Gate.
+
+
+
+PROJECT_DEVELOPMENT_MEMORY.md:92:| 2026-05-26 | clean worktree에서 required documents와 Bridge/F13 source surfaces가 `NOT_FOUND`가 되어 07SD가 `REVIEW_REQUIRED`로 종료 | old dirty worktree에 있던 핵심 산출물이 Git 정본, ProofPack, Recovery Package로 봉인되지 않은 untracked 상태였고, 새 clean worktree 생성
+ 시 따라오지 않음 | Artifact Promotion State Policy와 Clean Worktree 전환 전 Gate를 적용한다 |
+PROJECT_DEVELOPMENT_MEMORY.md:98:## 4. Artifact Promotion State Policy
+PROJECT_DEVELOPMENT_MEMORY.md:109:| `QUARANTINE` | secret-like, out-of-scope, provenance 불명, 위험 파일 | 열람·복사·삭제 금지 |
+PROJECT_DEVELOPMENT_MEMORY.md:122:## 5. Clean Worktree 전환 전 Gate
+PROJECT_DEVELOPMENT_MEMORY.md:145:| `.env`, `.env.*`, secret-like 파일명 존재 | `QUARANTINE` | 열람·복사·삭제 금지 |
+PROJECT_DEVELOPMENT_MEMORY.md:242:## 9. Secret and quarantine policy
+PROJECT_DEVELOPMENT_MEMORY.md:244:다음 파일 또는 패턴은 `QUARANTINE`으로 분류한다.
+PROJECT_DEVELOPMENT_MEMORY.md:310:| `QUARANTINE` | 열람·복사·삭제 금지 |
+
+
+
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:834:## 15A. Artifact Materialization and Clean Worktree Gate
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:850:UNTRACKED_FILE_IS_NOT_CANONICAL=true
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:864:| `CANONICAL` | 다음 작업의 정본 | clean worktree 반입 가능 |
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:867:### Clean Worktree 전환 전 Gate
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:869:새 clean worktree를 만들거나 다른 작업 폴더로 전환하기 전에 다음을 확인한다.
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:882:다음 조건 중 하나라도 있으면 clean worktree 전환 또는 구현 진행을 멈춘다.
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:890:| required 문서가 clean worktree에서 없음 | `REVIEW_REQUIRED` |
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:891:| required source surface가 clean worktree에서 없음 | `REVIEW_REQUIRED` |
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:915:장기 작업, clean worktree 전환, recovery, implementation packet, release 관련 보고에는 다음 표를 포함한다.
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:1052:- clean worktree transition allowed: YES / NO
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:1453:| CANONICAL | 다음 작업 정본 | clean worktree 반입 가능 |
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md:1456:## 10. Clean Worktree Gate
+
+
+
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:1:# PROJECT_DEVELOPMENT_GUIDEBOOK_창고_v1.0 ADDENDUM — Artifact Materialization and Clean Worktree Gate
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:26:QLIB Track A / Bridge Runtime MVP 작업 중 clean worktree에서 required documents와 Bridge/F13 source surfaces가 `NOT_FOUND`가 되어 07SD가 `REVIEW_REQUIRED`로 종료되었다.
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:31:핵심 산출물이 Git 정본, ProofPack, 또는 Recovery Package로 봉인되기 전에 old dirty worktree의 untracked 파일로만 존재했고, 새 clean worktree 생성 시 따라오지 않았다.
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:48:| `CANONICAL` | 다음 작업의 정본 | clean worktree 반입 가능 |
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:49:| `QUARANTINE` | secret-like, 범위 밖, 출처 불명, 위험 파일 | 열람·복사·삭제 금지 |
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:62:## 3. Clean Worktree 전환 전 Gate
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:64:새 clean worktree 생성 또는 작업 폴더 전환 전 다음을 확인한다.
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:86:| `.env`, `.env.*`, secret-like 파일명 존재 | `QUARANTINE` | 내용 열람 금지 |
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:93:old dirty worktree에서 clean worktree로 항목을 가져오기 전 Recovery Package를 작성한다.
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:129:| artifact state table | DRAFT/CANDIDATE/APPROVED_SOURCE/PROOFPACKED/CANONICAL/QUARANTINE 분류 |
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:132:| clean worktree eligibility | YES / NO / REVIEW_REQUIRED |
+docs\addendum\PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md:155:창고와 QLIB 산출물은 정본화되기 전까지 작업물이며, 작업물은 Git commit, Recovery Package, ProofPack manifest 중 하나로 봉인되어야 다음 clean worktree와 다음 작업의 기준이 된다.
+
+

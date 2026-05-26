@@ -1,0 +1,49 @@
+﻿PWD=H:\a\퀄리저널_pr_clean
+TIME=20260527_034534
+--- git status --short ---
+ M .github/PULL_REQUEST_TEMPLATE.md
+ M admin/server_quali.py
+ M docs/commit_message_template_with_constitution_trace.txt
+ M server_quali.py
+?? .env.bak_cloudmode_20260521_065155
+?? AGENTS.md
+?? COMMON_DEVELOPMENT_WORKFLOW.md
+?? COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md
+?? PROJECT_DEVELOPMENT_MEMORY.md
+?? PROJECT_DEVELOPMENT_MEMORY_PROMPT_CODEX_FINAL.md
+?? admin/.env.bak_cloudmode_20260521_065155
+?? admin/body.json
+?? admin/body_approve.json
+?? admin/body_link.json
+?? admin/body_promote.json
+?? admin/body_record.json
+?? admin/data/
+?? admin/f13_bridge_api.py
+?? admin/f13_completion_gate_static_enforcement.py
+?? admin/f13_feedback_queue_persistence.py
+?? admin/f13_feedback_queue_writer.py
+?? admin/f13_runtime_guard.py
+?? admin/f13_skillup_bridge_adapter.py
+?? admin/tests/test_f13_bridge_api.py
+?? admin/tests/test_f13_bridge_contract_regression.py
+?? admin/tests/test_f13_bridge_evidence_response_schema.py
+?? admin/tests/test_f13_completion_gate_static_enforcement.py
+?? admin/tests/test_f13_feedback_queue_migration_file.py
+?? admin/tests/test_f13_feedback_queue_persistence.py
+?? admin/tests/test_f13_feedback_queue_static_contracts.py
+?? admin/tests/test_f13_feedback_queue_writer.py
+?? admin/tests/test_f13_runtime_guard.py
+?? admin/tests/test_f13_skillup_bridge_adapter.py
+?? admin/tests/test_warehouse_core_api.py
+?? admin/warehouse_core.py
+?? "commit_message_template_with_constitution_trace.txt\357\200\242q"
+?? db/
+?? "docs/PROJECT_DEVELOPMENT_GUIDEBOOK_\354\260\275\352\263\240_v1_0_FINAL.md"
+?? docs/QLIB_COMPLETE_DEVELOPMENT_GUIDEBOOK_20260511_v1_2.md
+?? docs/f13/
+?? docs/feature_specs/
+?? docs/ontology/
+?? gap_maps/
+?? reports/
+?? schemas/
+?? shapes/

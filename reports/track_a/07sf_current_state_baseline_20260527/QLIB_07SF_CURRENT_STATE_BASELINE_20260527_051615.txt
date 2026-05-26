@@ -1,0 +1,34 @@
+﻿PWD=H:\a\퀄리저널_07SD_clean
+TIME=20260527_051615
+--- git status --short ---
+?? AGENTS.md
+?? COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md
+?? PROJECT_DEVELOPMENT_MEMORY.md
+?? docs/addendum/
+?? reports/
+--- governance files ---
+
+Name                                       Length LastWriteTime        
+----                                       ------ -------------        
+AGENTS.md                                    8679 2026-05-26 오후 7:34:24
+COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md  51615 2026-05-26 오후 7:34:24
+PROJECT_DEVELOPMENT_MEMORY.md               10759 2026-05-26 오후 7:34:24
+
+
+--- addendum files ---
+
+Name                                                                                                  Length LastWriteTime        
+----                                                                                                  ------ -------------        
+PROJECT_DEVELOPMENT_GUIDEBOOK_WAREHOUSE_v1_0_FINAL_ADDENDUM_20260526_ARTIFACT_MATERIALIZATION_GATE.md   5387 2026-05-26 오후 7:34:24
+
+
+--- evidence reports ---
+
+Name                                                        Length LastWriteTime        
+----                                                        ------ -------------        
+QLIB_07SD_dirty_worktree_classification_20260527_034825.txt 421335 2026-05-27 오전 3:48:37
+QLIB_07SD_git_status_20260527_034534.txt                      1808 2026-05-27 오전 3:45:46
+QLIB_GOVERNANCE_APPLY_CLOSURE_20260527_045050.txt             6658 2026-05-27 오전 4:51:01
+QLIB_GOVERNANCE_APPLY_STATUS_20260527_044836.txt              6664 2026-05-27 오전 4:48:46
+
+
