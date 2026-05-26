@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qualijournal.local/schemas/f13_bridge_explain_trace_response.schema.json",
+  "title": "F13 Bridge explain-trace response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_status",
+    "request_id",
+    "bridge_trace_id",
+    "course_id",
+    "module_id",
+    "binding_id",
+    "evidence_ids",
+    "policy_result",
+    "hold_reason",
+    "visible_trace_summary",
+    "raw_text_included",
+    "internal_path_included",
+    "created_at"
+  ],
+  "properties": {
+    "result_status": {
+      "type": "string",
+      "enum": ["OK", "HOLD", "DENIED"]
+    },
+    "request_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "bridge_trace_id": {
+      "type": ["string", "null"],
+      "maxLength": 160
+    },
+    "course_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "module_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "binding_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 120
+      }
+    },
+    "policy_result": {
+      "type": "string",
+      "enum": ["PASS", "HOLD", "DENIED"]
+    },
+    "hold_reason": {
+      "type": ["string", "null"],
+      "maxLength": 240
+    },
+    "visible_trace_summary": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "raw_text_included": {
+      "const": false
+    },
+    "internal_path_included": {
+      "const": false
+    },
+    "created_at": {
+      "type": "string"
+    }
+  }
+}

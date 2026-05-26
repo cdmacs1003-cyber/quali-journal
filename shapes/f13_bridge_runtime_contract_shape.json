@@ -1,0 +1,34 @@
+{
+  "shape_id": "f13_bridge_runtime_contract_shape_v0_1",
+  "status": "STATIC_RECOVERY_BASELINE",
+  "routes": [
+    "/api/f13/bridge/retrieve-evidence",
+    "/api/f13/bridge/check-policy",
+    "/api/f13/bridge/explain-trace"
+  ],
+  "required_response_flags": {
+    "raw_text_included": false,
+    "internal_path_included": false
+  },
+  "safe_evidence_fields": [
+    "evidence_id",
+    "bridge_trace_id",
+    "safe_summary",
+    "pointer_uri",
+    "raw_text_policy",
+    "rights_status",
+    "source_doc_kind",
+    "validation_shape_ids"
+  ],
+  "fail_closed_marker_groups": [
+    "RAW_TEXT_MARKERS",
+    "INTERNAL_PATH_MARKERS",
+    "SECRET_OR_TOKEN_MARKERS",
+    "DB_OR_DSN_MARKERS"
+  ],
+  "deferred_verification": [
+    "BRIDGE_FUNCTIONAL_200_BEHAVIOR",
+    "RUNTIME_SMOKE",
+    "AUTHENTICATED_FUNCTIONAL_SMOKE"
+  ]
+}

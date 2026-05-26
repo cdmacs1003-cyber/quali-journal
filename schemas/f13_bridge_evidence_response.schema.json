@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qualijournal.local/schemas/f13_bridge_evidence_response.schema.json",
+  "title": "F13 Bridge retrieve-evidence response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_status",
+    "evidence_items",
+    "hold_reason",
+    "feedback_candidate_required",
+    "raw_text_included",
+    "internal_path_included",
+    "policy_result",
+    "created_at"
+  ],
+  "properties": {
+    "result_status": {
+      "type": "string",
+      "enum": ["OK", "HOLD", "DENIED"]
+    },
+    "evidence_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_id",
+          "bridge_trace_id",
+          "safe_summary",
+          "pointer_uri",
+          "raw_text_policy",
+          "rights_status"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "bridge_trace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "safe_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "pointer_uri": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "raw_text_policy": {
+            "type": "string",
+            "enum": ["SUMMARY_ONLY", "POINTER_ONLY", "REDACTED_SUMMARY_ONLY", "DENIED", "NOT_VERIFIED"]
+          },
+          "rights_status": {
+            "type": "string",
+            "enum": ["PUBLIC", "INTERNAL", "LICENSED", "CUSTOMER_CONFIDENTIAL", "RESTRICTED", "UNKNOWN", "NOT_VERIFIED"]
+          },
+          "source_doc_kind": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "validation_shape_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 120
+            }
+          }
+        }
+      }
+    },
+    "hold_reason": {
+      "type": ["string", "null"],
+      "maxLength": 240
+    },
+    "feedback_candidate_required": {
+      "type": "boolean"
+    },
+    "raw_text_included": {
+      "const": false
+    },
+    "internal_path_included": {
+      "const": false
+    },
+    "policy_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_required_pass",
+        "raw_leak_pass",
+        "rights_pass",
+        "sensitivity_pass"
+      ],
+      "properties": {
+        "evidence_required_pass": {
+          "type": "boolean"
+        },
+        "raw_leak_pass": {
+          "type": "boolean"
+        },
+        "rights_pass": {
+          "type": "boolean"
+        },
+        "sensitivity_pass": {
+          "type": "boolean"
+        }
+      }
+    },
+    "created_at": {
+      "type": "string"
+    }
+  }
+}

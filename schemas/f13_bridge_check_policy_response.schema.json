@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qualijournal.local/schemas/f13_bridge_check_policy_response.schema.json",
+  "title": "F13 Bridge check-policy response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_status",
+    "bridge_trace_id",
+    "policy_result",
+    "hold_reason",
+    "output_constraints",
+    "blocked_fields",
+    "feedback_candidate_required",
+    "raw_text_included",
+    "internal_path_included",
+    "created_at"
+  ],
+  "properties": {
+    "result_status": {
+      "type": "string",
+      "enum": ["OK", "HOLD", "DENIED"]
+    },
+    "bridge_trace_id": {
+      "type": ["string", "null"],
+      "maxLength": 160
+    },
+    "policy_result": {
+      "type": "string",
+      "enum": ["PASS", "HOLD", "DENIED"]
+    },
+    "hold_reason": {
+      "type": ["string", "null"],
+      "maxLength": 240
+    },
+    "output_constraints": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 120
+      }
+    },
+    "blocked_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 120
+      }
+    },
+    "feedback_candidate_required": {
+      "type": "boolean"
+    },
+    "raw_text_included": {
+      "const": false
+    },
+    "internal_path_included": {
+      "const": false
+    },
+    "created_at": {
+      "type": "string"
+    }
+  }
+}
