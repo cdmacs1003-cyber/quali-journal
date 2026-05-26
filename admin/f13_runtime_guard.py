@@ -43,6 +43,10 @@ BRIDGE_EVIDENCE_ALLOWLIST_FIELDS = {
 
 _REDACTED_PREFLIGHT_FIELD = "redacted_preflight_replay_evidence"
 
+_SAFE_METADATA_FIELD_NAMES = {
+    "raw_text_policy",
+}
+
 _RAW_FIELD_MARKERS = {
     "raw_text",
     "raw text",
@@ -164,6 +168,8 @@ def _field_violation_code(field_name: Any) -> str | None:
     text = str(field_name or "").strip()
     lowered = text.lower()
     if lowered == _REDACTED_PREFLIGHT_FIELD:
+        return None
+    if lowered in _SAFE_METADATA_FIELD_NAMES:
         return None
     for marker in _RAW_FIELD_MARKERS:
         if marker in lowered:
@@ -326,6 +332,26 @@ def _positive(value: Any) -> bool:
     return normalized in {"YES", "Y", "TRUE", "1", "RECORDED", "ATTEMPTED"}
 
 
+def _recorded_boundary_positive(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if _is_missing(value):
+        return False
+    normalized = _safe_token(value)
+    safe_negative_values = {
+        "NO",
+        "N",
+        "FALSE",
+        "0",
+        "NONE",
+        "NONE_OBSERVED",
+        "NOT_RECORDED",
+        "NOT_APPLICABLE",
+        "ABSENT",
+    }
+    return normalized not in safe_negative_values
+
+
 def _contains(value: Any, needle: str) -> bool:
     return needle.lower() in str(value or "").lower()
 
@@ -340,13 +366,13 @@ def validate_human_redacted_preflight_replay_evidence(evidence: Mapping[str, Any
         "CODEX_RUNTIME_SMOKE",
     ]
 
-    if _positive(evidence.get("credential_material_recorded")):
+    if _recorded_boundary_positive(evidence.get("credential_material_recorded")):
         reason_codes.append("CREDENTIAL_MATERIAL_RECORDED_POSITIVE")
-    if _positive(evidence.get("password_recorded")):
+    if _recorded_boundary_positive(evidence.get("password_recorded")):
         reason_codes.append("PASSWORD_RECORDED_POSITIVE")
-    if _positive(evidence.get("full_connection_string_recorded")):
+    if _recorded_boundary_positive(evidence.get("full_connection_string_recorded")):
         reason_codes.append("FULL_CONNECTION_STRING_RECORDED_POSITIVE")
-    if _positive(evidence.get("secret_store_accessed")):
+    if _recorded_boundary_positive(evidence.get("secret_store_accessed")):
         reason_codes.append("SECRET_STORE_ACCESSED_POSITIVE")
     if reason_codes:
         return {
