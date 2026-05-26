@@ -3,10 +3,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import admin.f13_bridge_api as bridge_api
-from admin.server_quali import app, authorize
 
 
 ROUTE = "/api/f13/bridge/retrieve-evidence"
@@ -26,15 +26,16 @@ FORBIDDEN_KEYS = {
 
 
 @pytest.fixture
-def client() -> TestClient:
-    async def _ok() -> bool:
-        return True
+def local_app() -> FastAPI:
+    app = FastAPI()
+    app.include_router(bridge_api.router)
+    return app
 
-    app.dependency_overrides[authorize] = _ok
-    try:
-        yield TestClient(app)
-    finally:
-        app.dependency_overrides.pop(authorize, None)
+
+@pytest.fixture
+def client(local_app: FastAPI) -> TestClient:
+    with TestClient(local_app) as test_client:
+        yield test_client
 
 
 def _schema() -> dict[str, Any]:
@@ -144,8 +145,8 @@ def _assert_bridge_shape(body: dict[str, Any]) -> None:
         assert set(item).issubset(item_properties)
 
 
-def test_route_exists_and_accepts_post(client: TestClient):
-    assert ROUTE in {getattr(route, "path", "") for route in app.routes}
+def test_route_exists_and_accepts_post(client: TestClient, local_app: FastAPI):
+    assert ROUTE in {getattr(route, "path", "") for route in local_app.routes}
 
     response = client.post(ROUTE, json=_payload())
 
