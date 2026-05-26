@@ -2,23 +2,24 @@
 
 ## Static Recovery State
 
-This gap map records the clean-worktree Bridge/F13 source recovery baseline after governance canonicalization and reports evidence sealing.
+This gap map records the clean-worktree Bridge/F13 source recovery baseline after governance canonicalization, reports evidence sealing, and 07SQ source-surface recovery.
 
 ## P0 Gaps
 
 | Gap | Target surface | Required closure |
 |---|---|---|
-| Bridge API route surface missing | `admin/f13_bridge_api.py` | Recover selected source and verify route symbols statically. |
-| Runtime guard missing | `admin/f13_runtime_guard.py` | Regenerate from contract with fail-closed marker handling. |
-| retrieve-evidence schema missing | `schemas/f13_bridge_evidence_response.schema.json` | Regenerate JSON schema and verify parse. |
+| Bridge API route surface recovered | `admin/f13_bridge_api.py` | STATIC_RECOVERY_COMPLETE; runtime behavior remains NOT_VERIFIED. |
+| Runtime guard regenerated | `admin/f13_runtime_guard.py` | STATIC_RECOVERY_COMPLETE; runtime behavior remains NOT_VERIFIED. |
+| retrieve-evidence schema regenerated | `schemas/f13_bridge_evidence_response.schema.json` | STATIC_RECOVERY_COMPLETE; alias policy still requires static coverage. |
 
 ## P1 Gaps
 
 | Gap | Target surface | Required closure |
 |---|---|---|
-| check-policy schema missing | `schemas/f13_bridge_check_policy_response.schema.json` | Regenerate dedicated response schema. |
-| explain-trace schema missing | `schemas/f13_bridge_explain_trace_response.schema.json` | Regenerate dedicated response schema. |
-| Bridge tests missing | `admin/tests/test_f13_bridge_*.py` | Recover selected tests and defer execution to a later test gate. |
+| check-policy schema static coverage missing | `admin/tests/test_f13_bridge_check_policy_response_schema.py` | Add static schema test; defer execution to a later test gate. |
+| explain-trace feedback-candidate coverage missing | `admin/tests/test_f13_bridge_explain_trace_response_schema.py` | Add static schema and feedback-candidate tests; defer execution to a later test gate. |
+| Shape documentation wrapper missing | `shapes/f13_bridge_runtime_contract_shape.md` | Add wrapper documenting JSON shape canonicality. |
+| Bridge tests present but not executed | `admin/tests/test_f13_bridge_*.py` | Defer execution to a later explicit test gate. |
 
 ## Deferred Gaps
 

@@ -17,6 +17,14 @@ This specification restores the static F13 Bridge/F13 planning surface for the c
 - `/api/f13/bridge/check-policy`
 - `/api/f13/bridge/explain-trace`
 
+## Trace Explanation Contract
+
+The explain-trace response must expose a top-level `feedback_candidate_required`
+boolean and a top-level `feedback_candidate` value. `feedback_candidate` is
+`null` when the trace explanation is `OK`; otherwise it is a safe review object
+with bounded reason text and no raw evidence, internal path, secret-like value,
+or DB/DSN detail.
+
 ## Evidence Contract
 
 Evidence returned across the Bridge boundary must contain safe pointer metadata only:
@@ -31,6 +39,20 @@ Evidence returned across the Bridge boundary must contain safe pointer metadata 
 - optional `validation_shape_ids`
 
 Bridge responses must keep `raw_text_included=false` and `internal_path_included=false`.
+
+## Shape Contract
+
+`shapes/f13_bridge_runtime_contract_shape.json` is the canonical
+machine-readable Bridge/F13 runtime contract shape. The matching Markdown file
+`shapes/f13_bridge_runtime_contract_shape.md` is a human-readable documentation
+wrapper and must not replace the JSON shape.
+
+## Evidence Schema Alias Policy
+
+`schemas/f13_bridge_evidence_response.schema.json` is the canonical external
+retrieve-evidence schema. `schemas/f13/bridge_evidence_response.schema.json`
+is retained as a compatibility alias for recovered static tests; required fields
+and properties should remain aligned with the canonical schema.
 
 ## Guard Contract
 
@@ -55,3 +77,4 @@ The guard must never return the offending value in an external response.
 - runtime smoke
 - authenticated functional smoke
 - Bridge functional 200 verification
+- test execution until a separate explicit gate

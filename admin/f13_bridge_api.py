@@ -125,6 +125,8 @@ class BridgeTraceExplainResponse(BaseModel):
     evidence_ids: List[str]
     policy_result: str
     hold_reason: Optional[str]
+    feedback_candidate_required: bool
+    feedback_candidate: Optional[Dict[str, Any]]
     visible_trace_summary: str
     raw_text_included: bool
     internal_path_included: bool
@@ -199,6 +201,26 @@ def _safe_trace_id(value: object) -> Optional[str]:
     if any(char not in allowed for char in trace_id):
         return None
     return trace_id
+
+
+def _trace_feedback_candidate(
+    status: str,
+    hold_reason: Optional[str],
+    bridge_trace_id: Optional[str],
+) -> Optional[Dict[str, str]]:
+    if status == RESULT_OK:
+        return None
+
+    reason = _safe_label(hold_reason, max_length=160) or "Bridge trace explanation requires review"
+    candidate = {
+        "candidate_type": "BRIDGE_TRACE_REVIEW",
+        "reason": reason,
+        "next_action": "REVIEW_EVIDENCE_TRACE_POLICY",
+    }
+    safe_trace_id = _safe_trace_id(bridge_trace_id)
+    if safe_trace_id is not None:
+        candidate["bridge_trace_id"] = safe_trace_id
+    return candidate
 
 
 def _bounded_blocked_fields(fields: List[str]) -> List[str]:
@@ -550,6 +572,7 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
     request_payload = _model_to_dict(payload)
     forbidden = detect_forbidden_fields(request_payload)
     if forbidden:
+        hold_reason = "forbidden fields or patterns detected"
         return {
             "result_status": RESULT_DENIED,
             "request_id": None,
@@ -559,7 +582,9 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
             "binding_id": None,
             "evidence_ids": [],
             "policy_result": "DENIED",
-            "hold_reason": "forbidden fields or patterns detected",
+            "hold_reason": hold_reason,
+            "feedback_candidate_required": True,
+            "feedback_candidate": _trace_feedback_candidate(RESULT_DENIED, hold_reason, None),
             "visible_trace_summary": "Trace explanation denied by Bridge safety boundary.",
             "raw_text_included": False,
             "internal_path_included": False,
@@ -574,6 +599,7 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
         or trace.get("promotion_trace_id")
     )
     if bridge_trace_id is None:
+        hold_reason = "bridge_trace_id is required for no-DB trace explanation"
         return {
             "result_status": RESULT_HOLD,
             "request_id": _safe_label(payload.request_id),
@@ -583,7 +609,9 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
             "binding_id": _first_safe_value(payload.binding_id, trace.get("binding_id")),
             "evidence_ids": [],
             "policy_result": "HOLD",
-            "hold_reason": "bridge_trace_id is required for no-DB trace explanation",
+            "hold_reason": hold_reason,
+            "feedback_candidate_required": True,
+            "feedback_candidate": _trace_feedback_candidate(RESULT_HOLD, hold_reason, None),
             "visible_trace_summary": "Trace explanation is on HOLD because bridge_trace_id is missing.",
             "raw_text_included": False,
             "internal_path_included": False,
@@ -630,6 +658,8 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
         "evidence_ids": evidence_ids,
         "policy_result": policy_result,
         "hold_reason": hold_reason,
+        "feedback_candidate_required": status != RESULT_OK,
+        "feedback_candidate": _trace_feedback_candidate(status, hold_reason, bridge_trace_id),
         "visible_trace_summary": summary,
         "raw_text_included": False,
         "internal_path_included": False,
