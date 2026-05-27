@@ -1,0 +1,108 @@
+{
+  "manifest_version": "1.0",
+  "package_id": "QLIB_TA1_07SAU_STATIC_CLOSURE_PROOFPACK_20260527_153505",
+  "created_at_kst": "2026-05-27T15:35:05+09:00",
+  "package_type": "static_closure_proofpack",
+  "scope": {
+    "mode": "static_only",
+    "included_committed_report_artifact_count": 2,
+    "included_committed_report_artifacts": [
+      "reports/track_a/QLIB_TA1_07SAP_STATIC_EVIDENCE_CLOSURE_REPORT_20260527.md",
+      "reports/track_a/QLIB_TA1_07SAU_TRACK_A_STATIC_EVIDENCE_CLOSURE_HANDOFF_REPORT_20260527.md"
+    ],
+    "generated_package_files": [
+      "reports/track_a/QLIB_TA1_07SAU_STATIC_CLOSURE_PROOFPACK_MANIFEST_20260527_153505.json",
+      "reports/track_a/QLIB_TA1_07SAU_STATIC_CLOSURE_PROOFPACK_SUMMARY_20260527_153505.md"
+    ],
+    "excluded": [
+      "runtime execution",
+      "server startup",
+      "HTTP or network requests",
+      "database actions",
+      "old dirty worktree inspection",
+      "secret content inspection",
+      "approval claims",
+      "release claims"
+    ]
+  },
+  "repository_state_before_generation": {
+    "worktree": "current repository root",
+    "git_status_short": "clean",
+    "head_commit": "f5fd9902a10a567606cc72a4184d7219c99527a4",
+    "head_subject": "T-A1-07SAU materialize Track A static evidence closure handoff"
+  },
+  "governance_boundaries": {
+    "runtime_server_http_db_actions": "NOT_EXECUTED",
+    "old_dirty_worktree_inspection": "NOT_EXECUTED",
+    "secret_content_inspection_for_package": "NOT_EXECUTED",
+    "approval_or_release_claims": "NOT_GRANTED",
+    "runtime_pass": "NOT_GRANTED",
+    "bridge_smoke_pass": "NOT_GRANTED",
+    "bridge_functional_200_pass": "NOT_GRANTED",
+    "track_a_pass": "NOT_GRANTED",
+    "beta_pass": "NOT_GRANTED",
+    "f13_pass": "NOT_GRANTED",
+    "deployment_release_final_approval": "NOT_GRANTED"
+  },
+  "hashing": {
+    "algorithm": "SHA256",
+    "hash_scope": "Only the two included committed report artifact files were hashed."
+  },
+  "artifacts": [
+    {
+      "artifact_id": "QLIB_TA1_07SAP_STATIC_EVIDENCE_CLOSURE_REPORT_20260527",
+      "artifact_kind": "committed_report",
+      "path": "reports/track_a/QLIB_TA1_07SAP_STATIC_EVIDENCE_CLOSURE_REPORT_20260527.md",
+      "git_tracked": true,
+      "last_commit": {
+        "hash": "86bee5a6748ac748cac2e25ea94d390065670a04",
+        "date": "2026-05-27 09:22:54 +0900",
+        "subject": "T-A1-07SAP materialize static evidence closure report"
+      },
+      "size_bytes": 5145,
+      "sha256": "6553467D454F2CB71F456B47DE06C03F46FFCC44C637CF3DE907267B05EC2350",
+      "artifact_state_within_this_manifest": "PROOFPACKED"
+    },
+    {
+      "artifact_id": "QLIB_TA1_07SAU_TRACK_A_STATIC_EVIDENCE_CLOSURE_HANDOFF_REPORT_20260527",
+      "artifact_kind": "committed_report",
+      "path": "reports/track_a/QLIB_TA1_07SAU_TRACK_A_STATIC_EVIDENCE_CLOSURE_HANDOFF_REPORT_20260527.md",
+      "git_tracked": true,
+      "last_commit": {
+        "hash": "f5fd9902a10a567606cc72a4184d7219c99527a4",
+        "date": "2026-05-27 09:39:18 +0900",
+        "subject": "T-A1-07SAU materialize Track A static evidence closure handoff"
+      },
+      "size_bytes": 5607,
+      "sha256": "344C482C7F41F0B2506F192305568CDDD517A738FD0D1E9E4D00B33698442196",
+      "artifact_state_within_this_manifest": "PROOFPACKED"
+    }
+  ],
+  "static_verification_evidence": [
+    {
+      "command": "git status --short",
+      "result": "clean before generation"
+    },
+    {
+      "command": "git ls-files --error-unmatch <two report paths>",
+      "result": "both report artifacts are tracked"
+    },
+    {
+      "command": "Get-FileHash -Algorithm SHA256 -LiteralPath <two report paths>",
+      "result": "hashes recorded in this manifest"
+    },
+    {
+      "command": "Get-Item -LiteralPath <two report paths> | Select-Object Name,Length,LastWriteTime",
+      "result": "byte sizes recorded in this manifest"
+    },
+    {
+      "command": "git log -1 --format=<hash date subject> -- <each report path>",
+      "result": "per-artifact last commits recorded in this manifest"
+    }
+  ],
+  "manifest_status": {
+    "state": "DRAFT",
+    "reason": "Generated in the working tree and not committed or separately reviewed yet.",
+    "next_handling": "Review, then commit or reject without making release or approval claims."
+  }
+}
