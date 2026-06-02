@@ -35,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.staticfiles import StaticFiles
+from admin.f13_bridge_api import router as f13_bridge_router
 
 # === DB KPI helpers (optional; safe fallback) ================================
 try:
@@ -461,6 +462,7 @@ def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(authorize)):
     return {"ok": True, "gate_required": cfg["gate_required"]}
 
 app.include_router(ready_router)
+app.include_router(f13_bridge_router)
 # === READY/SSOT PATCH END ===================================================
 # ---------------------------------------------------------------------------
 # Paths / Constants
