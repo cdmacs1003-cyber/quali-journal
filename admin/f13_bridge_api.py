@@ -23,6 +23,11 @@ from admin.f13_runtime_guard import (
     project_bridge_safe_evidence,
     validate_human_redacted_preflight_replay_evidence,
 )
+from admin.f13_skillup_bridge import (
+    skillup_answer_from_bridge_response,
+    skillup_answer_from_request,
+    skillup_feedback_queue_item_from_hold,
+)
 
 
 router = APIRouter(prefix="/api/f13/bridge", tags=["f13-bridge"])
@@ -131,6 +136,15 @@ class BridgeTraceExplainResponse(BaseModel):
     raw_text_included: bool
     internal_path_included: bool
     created_at: str
+
+
+class SkillupBridgeAnswerRequest(BaseModel):
+    bridge_response: Optional[Dict[str, Any]] = None
+    request_payload: Optional[Dict[str, Any]] = None
+    requester_module: str = "Skillup"
+
+    class Config:
+        extra = "allow"
 
 
 
@@ -337,6 +351,36 @@ def _bounded_preflight_validation_reason(validation: Dict[str, Any]) -> str:
     return f"redacted preflight replay evidence requires review{code_suffix}"
 
 
+def _safe_skillup_pointer_uri(value: object) -> Optional[str]:
+    pointer = _safe_label(value, max_length=200)
+    if pointer is None or not pointer.startswith("pointer://"):
+        return None
+    lowered = pointer.lower()
+    if any(marker in lowered for marker in ("file://", "h:\\", "c:\\", "localhost", "127.0.0.1")):
+        return None
+    return pointer
+
+
+def _skillup_bridge_response_payload(request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    bridge_response = request_payload.get("bridge_response")
+    if isinstance(bridge_response, dict):
+        return dict(bridge_response)
+    if any(
+        key in request_payload
+        for key in ("result_status", "evidence_items", "hold_reason", "feedback_candidate_required")
+    ):
+        return dict(request_payload)
+    return {}
+
+
+def _without_pass_claim_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in {"f13_pass", "track_a_pass", "beta_pass"}
+    }
+
+
 def _preflight_validation_gate_response(request_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     redacted_evidence = request_payload.get(_REDACTED_PREFLIGHT_REPLAY_EVIDENCE_FIELD)
     if redacted_evidence is None:
@@ -397,6 +441,35 @@ def _response(
         },
         "created_at": _created_at(),
     }
+
+
+@router.post("/skillup/bridge-answer")
+def skillup_bridge_answer(payload: SkillupBridgeAnswerRequest) -> Dict[str, Any]:
+    request_payload = _model_to_dict(payload)
+    bridge_payload = _skillup_bridge_response_payload(request_payload)
+    if bridge_payload:
+        helper_result = skillup_answer_from_bridge_response(bridge_payload)
+    else:
+        helper_result = skillup_answer_from_request(request_payload.get("request_payload") or request_payload)
+
+    response = _without_pass_claim_fields(dict(helper_result))
+    response["created_at"] = _created_at()
+
+    if response.get("result_status") == RESULT_OK:
+        evidence_items = bridge_payload.get("evidence_items") or []
+        if evidence_items and isinstance(evidence_items[0], dict):
+            pointer_uri = _safe_skillup_pointer_uri(evidence_items[0].get("pointer_uri"))
+            if pointer_uri is not None:
+                response["pointer_uri"] = pointer_uri
+        return response
+
+    queue_source = {
+        **response,
+        "origin_module": request_payload.get("requester_module") or "Skillup",
+        "origin_event_id": request_payload.get("origin_event_id") or response.get("bridge_trace_id"),
+    }
+    response["feedback_queue_item"] = skillup_feedback_queue_item_from_hold(queue_source)
+    return response
 
 
 @router.post("/retrieve-evidence", response_model=BridgeEvidenceResponse)
@@ -678,4 +751,6 @@ __all__ = [
     "BridgePolicyCheckResponse",
     "BridgeTraceExplainRequest",
     "BridgeTraceExplainResponse",
+    "SkillupBridgeAnswerRequest",
+    "skillup_bridge_answer",
 ]
