@@ -19,6 +19,7 @@
 | release board reference | reports/track_a/proofpack/release_board_reference.md | GENERATED_CANDIDATE |
 | rollback note | reports/track_a/proofpack/rollback.md | GENERATED_CANDIDATE |
 | SHA256 sums | reports/track_a/proofpack/SHA256SUMS.txt | GENERATED_CANDIDATE |
+| ICD-G1 F13 spec completion artifact | ImplementationCompletion/F13/F13_library_auto_intake_and_curation_v0.1.md | REFERENCED_AND_HASHED |
 
 ## 3. Status preservation
 - Actual ProofPack generation: EXECUTED_CANDIDATE_FILES_ONLY
@@ -40,3 +41,13 @@ See `reports/track_a/proofpack/SHA256SUMS.txt`.
 - Git staging: NOT_EXECUTED
 - Git commit: NOT_EXECUTED
 - Canonical repository state: NOT_CANONICAL_UNTIL_COMMITTED
+
+## 6. ICD-G1 F13 Spec Reference
+- Update gate: 07SOU_R5
+- Completion gate: ICD-G1 F13 Spec Materialized
+- Artifact path: ImplementationCompletion/F13/F13_library_auto_intake_and_curation_v0.1.md
+- Artifact state: CANONICAL_COMPLETION_SPEC_CANDIDATE / COMMITTED / REFERENCED_AND_HASHED
+- SHA256: CB1375DD6DA394F433B7B01E26A65E9125C533F929761DDE73AA685A9A35CD9A
+- F13 PASS: NOT_GRANTED
+- Track A PASS: NOT_GRANTED
+- Beta PASS: NOT_GRANTED
