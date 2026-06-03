@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qlib:f13:schema:evidence-pointer:0.1",
+  "title": "F13 Evidence Pointer Schema",
+  "description": "Materialized ICD-G2 schema for safe evidence location, rights status, use policy, and summary metadata.",
+  "type": "object",
+  "required": [
+    "evidence_id",
+    "source_doc_id",
+    "source_doc_kind",
+    "source_hash",
+    "source_span_id",
+    "clause_ref",
+    "page_ref",
+    "section_ref",
+    "pointer_uri",
+    "rights_status",
+    "raw_text_policy",
+    "excerpt_policy",
+    "evidence_summary",
+    "created_at",
+    "created_by",
+    "validation_shape_ids"
+  ],
+  "properties": {
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^evidence:[A-Za-z0-9._:-]+$"
+    },
+    "source_doc_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_doc_kind": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "REFERENCE",
+        "WAREHOUSE_ITEM",
+        "FEEDBACK",
+        "FIELD_CASE",
+        "QA_CASE"
+      ]
+    },
+    "source_hash": {
+      "type": "string",
+      "pattern": "^(sha256:)?[A-Fa-f0-9]{64}$"
+    },
+    "source_span_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clause_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "page_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "section_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "pointer_uri": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Safe pointer URI; raw source content is not embedded."
+    },
+    "rights_status": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "LICENSED",
+        "RESTRICTED",
+        "UNKNOWN",
+        "DENIED"
+      ]
+    },
+    "raw_text_policy": {
+      "type": "string",
+      "enum": [
+        "POINTER_ONLY",
+        "SAFE_SUMMARY_ONLY",
+        "SAFE_SHORT_EXCERPT",
+        "DENIED"
+      ]
+    },
+    "excerpt_policy": {
+      "type": "object",
+      "required": [
+        "max_chars",
+        "allow_direct_quote",
+        "allow_summary",
+        "allow_pointer_only"
+      ],
+      "properties": {
+        "max_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "allow_direct_quote": {
+          "type": "boolean"
+        },
+        "allow_summary": {
+          "type": "boolean"
+        },
+        "allow_pointer_only": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validation_shape_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^SH-F13-[A-Z]+-[0-9]{3}$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

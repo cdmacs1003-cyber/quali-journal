@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qlib:f13:schema:shape-catalog-mapping:0.1",
+  "title": "F13 Shape Catalog Mapping Schema",
+  "description": "Materialized ICD-G2 schema for mapping F13 governance rules to JSON Schema or shape validation records.",
+  "type": "object",
+  "required": [
+    "shape_id",
+    "schema_artifact",
+    "contract_family",
+    "governing_rule",
+    "shape_rule",
+    "failure_status",
+    "required_fields",
+    "prohibited_fields",
+    "source_basis",
+    "validation_target",
+    "severity",
+    "proofpack_reference_required",
+    "version"
+  ],
+  "properties": {
+    "shape_id": {
+      "type": "string",
+      "enum": [
+        "SH-F13-INTAKE-001",
+        "SH-F13-SUGGEST-001",
+        "SH-F13-CURATION-001",
+        "SH-F13-EVIDENCE-001",
+        "SH-F13-TRACE-001",
+        "SH-F13-BRIDGE-001",
+        "SH-F13-SKILLUP-001",
+        "SH-F13-FEEDBACK-001",
+        "SH-F13-OVERLAY-001",
+        "SH-F13-ROLLBACK-001"
+      ]
+    },
+    "schema_artifact": {
+      "type": "string",
+      "pattern": "^ImplementationCompletion/F13/schemas/[a-z0-9_]+\\.schema\\.json$"
+    },
+    "contract_family": {
+      "type": "string",
+      "enum": [
+        "Intake Candidate",
+        "Auto Suggestion",
+        "Curation Decision",
+        "Evidence Pointer",
+        "Evidence Response",
+        "Feedback Queue Item",
+        "Shape Catalog Mapping",
+        "Bridge Boundary",
+        "Skillup Answer",
+        "Quarantine Rollback"
+      ]
+    },
+    "governing_rule": {
+      "type": "string",
+      "minLength": 1
+    },
+    "shape_rule": {
+      "type": "string",
+      "minLength": 1
+    },
+    "failure_status": {
+      "type": "string",
+      "enum": [
+        "HOLD",
+        "NOT_EXECUTED",
+        "NOT_VERIFIED",
+        "CURATION_REQUIRED",
+        "QUARANTINED",
+        "DENIED"
+      ]
+    },
+    "required_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "prohibited_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "raw_text",
+          "raw_prompt",
+          "raw_query",
+          "full_source_text",
+          "internal_path",
+          "local_filesystem_path",
+          "secret_like_value",
+          "token",
+          "key",
+          "credential",
+          "dsn"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "source_basis": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "section"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "enum": [
+              "ImplementationCompletion/F13/F13_library_auto_intake_and_curation_v0.1.md",
+              "ONTOLOGY_SEMANTIC_WORKFLOW_ENHANCEMENT_GUIDEBOOK_20260516_v1_0_FINAL.md"
+            ]
+          },
+          "section": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "validation_target": {
+      "type": "string",
+      "enum": [
+        "WAREHOUSE_INTAKE",
+        "AUTO_SUGGESTION",
+        "CURATION",
+        "BRIDGE_RESPONSE",
+        "SKILLUP_FEEDBACK",
+        "SHAPE_REGISTRY",
+        "PROOFPACK_REFERENCE"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "BLOCKER",
+        "REVIEW_REQUIRED",
+        "INFO"
+      ]
+    },
+    "proofpack_reference_required": {
+      "type": "boolean"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^v?[0-9]+\\.[0-9]+(\\.[0-9]+)?$"
+    }
+  },
+  "additionalProperties": false
+}

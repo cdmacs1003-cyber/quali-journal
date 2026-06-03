@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qlib:f13:schema:feedback-queue-item:0.1",
+  "title": "F13 Feedback Queue Item Schema",
+  "description": "Materialized ICD-G2 schema for Skillup, Bridge, Q&A, HOLD, wrong-link, or training-confusion feedback returning to the warehouse queue.",
+  "type": "object",
+  "required": [
+    "feedback_id",
+    "origin_module",
+    "origin_event_id",
+    "feedback_type",
+    "user_visible_text_policy",
+    "linked_answer_id",
+    "linked_evidence_id",
+    "suspected_issue",
+    "proposed_candidate_type",
+    "current_status",
+    "created_at",
+    "reviewed_by",
+    "dedup_key",
+    "duplicate_count",
+    "duplicate_action"
+  ],
+  "properties": {
+    "feedback_id": {
+      "type": "string",
+      "pattern": "^fb:[A-Za-z0-9._:-]+$"
+    },
+    "origin_module": {
+      "type": "string",
+      "enum": [
+        "SKILLUP",
+        "BRIDGE",
+        "CURATION",
+        "WAREHOUSE",
+        "LIBRARY",
+        "TEST_REVIEW"
+      ]
+    },
+    "origin_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "feedback_type": {
+      "type": "string",
+      "enum": [
+        "QUESTION_GAP",
+        "EVIDENCE_GAP",
+        "TERM_CONFUSION",
+        "WRONG_LINK",
+        "HOLD_CASE",
+        "TRAINING_CONFUSION",
+        "STANDARD_UPDATE_NEEDED"
+      ]
+    },
+    "user_visible_text_policy": {
+      "type": "string",
+      "enum": [
+        "POINTER_ONLY",
+        "SAFE_SUMMARY_ONLY",
+        "NO_RAW_TEXT",
+        "INTERNAL_REVIEW_ONLY"
+      ]
+    },
+    "linked_answer_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "linked_evidence_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^evidence:[A-Za-z0-9._:-]+$"
+    },
+    "suspected_issue": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "MISSING_EVIDENCE",
+          "RIGHTS_REVIEW_REQUIRED",
+          "RAW_TEXT_RISK",
+          "WRONG_LINK",
+          "TERM_CONFUSION",
+          "TRACE_MISSING",
+          "SCHEMA_MISMATCH",
+          "DB_ACCESS_BLOCKED",
+          "HOLD_REASON_REQUIRED"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "proposed_candidate_type": {
+      "type": "string",
+      "enum": [
+        "standard_clause",
+        "reference_excerpt",
+        "tacit_knowledge",
+        "field_case",
+        "qa_case",
+        "failure_record",
+        "education_seed",
+        "overlay_rule_candidate",
+        "term_candidate",
+        "relation_candidate"
+      ]
+    },
+    "current_status": {
+      "type": "string",
+      "enum": [
+        "NEW",
+        "DEDUPED",
+        "CURATOR_REVIEW",
+        "RESOLVED",
+        "QUARANTINED",
+        "REJECTED"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reviewed_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "dedup_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "duplicate_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "duplicate_action": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "increment_count",
+          "append_event",
+          "do_not_create_new_candidate"
+        ]
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

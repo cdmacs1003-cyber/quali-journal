@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qlib:f13:schema:curation-decision:0.1",
+  "title": "F13 Curation Decision Schema",
+  "description": "Materialized ICD-G2 schema for curator approval, rejection, hold, rights review, domain review, or quarantine decisions.",
+  "type": "object",
+  "required": [
+    "decision_id",
+    "candidate_id",
+    "reviewer_id",
+    "reviewed_at",
+    "decision",
+    "decision_reason",
+    "accepted_suggestions",
+    "rejected_suggestions",
+    "required_followups",
+    "approval_record_id",
+    "proofpack_id"
+  ],
+  "properties": {
+    "decision_id": {
+      "type": "string",
+      "pattern": "^decision:[A-Za-z0-9._:-]+$"
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^candidate:[A-Za-z0-9._:-]+$"
+    },
+    "reviewer_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reviewed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "APPROVE_WAREHOUSE",
+        "APPROVE_LIBRARY_PROMOTION",
+        "REQUEST_MORE_EVIDENCE",
+        "REQUEST_RIGHTS_REVIEW",
+        "REQUEST_DOMAIN_REVIEW",
+        "REJECT",
+        "QUARANTINE"
+      ]
+    },
+    "decision_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "accepted_suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "suggestion_path",
+          "accepted_value"
+        ],
+        "properties": {
+          "suggestion_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "accepted_value": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "rejected_suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "suggestion_path",
+          "rejection_reason"
+        ],
+        "properties": {
+          "suggestion_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rejection_reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "required_followups": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "MORE_EVIDENCE",
+          "RIGHTS_REVIEW",
+          "DOMAIN_REVIEW",
+          "QUARANTINE_REVIEW",
+          "ROLLBACK_REVIEW",
+          "PROOFPACK_REFERENCE"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "approval_record_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^approval:[A-Za-z0-9._:-]+$"
+    },
+    "proofpack_id": {
+      "type": "string",
+      "pattern": "^proof:[A-Za-z0-9._:-]+$"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "APPROVE_LIBRARY_PROMOTION"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "approval_record_id": {
+            "type": "string",
+            "pattern": "^approval:[A-Za-z0-9._:-]+$"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qlib:f13:schema:evidence-response:0.1",
+  "title": "F13 Bridge Evidence Response Schema",
+  "description": "Materialized ICD-G2 schema for safe Bridge evidence responses with pointer metadata only.",
+  "type": "object",
+  "required": [
+    "result_status",
+    "evidence_items",
+    "hold_reason",
+    "policy_reason",
+    "feedback_candidate_required",
+    "raw_text_included",
+    "internal_path_included",
+    "db_access_executed"
+  ],
+  "properties": {
+    "result_status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "HOLD",
+        "DENIED"
+      ]
+    },
+    "evidence_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "bridge_trace_id",
+          "safe_summary",
+          "pointer_uri",
+          "raw_text_policy",
+          "rights_status",
+          "source_doc_kind",
+          "validation_shape_ids"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "^evidence:[A-Za-z0-9._:-]+$"
+          },
+          "bridge_trace_id": {
+            "type": "string",
+            "pattern": "^btrace:[A-Za-z0-9._:-]+$"
+          },
+          "safe_summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pointer_uri": {
+            "type": "string",
+            "minLength": 1
+          },
+          "raw_text_policy": {
+            "type": "string",
+            "enum": [
+              "POINTER_ONLY",
+              "SAFE_SUMMARY_ONLY",
+              "SAFE_SHORT_EXCERPT",
+              "DENIED"
+            ]
+          },
+          "rights_status": {
+            "type": "string",
+            "enum": [
+              "PUBLIC",
+              "INTERNAL",
+              "LICENSED",
+              "RESTRICTED",
+              "UNKNOWN",
+              "DENIED"
+            ]
+          },
+          "source_doc_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "STANDARD",
+              "REFERENCE",
+              "WAREHOUSE_ITEM",
+              "FEEDBACK",
+              "FIELD_CASE",
+              "QA_CASE",
+              null
+            ]
+          },
+          "validation_shape_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^SH-F13-[A-Z]+-[0-9]{3}$"
+            },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "hold_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "policy_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "feedback_candidate_required": {
+      "type": "boolean"
+    },
+    "raw_text_included": {
+      "const": false
+    },
+    "internal_path_included": {
+      "const": false
+    },
+    "db_access_executed": {
+      "const": false
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "result_status": {
+            "enum": [
+              "HOLD",
+              "DENIED"
+            ]
+          }
+        },
+        "required": [
+          "result_status"
+        ]
+      },
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "hold_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "policy_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

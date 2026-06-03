@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qlib:f13:schema:intake-candidate:0.1",
+  "title": "F13 Intake Candidate Schema",
+  "description": "Materialized ICD-G2 schema for a warehouse intake candidate before curator review or library promotion.",
+  "type": "object",
+  "required": [
+    "candidate_id",
+    "candidate_type",
+    "source_kind",
+    "source_title",
+    "source_uri_or_path",
+    "source_hash",
+    "text_hash",
+    "source_span",
+    "language",
+    "rights_status",
+    "sensitivity",
+    "submitted_by",
+    "submitted_at",
+    "current_status",
+    "auto_suggestion_id",
+    "curation_decision_id",
+    "proofpack_id",
+    "validation_shape_ids"
+  ],
+  "properties": {
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^candidate:[A-Za-z0-9._:-]+$",
+      "description": "Stable identifier for the intake candidate."
+    },
+    "candidate_type": {
+      "type": "string",
+      "enum": [
+        "standard_clause",
+        "reference_excerpt",
+        "tacit_knowledge",
+        "field_case",
+        "qa_case",
+        "failure_record",
+        "education_seed",
+        "overlay_rule_candidate",
+        "term_candidate",
+        "relation_candidate"
+      ],
+      "description": "Candidate class from the F13 intake contract."
+    },
+    "source_kind": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "REFERENCE",
+        "WAREHOUSE_ITEM",
+        "FEEDBACK",
+        "FIELD_CASE",
+        "QA_CASE",
+        "TRAINING_MATERIAL",
+        "OVERLAY_RULE",
+        "TERM_REGISTRY",
+        "RELATION_RECORD"
+      ],
+      "description": "Source family used to route review and rights handling."
+    },
+    "source_title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_uri_or_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Pointer to the source under intake controls; this schema does not authorize Bridge response exposure."
+    },
+    "source_hash": {
+      "type": "string",
+      "pattern": "^(sha256:)?[A-Fa-f0-9]{64}$"
+    },
+    "text_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^(sha256:)?[A-Fa-f0-9]{64}$"
+    },
+    "source_span": {
+      "type": "object",
+      "required": [
+        "start",
+        "end",
+        "text_excerpt_policy"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "minLength": 1
+        },
+        "end": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text_excerpt_policy": {
+          "type": "string",
+          "enum": [
+            "POINTER_ONLY",
+            "SAFE_SHORT_EXCERPT",
+            "SAFE_SUMMARY_ONLY",
+            "DENIED"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "language": {
+      "type": "string",
+      "enum": [
+        "ko",
+        "en",
+        "mixed",
+        "unknown"
+      ]
+    },
+    "rights_status": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "LICENSED",
+        "RESTRICTED",
+        "UNKNOWN",
+        "DENIED"
+      ]
+    },
+    "sensitivity": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "CONFIDENTIAL",
+        "CUSTOMER_CONFIDENTIAL",
+        "SECRET_LIKE"
+      ]
+    },
+    "submitted_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "submitted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "current_status": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "AUTO_SUGGESTED",
+        "CURATION_REQUIRED",
+        "APPROVED_FOR_WAREHOUSE",
+        "APPROVED_FOR_LIBRARY",
+        "REJECTED",
+        "QUARANTINED"
+      ]
+    },
+    "auto_suggestion_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^suggestion:[A-Za-z0-9._:-]+$"
+    },
+    "curation_decision_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^decision:[A-Za-z0-9._:-]+$"
+    },
+    "proofpack_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^proof:[A-Za-z0-9._:-]+$"
+    },
+    "validation_shape_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^SH-F13-[A-Z]+-[0-9]{3}$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}
