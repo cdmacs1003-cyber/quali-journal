@@ -51,9 +51,12 @@ def test_course_library_binding_safe_ok_contract():
             "course_id": "course:diagnostic-1",
             "module_id": "module:diagnostic-1",
             "evidence_id": "ev:diagnostic-1",
+            "approval_record_id": "approval:diagnostic-1",
             "bridge_trace_id": "btrace:diagnostic-1",
+            "current_status": "APPROVED_FOR_LIBRARY",
             "rights_status": "PUBLIC",
             "raw_text_policy": "SUMMARY_ONLY",
+            "validation_shape_ids": ["SH-F13-CURATION-001"],
         }
     )
 

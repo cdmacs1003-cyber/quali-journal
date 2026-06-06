@@ -285,6 +285,17 @@ def decide_bridge_result(
     if bool(evidence.get("direct_db_access_attempt")) and str(requester_module).lower() == "skillup":
         return _decision(RESULT_DENIED, "direct DB access is denied for Bridge-only Skillup requests")
 
+    current_status = _safe_token(evidence.get("current_status"))
+    purpose_token = _safe_token(purpose)
+    requester_token = _safe_token(requester_module)
+    search_exposure_requested = (
+        purpose_token == "SEARCH_EXPOSURE"
+        or requester_token == "SEARCH"
+        or _positive(evidence.get("search_exposure_requested"))
+    )
+    if current_status == "QUARANTINED" and search_exposure_requested:
+        return _decision(RESULT_HOLD, "QUARANTINED evidence is not available for search exposure")
+
     if _is_missing(evidence.get("evidence_id")):
         return _decision(RESULT_HOLD, "missing evidence_id")
     if _is_missing(evidence.get("safe_summary")):

@@ -13,6 +13,7 @@ CREATED_AT = "1970-01-01T00:00:00Z"
 
 _DENIED_RIGHTS = {"DENIED", "RESTRICTED", "PRIVATE", "PROPRIETARY"}
 _HOLD_RIGHTS = {"", "UNKNOWN", "NOT_VERIFIED"}
+_LIBRARY_BINDABLE_STATUS = "APPROVED_FOR_LIBRARY"
 _UNSAFE_FIELD_MARKERS = (
     "raw_text",
     "raw_prompt",
@@ -79,6 +80,18 @@ def _normal_rights(value: Any) -> str:
     return str(value or "UNKNOWN").strip().upper() or "UNKNOWN"
 
 
+def _normal_status(value: Any) -> str:
+    return str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def _has_shape_pass(source: Mapping[str, Any]) -> bool:
+    shape_ids = source.get("validation_shape_ids")
+    if isinstance(shape_ids, list | tuple | set):
+        return any(_safe_token(item, "") for item in shape_ids)
+    shape_status = _normal_status(source.get("shape_validation_status") or source.get("shape_status"))
+    return shape_status == "PASS" or source.get("shape_pass") is True
+
+
 def _feedback_queue_item(
     *,
     course_id: str,
@@ -121,6 +134,9 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
     )
     rights_status = _normal_rights(source.get("rights_status"))
     raw_text_policy = _safe_token(source.get("raw_text_policy"), RAW_TEXT_POLICY_SUMMARY_ONLY)
+    current_status = _normal_status(source.get("current_status"))
+    approval_ref = _safe_token(source.get("approval_record_id"), "", max_length=120)
+    shape_pass = _has_shape_pass(source)
     binding_id = f"binding:{_stable_digest(course_id, module_ref, evidence_ref, bridge_trace_id)}"
 
     base = {
@@ -157,6 +173,18 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
         status = RESULT_HOLD
         issue = "rights_status requires review before Skillup use"
         feedback_type = "RIGHTS_POLICY_REVIEW"
+    elif current_status != _LIBRARY_BINDABLE_STATUS:
+        status = RESULT_HOLD
+        issue = "course_library_binding requires APPROVED_FOR_LIBRARY status before Skillup use"
+        feedback_type = "STATE_TRANSITION_REVIEW"
+    elif not approval_ref:
+        status = RESULT_HOLD
+        issue = "course_library_binding requires approval_record_id before Skillup use"
+        feedback_type = "APPROVAL_GAP"
+    elif not shape_pass:
+        status = RESULT_HOLD
+        issue = "course_library_binding requires shape PASS evidence before Skillup use"
+        feedback_type = "SHAPE_VALIDATION_GAP"
     else:
         return {
             **base,
