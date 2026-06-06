@@ -28,32 +28,32 @@ The committed Gap Map implementation remains intentionally conservative: `admin/
 | ProofPack manifest | reports/track_a/proofpack/manifest.md | tracked; records current ProofPack candidate references | no final approval |
 | SHA256SUMS | reports/track_a/proofpack/SHA256SUMS.txt | tracked; records current repository-local hashes | hash record only |
 
-## 3. Gap Map closure interpretation
+## 3. Gap Map Closure Matrix
 
-ICD-G3 Gap Map Closed means the Gap Map has no unclassified required F13 contract item in the closure evidence. It does not mean every later ICD gate is complete.
+This correction records the required Gap Map closure matrix vocabulary. It does not close ICD-G3 by itself.
 
-The committed Gap Map contract requires open or review-required items to remain explicit when any F13 completion condition is missing, not executed, or not verified. Therefore, ICD-G3 closure is satisfied by a complete disposition map that:
+The committed Gap Map contract requires open or review-required items to remain explicit when any F13 completion condition is missing, not executed, or not verified. Therefore, a future ICD-G3 closure review requires a complete disposition map that:
 
 1. enumerates the required F13 contracts;
 2. maps each contract to committed evidence or a named later gate;
 3. preserves open items as `NOT_EXECUTED`, `NOT_VERIFIED`, or `NOT_GRANTED`;
 4. avoids escalation to F13 PASS, Track A PASS, Beta PASS, deployment, release, production readiness, or full regression safety.
 
-## 4. Required F13 contract disposition
+Allowed dispositions for this matrix are `RESOLVED_BY_COMMITTED_EVIDENCE`, `HELD_FOR_LATER_GATE`, `DEFERRED_WITH_REASON`, and `NOT_APPLICABLE_WITH_REASON`.
 
-| Required contract | Gap Map disposition | Evidence | Limitation carried forward |
-|---|---|---|---|
-| F13_SPEC_MATERIALIZED | EVIDENCE_CLASSIFIED | ImplementationCompletion/F13/F13_library_auto_intake_and_curation_v0.1.md is tracked, referenced, and hash-recorded | does not grant F13 PASS |
-| JSON_SCHEMAS_MATERIALIZED | EVIDENCE_CLASSIFIED | seven ImplementationCompletion/F13/schemas/*.schema.json artifacts are tracked, referenced, and hash-recorded | semantic adequacy remains review-bound |
-| GAP_MAP_MATERIALIZED | EVIDENCE_CLASSIFIED | admin/f13_gap_map.py and admin/tests/test_f13_gap_map.py are tracked, referenced, and hash-recorded | selected no-DB/in-memory only |
-| BRIDGE_BOUNDARY_ENFORCED | EVIDENCE_CLASSIFIED_HELD_FOR_LATER_GATE | selected Track A/F13 evidence snapshot records bounded bridge evidence | production/runtime breadth not proved here |
-| EVIDENCE_REQUIRED_ENFORCED | EVIDENCE_CLASSIFIED_HELD_FOR_LATER_GATE | selected evidence snapshot records retrieve-evidence contract evidence | production DB behavior not proved here |
-| RAW_LEAK_ENFORCED | EVIDENCE_CLASSIFIED_HELD_FOR_LATER_GATE | selected evidence snapshot records negative raw leak policy evidence | production raw leak safety remains NOT_VERIFIED |
-| FEEDBACK_LOOP_ENFORCED | EVIDENCE_CLASSIFIED_HELD_FOR_LATER_GATE | selected evidence snapshot records Skillup HOLD feedback and Feedback Queue Item evidence | DB-backed persistence remains NOT_EXECUTED / NOT_VERIFIED |
-| PROOFPACK_MANIFEST_PRESENT | EVIDENCE_CLASSIFIED | reports/track_a/proofpack/manifest.md is tracked and hash-recorded | candidate references only; no final approval |
-| RELEASE_BOARD_PRESENT | EVIDENCE_CLASSIFIED_HELD_FOR_LATER_GATE | selected evidence snapshot records Beta Release Board selected tests | release readiness remains NOT_GRANTED |
-| GATE_RESULTS_PRESENT | EVIDENCE_CLASSIFIED | reports/track_a/proofpack/gate_results.md is tracked and hash-recorded | selected no-DB evidence only |
-| FINAL_APPROVAL_RECORDED | EXPLICITLY_OPEN_FOR_ICD_G12 | admin/f13_gap_map.py and selected tests preserve FINAL_APPROVAL_NOT_RECORDED | final approval remains NOT_GRANTED / NOT_VERIFIED |
+| Gap item | F13 contract expectation | Current committed evidence | Disposition | Reason | Later gate if held |
+|---|---|---|---|---|---|
+| F13_SPEC_MATERIALIZED | F13 completion spec exists and is repository committed | ImplementationCompletion/F13/F13_library_auto_intake_and_curation_v0.1.md is tracked, ProofPack referenced, and hash-recorded | RESOLVED_BY_COMMITTED_EVIDENCE | Committed spec evidence exists; this does not grant F13 PASS | N/A |
+| JSON_SCHEMAS_MATERIALIZED | ICD-G2 schema artifacts exist and are repository committed | Seven ImplementationCompletion/F13/schemas/*.schema.json artifacts are tracked, ProofPack referenced, and hash-recorded | RESOLVED_BY_COMMITTED_EVIDENCE | Committed schema artifacts exist; semantic adequacy remains review-bound outside this ICD-G3 item | N/A |
+| GAP_MAP_MATERIALIZED | Gap Map contract and selected tests exist | admin/f13_gap_map.py and admin/tests/test_f13_gap_map.py are tracked, referenced, and hash-recorded | RESOLVED_BY_COMMITTED_EVIDENCE | Committed no-DB/in-memory Gap Map contract and selected tests exist | N/A |
+| BRIDGE_BOUNDARY_ENFORCED | Bridge boundary behavior is classified in evidence | Selected Track A/F13 evidence snapshot records bounded bridge evidence | HELD_FOR_LATER_GATE | Production/runtime breadth is not proved by this artifact | Later bridge runtime verification gate; required future evidence: committed runtime boundary verification evidence |
+| EVIDENCE_REQUIRED_ENFORCED | Retrieve-evidence requirement behavior is classified in evidence | Selected evidence snapshot records retrieve-evidence contract evidence | HELD_FOR_LATER_GATE | Production DB behavior is not proved by this artifact | Later DB behavior verification gate; required future evidence: committed DB-backed retrieve-evidence verification |
+| RAW_LEAK_ENFORCED | Raw leak policy behavior is classified in evidence | Selected evidence snapshot records negative raw leak policy evidence | HELD_FOR_LATER_GATE | Production raw leak safety remains NOT_VERIFIED | Later production raw leak safety gate; required future evidence: committed production-scope raw leak verification |
+| FEEDBACK_LOOP_ENFORCED | Skillup HOLD feedback behavior is classified in evidence | Selected evidence snapshot records Skillup HOLD feedback and Feedback Queue Item evidence | HELD_FOR_LATER_GATE | DB-backed persistence remains NOT_EXECUTED / NOT_VERIFIED | Later feedback persistence gate; required future evidence: committed DB-backed feedback persistence verification |
+| PROOFPACK_MANIFEST_PRESENT | ProofPack manifest reference exists | reports/track_a/proofpack/manifest.md is tracked and hash-recorded | RESOLVED_BY_COMMITTED_EVIDENCE | Committed ProofPack reference surface exists; it does not grant final approval | N/A |
+| RELEASE_BOARD_PRESENT | Beta Release Board evidence is classified | Selected evidence snapshot records Beta Release Board selected tests | HELD_FOR_LATER_GATE | Release readiness remains NOT_GRANTED | Later release readiness gate; required future evidence: committed release approval and readiness evidence |
+| GATE_RESULTS_PRESENT | Gate results evidence exists | reports/track_a/proofpack/gate_results.md is tracked and hash-recorded | RESOLVED_BY_COMMITTED_EVIDENCE | Committed selected no-DB gate result evidence exists | N/A |
+| FINAL_APPROVAL_RECORDED | Final approval must be explicitly recorded before final closure | admin/f13_gap_map.py and selected tests preserve FINAL_APPROVAL_NOT_RECORDED | HELD_FOR_LATER_GATE | Final approval remains NOT_GRANTED / NOT_VERIFIED | ICD-G12 final approval gate; required future evidence: committed final approval record |
 
 ## 5. Open item preservation
 
@@ -73,7 +73,8 @@ The committed Gap Map contract requires open or review-required items to remain 
 | Claim | Status |
 |---|---|
 | ICD-G3 Gap Map Closed evidence artifact | MATERIALIZED_FOR_POST_COMMIT_VERIFICATION |
-| ICD-G3 final closure | NOT_GRANTED / NOT_VERIFIED until post-commit and closure review |
+| ICD-G3 Gap Map Closed | NOT_GRANTED_PENDING_POST_CORRECTION_VERIFICATION |
+| ICD-G3 final closure | NOT_GRANTED / NOT_VERIFIED until post-correction verification and closure review |
 | F13 PASS | NOT_GRANTED |
 | Track A PASS | NOT_GRANTED |
 | Beta PASS | NOT_GRANTED |
@@ -83,6 +84,20 @@ The committed Gap Map contract requires open or review-required items to remain 
 | Full regression safety | NOT_VERIFIED |
 | Production raw leak safety | NOT_VERIFIED |
 | Production DB behavior | NOT_EXECUTED / NOT_VERIFIED |
+
+Required boundary statements:
+
+```text
+F13 PASS = NOT_GRANTED
+Track A PASS = NOT_GRANTED
+Beta PASS = NOT_GRANTED
+Deployment = NOT_GRANTED
+Release = NOT_GRANTED
+DB behavior = NOT_VERIFIED
+Runtime behavior = NOT_VERIFIED
+HTTP behavior = NOT_VERIFIED
+Full regression = NOT_EXECUTED
+```
 
 ## 7. Boundary compliance
 
@@ -123,7 +138,7 @@ This statement is evidence for ICD-G3 closure review only. It is not a release a
 Expected next bounded task:
 
 ```text
-T-A1-07SOU_R4_ICD_G3_GAP_MAP_CLOSED_EVIDENCE_POST_COMMIT_VERIFICATION_ONLY
+T-A1-07SOU_R8B_ICD_G3_GAP_MAP_CLOSURE_ARTIFACT_CONTRACT_CORRECTION_POST_COMMIT_VERIFICATION_ONLY
 ```
 
-After post-commit verification, a separate ProofPack reference/hash update task is still required before this artifact can be treated as ProofPack-referenced.
+After this correction is committed, a separate post-commit verification task is still required before this artifact can support an ICD-G3 closure decision.
