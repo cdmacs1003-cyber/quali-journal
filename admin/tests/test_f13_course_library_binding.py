@@ -126,6 +126,29 @@ def test_course_library_binding_unknown_rights_blocks_skillup_use():
     _assert_no_pass_escalation(result)
 
 
+def test_course_library_binding_warehouse_status_blocks_skillup_canonical_use():
+    result = bind_course_library_reference(
+        {
+            "course_id": "course:diagnostic-1",
+            "module_id": "module:diagnostic-1",
+            "library_node_id": "lib:diagnostic-1",
+            "evidence_id": "ev:diagnostic-1",
+            "approval_record_id": "approval:diagnostic-1",
+            "bridge_trace_id": "btrace:diagnostic-1",
+            "current_status": "APPROVED_FOR_WAREHOUSE",
+            "rights_status": "PUBLIC",
+            "raw_text_policy": "SUMMARY_ONLY",
+            "validation_shape_ids": ["SH-F13-CURATION-001"],
+        }
+    )
+
+    assert result["binding_status"] in {"DENIED", "HOLD"}
+    assert result["skillup_use_allowed"] is False
+    assert result["feedback_candidate_required"] is True
+    _assert_no_raw_internal_or_secret_surface(result)
+    _assert_no_pass_escalation(result)
+
+
 def test_course_library_binding_dedup_key_stable_for_missing_evidence():
     payload = {
         "course_id": "course:diagnostic-1",

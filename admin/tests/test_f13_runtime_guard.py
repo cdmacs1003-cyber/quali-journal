@@ -414,3 +414,15 @@ def test_tc31_redacted_preflight_helper_has_no_db_subprocess_environment_or_file
         "dotenv",
     }
     assert names.isdisjoint(forbidden_names)
+
+
+def test_tc32_quarantined_search_exposure_returns_hold_or_denied():
+    evidence = _base_evidence(
+        current_status="QUARANTINED",
+        source_doc_kind="library_item",
+        search_exposure_requested=True,
+    )
+
+    result = decide_bridge_result(evidence, requester_module="Search", purpose="search_exposure")
+
+    assert result["result_status"] in {RESULT_HOLD, RESULT_DENIED}
