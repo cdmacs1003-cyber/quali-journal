@@ -27,6 +27,7 @@
 | ICD-G2 evidence response schema artifact | ImplementationCompletion/F13/schemas/evidence_response.schema.json | REFERENCED_AND_HASHED |
 | ICD-G2 feedback queue item schema artifact | ImplementationCompletion/F13/schemas/feedback_queue_item.schema.json | REFERENCED_AND_HASHED |
 | ICD-G2 shape catalog mapping schema artifact | ImplementationCompletion/F13/schemas/shape_catalog_mapping.schema.json | REFERENCED_AND_HASHED |
+| ICD-G3 Gap Map Closed evidence artifact | ImplementationCompletion/F13/F13_gap_map_closed_evidence.md | REFERENCED_AND_HASHED |
 
 ## 3. Status preservation
 - Actual ProofPack generation: EXECUTED_CANDIDATE_FILES_ONLY
@@ -78,6 +79,21 @@ See `reports/track_a/proofpack/SHA256SUMS.txt`.
 - Shape Catalog Mapping schema: ImplementationCompletion/F13/schemas/shape_catalog_mapping.schema.json
   - SHA256: 8422BD5C60BFAC3954083012F084BE95DB783528F96868393B08E3FD77108690
 - ICD-G2 closed: NOT_GRANTED / NOT_VERIFIED
+- F13 PASS: NOT_GRANTED
+- Track A PASS: NOT_GRANTED
+- Beta PASS: NOT_GRANTED
+
+## 8. ICD-G3 Gap Map Closed Evidence Reference
+- Update gate: 07SOU_R6
+- Evidence type: ICD-G3 Gap Map Closed evidence
+- Artifact path: ImplementationCompletion/F13/F13_gap_map_closed_evidence.md
+- Artifact state: COMMITTED / STATIC_EVIDENCE_ONLY / REFERENCED_AND_HASHED
+- SHA256: 31DCB69383EFB506DB0ACFD0E7532AA8B84C06431FA14375693AF92CCE6F8D38
+- Runtime execution: NOT_EXECUTED / NOT_VERIFIED
+- DB access: NOT_EXECUTED / NOT_VERIFIED
+- External HTTP: NOT_EXECUTED / NOT_VERIFIED
+- Full regression: NOT_EXECUTED / NOT_VERIFIED
+- ICD-G3 closure: NOT_GRANTED
 - F13 PASS: NOT_GRANTED
 - Track A PASS: NOT_GRANTED
 - Beta PASS: NOT_GRANTED
