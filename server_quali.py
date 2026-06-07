@@ -99,6 +99,52 @@ class FlowKwReq(BaseModel):
     keyword: str
     use_external_rss: bool = False
 
+class StatusData(BaseModel):
+    selected: int
+    approved: int
+    published: int
+    gate_required: int
+    ts: int
+    selection_total: int
+    selection_approved: int
+    state_counts: Dict[str, int]
+    community_total: int
+    keyword_total: int
+    gate_pass: bool
+    date: Optional[str] = None
+    keyword: str = ""
+    total: int | None = None
+    ready_count: int | None = None
+    ready_rate: float | None = None
+
+class ItemsData(BaseModel):
+    date: Optional[str] = None
+    keyword: Optional[str] = None
+    state: str
+    items: List[Dict[str, Any]]
+
+class GateConfigData(BaseModel):
+    gate_required: int
+
+class ReportData(BaseModel):
+    op: str
+    path: str
+    count: int
+    duration_ms: int
+
+class TasksFlowData(BaseModel):
+    job_id: str
+    status: str
+    kind: str
+    args: List[Any]
+
+class ReviewApproveReq(BaseModel):
+    reviewer_id: str = Field(..., description="Reviewer ID")
+
+class ReviewTestInitReq(BaseModel):
+    standard_id: str = Field(default="TEST-STD-1", description="Test standard ID")
+    reset: bool = Field(default=False, description="Reset review queue before seeding")
+
 # ---------------------------------------------------------------------------
 # Optional JWT utils (safe fallbacks if module missing)
 # ---------------------------------------------------------------------------
@@ -276,8 +322,12 @@ def download_archive(path: str, request: Request):
     """
     _auth_header_or_qs_ok(request)  # 헤더 우선, ?token 허용
 
+    raw = path.lstrip("/\\")
+    if raw.startswith(("archive/", "archive\\")):
+        raw = raw[len("archive/"):]
+
     base = (ARCHIVE_CLOUD if IS_CLOUD else (BASE / "archive")).resolve()
-    full = (base / path).resolve()
+    full = (base / raw).resolve()
 
     # 경로 이탈 방지(../../ 차단)
     if not str(full).startswith(str(base)) or not full.is_file():
@@ -450,6 +500,65 @@ def _write_json(p: Path, obj: dict):
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
+
+def _reviews_file() -> Path:
+    return ROOT / "logs" / "standard_reviews.json"
+
+def _load_reviews() -> List[Dict[str, Any]]:
+    obj = _read_json(_reviews_file())
+    if isinstance(obj, list):
+        return [x for x in obj if isinstance(x, dict)]
+    if isinstance(obj, dict):
+        raw = obj.get("items") or obj.get("review_tasks") or []
+        if isinstance(raw, list):
+            return [x for x in raw if isinstance(x, dict)]
+    return []
+
+def _save_reviews(items: List[Dict[str, Any]]) -> None:
+    _write_json(
+        _reviews_file(),
+        {
+            "items": items,
+            "updated_at": int(time.time()),
+        },
+    )
+
+def _normalize_review_task(task: Dict[str, Any], standard_id: Optional[str] = None) -> Dict[str, Any]:
+    item = dict(task or {})
+    if standard_id:
+        item.setdefault("standard_id", standard_id)
+    if not item.get("standard_id") and isinstance(item.get("item"), dict):
+        item["standard_id"] = item["item"].get("id")
+
+    item["decision"] = str(item.get("decision") or "HOLD").upper()
+    item["status"] = str(item.get("status") or "HOLD").upper()
+
+    try:
+        required_reviewers = int(item.get("required_reviewers", 2))
+    except Exception:
+        required_reviewers = 2
+    item["required_reviewers"] = max(1, required_reviewers)
+
+    approved_by = item.get("approved_by")
+    if isinstance(approved_by, list):
+        item["approved_by"] = [str(x) for x in approved_by]
+    elif approved_by is None:
+        item["approved_by"] = []
+    else:
+        item["approved_by"] = [str(approved_by)]
+
+    item.setdefault("reason_short", "")
+    log = item.get("log", [])
+    if not isinstance(log, list):
+        log = [log]
+    item["log"] = log
+    return item
+
+def _find_review_index(items: List[Dict[str, Any]], standard_id: str) -> Optional[int]:
+    for idx, item in enumerate(items):
+        if str(item.get("standard_id")) == str(standard_id):
+            return idx
+    return None
 
 def _slug_kw(s: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in (s or "")).strip("-").upper()
@@ -867,11 +976,179 @@ async def stream_task(job_id: str, request: Request):
 async def get_gate_required(authorized: bool = Depends(authorize)):
     return {"gate_required": int(GATE.get("gate_required", 15))}
 
+@app.get("/api/ready/config/gate_required")
+async def get_ready_gate_required(authorized: bool = Depends(authorize)):
+    return {"gate_required": int(GATE.get("gate_required", 15))}
+
 @app.patch("/api/config/gate_required")
 async def set_gate_required(p: GatePatch, authorized: bool = Depends(authorize)):
     v = max(1, min(100, int(p.gate_required)))  # 1~100 clamp
     GATE["gate_required"] = v
     return {"ok": True, "gate_required": v}
+
+# ---------------------------------------------------------------------------
+# Standards reviews compatibility API - protected
+# ---------------------------------------------------------------------------
+@app.get("/api/standards/reviews")
+def api_standards_reviews_list(
+    status: Optional[str] = Query(None),
+    decision: Optional[str] = Query(None),
+    authorized: bool = Depends(authorize),
+):
+    status_filter = (status or "").strip().upper()
+    decision_filter = (decision or "").strip().upper()
+    items = [_normalize_review_task(item) for item in _load_reviews()]
+
+    def _matches(item: Dict[str, Any]) -> bool:
+        if status_filter and str(item.get("status", "")).upper() != status_filter:
+            return False
+        if decision_filter and str(item.get("decision", "")).upper() != decision_filter:
+            return False
+        return True
+
+    filtered = [item for item in items if _matches(item)]
+    return JSONResponse(
+        {
+            "ok": True,
+            "name": "standards_reviews_list",
+            "data": {
+                "count": len(filtered),
+                "items": filtered,
+            },
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+@app.post("/api/standards/reviews/{standard_id}/approve")
+def api_standards_reviews_approve(
+    standard_id: str,
+    req: ReviewApproveReq,
+    authorized: bool = Depends(authorize),
+):
+    reviewer = str(req.reviewer_id or "").strip()
+    if not reviewer:
+        raise HTTPException(status_code=400, detail="reviewer_id required")
+
+    items = [_normalize_review_task(item) for item in _load_reviews()]
+    idx = _find_review_index(items, standard_id)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="review task not found")
+
+    task = items[idx]
+    if reviewer not in task["approved_by"]:
+        task["approved_by"].append(reviewer)
+
+    if task.get("status") == "HOLD" and len(task["approved_by"]) >= int(task.get("required_reviewers", 2)):
+        task["status"] = "REVIEWED"
+
+    task["log"].append({
+        "ts": int(time.time()),
+        "event": "approve",
+        "reviewer_id": reviewer,
+    })
+    items[idx] = task
+    _save_reviews(items)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "name": "standards_reviews_approve",
+            "data": {"review_task": task},
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+@app.post("/api/standards/reviews/{standard_id}/publish")
+def api_standards_reviews_publish(
+    standard_id: str,
+    authorized: bool = Depends(authorize),
+):
+    items = [_normalize_review_task(item) for item in _load_reviews()]
+    idx = _find_review_index(items, standard_id)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="review task not found")
+
+    task = items[idx]
+    status_now = str(task.get("status", "HOLD")).upper()
+    if status_now not in ("REVIEWED", "PUBLISHED"):
+        raise HTTPException(status_code=409, detail="review task not reviewed")
+
+    if status_now != "PUBLISHED":
+        task["status"] = "PUBLISHED"
+        task["decision"] = "PASS"
+        task["log"].append({
+            "ts": int(time.time()),
+            "event": "publish",
+        })
+        items[idx] = task
+        _save_reviews(items)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "name": "standards_reviews_publish",
+            "data": {"review_task": task},
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+@app.post("/api/standards/reviews/test/init")
+def api_standards_reviews_test_init(
+    req: ReviewTestInitReq,
+    authorized: bool = Depends(authorize),
+):
+    standard_id = (req.standard_id or "TEST-STD-1").strip() or "TEST-STD-1"
+    items = [] if req.reset else [_normalize_review_task(item) for item in _load_reviews()]
+    idx = _find_review_index(items, standard_id)
+    if idx is not None:
+        task = _normalize_review_task(items[idx], standard_id=standard_id)
+        items[idx] = task
+        _save_reviews(items)
+        return {
+            "ok": True,
+            "name": "standards_reviews_test_init",
+            "data": {
+                "review_task": task,
+                "created": False,
+                "reset": req.reset,
+            },
+        }
+
+    now = int(time.time())
+    task = _normalize_review_task(
+        {
+            "standard_id": standard_id,
+            "status": "HOLD",
+            "decision": "HOLD",
+            "required_reviewers": 2,
+            "approved_by": [],
+            "reason_short": "[TEST] standards review state-machine card",
+            "item": {
+                "id": standard_id,
+                "title": "[TEST] Standards review state-machine card",
+                "url": "https://example.com/qualijournal/test-standard",
+            },
+            "log": [
+                {
+                    "ts": now,
+                    "event": "init_test_task",
+                    "by": "system",
+                }
+            ],
+        },
+        standard_id=standard_id,
+    )
+    items.append(task)
+    _save_reviews(items)
+    return {
+        "ok": True,
+        "name": "standards_reviews_test_init",
+        "data": {
+            "review_task": task,
+            "created": True,
+            "reset": req.reset,
+        },
+    }
 
 # ---------------------------------------------------------------------------
 # Report / Enrich / Export — protected
@@ -1081,6 +1358,18 @@ def export_csv_alias(authorized: bool = Depends(authorize)):
 # Tools runner (repair / approve_top) — protected
 # ---------------------------------------------------------------------------
 
+def _tools_ok(rc: int, sync_log: dict | None, stderr: str | None) -> bool:
+    sync_ok = bool((sync_log or {}).get("ok"))
+    stderr_text = (stderr or "").lower()
+
+    if rc == 0:
+        return True
+
+    if rc == 127 and sync_ok and "not found" in stderr_text:
+        return True
+
+    return False
+
 @app.post("/api/tools/repair")
 def api_tools_repair(authorized: bool = Depends(authorize)):
     """
@@ -1089,9 +1378,9 @@ def api_tools_repair(authorized: bool = Depends(authorize)):
     - 실행 로그와 성공 여부를 반환
     """
     rc, out, err = _run_py("repair_selection_files.py", [])
-    ok = (rc == 0)
     # 실행 후 발행본 싱크 보강(있으면 내부 스크립트가 수행하지만, 안전하게 한 번 더)
     sync = _sync_after_save()
+    ok = _tools_ok(rc, sync, err)
     return {
         "ok": ok,
         "rc": rc,
@@ -1109,8 +1398,8 @@ def api_tools_approve_top(n: int = Query(20, ge=1, le=100), authorized: bool = D
     - 처리 후 발행본을 동기화
     """
     rc, out, err = _run_py("force_approve_top20.py", ["--top", str(n)])
-    ok = (rc == 0)
     sync = _sync_after_save()  # 스크립트가 싱크하더라도 안전하게 최종 보정
+    ok = _tools_ok(rc, sync, err)
     return {
         "ok": ok,
         "rc": rc,
