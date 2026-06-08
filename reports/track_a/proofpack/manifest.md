@@ -28,6 +28,7 @@
 | ICD-G2 feedback queue item schema artifact | ImplementationCompletion/F13/schemas/feedback_queue_item.schema.json | REFERENCED_AND_HASHED |
 | ICD-G2 shape catalog mapping schema artifact | ImplementationCompletion/F13/schemas/shape_catalog_mapping.schema.json | REFERENCED_AND_HASHED |
 | ICD-G3 Gap Map Closed evidence artifact | ImplementationCompletion/F13/F13_gap_map_closed_evidence.md | REFERENCED_AND_HASHED |
+| R9ZAG admin tests compatibility source repair | server_quali.py | REFERENCED_AND_HASHED |
 
 ## 3. Status preservation
 - Actual ProofPack generation: EXECUTED_CANDIDATE_FILES_ONLY
@@ -97,3 +98,31 @@ See `reports/track_a/proofpack/SHA256SUMS.txt`.
 - F13 PASS: NOT_GRANTED
 - Track A PASS: NOT_GRANTED
 - Beta PASS: NOT_GRANTED
+
+## 9. R9ZAG Admin Tests Compatibility Source Repair Reference
+- Update gate: T-A1-07SOU_R9ZAI_PROOFPACK_SHA256SUMS_UPDATE_EXECUTION_ONLY
+- Source repair task: T-A1-07SOU_R9ZAG close admin tests compatibility gaps
+- Source commit SHA: c6af3defd85f8396baa8fd1f3f45e1208e88c974
+- Source commit subject: T-A1-07SOU_R9ZAG close admin tests compatibility gaps
+- Source commit parent: 276f4fdc2b623f051696fc9fa0cca45c418db7b9
+- Committed source file scope: server_quali.py only
+- Commit content summary: 1 file changed, 350 insertions(+), 61 deletions(-)
+- Artifact path: server_quali.py
+- Artifact state: COMMITTED / STATIC_COMPATIBILITY_REPAIR / REFERENCED_AND_HASHED
+- SHA256: 47D48D680C47937E5EF360EB525C16E672335B416B617AB90C7E911F3C4E9D84
+- Admin API schema validation: EXECUTED_PASS
+- Ready config targeted validation: EXECUTED_PASS
+- Standards reviews selected-scope validation: EXECUTED_PASS_SELECTED_SCOPE_ONLY
+- Archive route selected-scope validation: EXECUTED_PASS_SELECTED_SCOPE_ONLY
+- Tools quick selected-scope validation: EXECUTED_PASS_SELECTED_SCOPE_ONLY
+- Bounded admin/tests regression: EXECUTED_PASS_BOUND_ADMIN_TESTS_ONLY
+- Pytest summary: 122 passed, 1 skipped, 9 warnings, no failures
+- Generated/deferred artifact cleanup: EXECUTED_PASS_EXACT_TWO_GENERATED_ARTIFACTS_ONLY
+- Runtime/server behavior: NOT_EXECUTED
+- DB behavior: NOT_VERIFIED beyond approved test-local behavior
+- External requests: NOT_VERIFIED
+- Tag/push/deploy: NOT_EXECUTED / NOT_GRANTED
+- F13 PASS: NOT_GRANTED
+- Track A PASS: NOT_GRANTED
+- Beta PASS: NOT_GRANTED
+- Deployment/release: NOT_GRANTED
