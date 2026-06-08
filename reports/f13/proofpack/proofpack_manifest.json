@@ -1,0 +1,87 @@
+{
+  "proofpack_id": "F13_R9ZAY_BOUNDED_PROOFPACK",
+  "sequence_id": "T-A1-07SOU_R9ZAY",
+  "repository": "H:\\a\\퀄리저널_track_a_clean_standalone",
+  "branch": "track-a-07s-static-closure-proofpack",
+  "head": {
+    "commit": "656a496",
+    "subject": "T-A1-07SOU_R9ZAQ materialize approved governance docs"
+  },
+  "parent": {
+    "commit": "574bd9a",
+    "subject": "T-A1-07SOU_R9ZAI update proofpack checksums for R9ZAG"
+  },
+  "generated_at": "2026-06-08T19:26:28.4896782+09:00",
+  "evidence_files": [
+    {
+      "path": "reports/f13/proofpack/evidence_index.md",
+      "role": "evidence_index",
+      "sha256": "A592F21704421FFC76F358C3D6DF69FE6B9EEF8E79049FC7AC69AD40C5FDA16A"
+    },
+    {
+      "path": "reports/f13/proofpack/test_results.md",
+      "role": "selected_test_results",
+      "sha256": "4277ADC666292038F4607442F2BC54484B611158B34325E9DFA9EC5AF9EE0DDB"
+    },
+    {
+      "path": "reports/f13/proofpack/runtime_smoke.md",
+      "role": "bounded_local_runtime_smoke",
+      "sha256": "864AF18B3AE9239EB4AA2BD61B8E0538D839E4CAA6B52AD5AD7B02E1FF3AE27A"
+    },
+    {
+      "path": "reports/f13/proofpack/schema_shape_evidence.md",
+      "role": "schema_shape_static_evidence",
+      "sha256": "15DFE6435FAED9CF50802CF57C9E3B540E0574B6457CF752E9D61A1B4E700173"
+    },
+    {
+      "path": "reports/f13/proofpack/f13_boundary_declaration.md",
+      "role": "boundary_declaration",
+      "sha256": "705DE40152D3BA3814E843C0799AD393CD214CA461E9B6D2BFB8B2D28ABB825F"
+    },
+    {
+      "path": "reports/f13/proofpack/non_escalation.md",
+      "role": "non_escalation",
+      "sha256": "6BFBC92DFBFE16CD6D260CCDFED34DD69487A749257011DDC508FACC9940A49F"
+    }
+  ],
+  "status_register": {
+    "RUNTIME_SERVER_BEHAVIOR": "EXECUTED_PASS_BOUND_LOCAL_RUNTIME_SMOKE_ONLY",
+    "DB_BEHAVIOR": "NOT_VERIFIED_BEYOND_TEST_LOCAL",
+    "EXTERNAL_REQUEST_BEHAVIOR": "NOT_VERIFIED_EXTERNAL_NETWORK_NOT_ALLOWED",
+    "TAG": "NOT_EXECUTED",
+    "PUSH": "NOT_EXECUTED",
+    "DEPLOYMENT_RELEASE": "NOT_GRANTED",
+    "F13_PASS": "NOT_GRANTED",
+    "TRACK_A_PASS": "NOT_GRANTED",
+    "BETA_PASS": "NOT_GRANTED"
+  },
+  "boundary_register": {
+    "scope": "bounded F13 ProofPack hash / manifest verification only",
+    "tests_rerun": false,
+    "server_runtime_executed": false,
+    "http_requests_sent": false,
+    "db_verification_performed": false,
+    "external_network_requests_made": false,
+    "git_write_action_performed": false,
+    "release_granted": false,
+    "f13_pass_granted": false
+  },
+  "non_escalation_register": {
+    "product_pass": false,
+    "f13_pass": false,
+    "track_a_pass": false,
+    "beta_pass": false,
+    "release_pass": false,
+    "tag_push_deploy_approval": false,
+    "production_db_verified": false,
+    "external_network_verified": false
+  },
+  "sha256_entries": {
+    "reports/f13/proofpack/evidence_index.md": "A592F21704421FFC76F358C3D6DF69FE6B9EEF8E79049FC7AC69AD40C5FDA16A",
+    "reports/f13/proofpack/test_results.md": "4277ADC666292038F4607442F2BC54484B611158B34325E9DFA9EC5AF9EE0DDB",
+    "reports/f13/proofpack/runtime_smoke.md": "864AF18B3AE9239EB4AA2BD61B8E0538D839E4CAA6B52AD5AD7B02E1FF3AE27A",
+    "reports/f13/proofpack/schema_shape_evidence.md": "15DFE6435FAED9CF50802CF57C9E3B540E0574B6457CF752E9D61A1B4E700173",
+    "reports/f13/proofpack/f13_boundary_declaration.md": "705DE40152D3BA3814E843C0799AD393CD214CA461E9B6D2BFB8B2D28ABB825F",
+    "reports/f13/proofpack/non_escalation.md": "6BFBC92DFBFE16CD6D260CCDFED34DD69487A749257011DDC508FACC9940A49F"
+  }
+}
