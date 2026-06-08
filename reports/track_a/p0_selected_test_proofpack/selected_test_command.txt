@@ -1,0 +1,25 @@
+Packet: T-A1-07SOU_R9ZBK_TRACK_A_P0_SELECTED_TEST_EXECUTION_APPROVAL_PACKET
+Evidence source: accepted terminal/session evidence
+Materialized by: T-A1-07SOU_R9ZBM_TRACK_A_P0_SELECTED_TEST_PROOFPACK_MATERIALIZATION_APPROVAL_PACKET
+
+PowerShell environment:
+$env:PYTHONDONTWRITEBYTECODE='1'
+$bt='C:\Users\user\AppData\Local\Temp\qlib_r9zbk_pytest_d1fb8b45e7ff40d49fd20e14505952d8'
+
+Selected pytest command:
+python -B -m pytest -q admin/tests/test_f13_bridge_api.py admin/tests/test_f13_runtime_guard.py admin/tests/test_f13_bridge_contract_regression.py admin/tests/test_f13_bridge_evidence_response_schema.py admin/tests/test_f13_skillup_bridge_runtime_wiring.py admin/tests/test_skillup_bridge_hold_feedback.py admin/tests/test_f13_course_library_binding.py admin/tests/test_f13_beta_release_board.py --basetemp $bt -p no:cacheprovider
+
+Execution mode:
+- selected pytest only
+- local process only
+- no pytest cache provider
+- no Python bytecode generation requested
+- temp output outside repository
+- no manual server start
+- no manual HTTP smoke
+- no external network
+- no production DB
+- no git write
+
+Accepted result:
+76 passed, 5 warnings

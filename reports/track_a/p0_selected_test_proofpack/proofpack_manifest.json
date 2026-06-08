@@ -1,0 +1,112 @@
+{
+  "manifest_version": "1.0",
+  "packet_id": "T-A1-07SOU_R9ZBM_TRACK_A_P0_SELECTED_TEST_PROOFPACK_MATERIALIZATION_APPROVAL_PACKET",
+  "created_at_kst": "2026-06-08T22:40:31+09:00",
+  "repository": "H:\\a\\퀄리저널_track_a_clean_standalone",
+  "branch": "track-a-07s-static-closure-proofpack",
+  "head_at_materialization_start": "655ba6c T-A1-07SOU_R9ZBG add R9ZBB handover document",
+  "parent": "2af1fe2 T-A1-07SOU_R9ZAZ commit bounded F13 proofpack",
+  "evidence_source": "accepted terminal/session evidence from T-A1-07SOU_R9ZBK_TRACK_A_P0_SELECTED_TEST_EXECUTION_APPROVAL_PACKET",
+  "prior_result": {
+    "R9ZBK_RESULT": "APPROVE_SELECTED_TEST_EXECUTION_ONLY",
+    "SELECTED_P0_TESTS": "EXECUTED_PASS_76_PASSED_5_WARNINGS",
+    "warnings": [
+      "1 Starlette PendingDeprecationWarning for python_multipart import path",
+      "4 Pydantic deprecation warnings for class-based config"
+    ],
+    "worktree_before": "clean",
+    "worktree_after": "clean",
+    "changed_files": "none"
+  },
+  "selected_test_command": {
+    "python_bytecode_generation": "disabled by PYTHONDONTWRITEBYTECODE=1 and python -B",
+    "pytest_cache": "disabled by -p no:cacheprovider",
+    "basetemp": "C:\\Users\\user\\AppData\\Local\\Temp\\qlib_r9zbk_pytest_d1fb8b45e7ff40d49fd20e14505952d8",
+    "command": "python -B -m pytest -q admin/tests/test_f13_bridge_api.py admin/tests/test_f13_runtime_guard.py admin/tests/test_f13_bridge_contract_regression.py admin/tests/test_f13_bridge_evidence_response_schema.py admin/tests/test_f13_skillup_bridge_runtime_wiring.py admin/tests/test_skillup_bridge_hold_feedback.py admin/tests/test_f13_course_library_binding.py admin/tests/test_f13_beta_release_board.py --basetemp $bt -p no:cacheprovider"
+  },
+  "selected_test_files": [
+    "admin/tests/test_f13_bridge_api.py",
+    "admin/tests/test_f13_runtime_guard.py",
+    "admin/tests/test_f13_bridge_contract_regression.py",
+    "admin/tests/test_f13_bridge_evidence_response_schema.py",
+    "admin/tests/test_f13_skillup_bridge_runtime_wiring.py",
+    "admin/tests/test_skillup_bridge_hold_feedback.py",
+    "admin/tests/test_f13_course_library_binding.py",
+    "admin/tests/test_f13_beta_release_board.py"
+  ],
+  "p0_axes": [
+    "Bridge Runtime MVP",
+    "Skillup answer/HOLD flow",
+    "course_library_binding",
+    "raw leak / policy block",
+    "feedback queue",
+    "Beta Release Board"
+  ],
+  "proofpack_files": [
+    "reports/track_a/p0_selected_test_proofpack/selected_test_results.md",
+    "reports/track_a/p0_selected_test_proofpack/selected_test_command.txt",
+    "reports/track_a/p0_selected_test_proofpack/selected_test_scope.md",
+    "reports/track_a/p0_selected_test_proofpack/evidence_index.md",
+    "reports/track_a/p0_selected_test_proofpack/non_escalation.md",
+    "reports/track_a/p0_selected_test_proofpack/rollback_note.md",
+    "reports/track_a/p0_selected_test_proofpack/SHA256SUMS",
+    "reports/track_a/p0_selected_test_proofpack/proofpack_manifest.json"
+  ],
+  "artifact_hashes_embedded_in_manifest": [
+    {
+      "path": "reports/track_a/p0_selected_test_proofpack/selected_test_results.md",
+      "sha256": "FDD2A8AF1DBC201413F4E49323F4AB8ED15F0AE15418E1A56DD92E70A4C03F19"
+    },
+    {
+      "path": "reports/track_a/p0_selected_test_proofpack/selected_test_command.txt",
+      "sha256": "74A85714D62566FF2E4E279019C17C0095A5560A48FF4531905ECD6FDB32271A"
+    },
+    {
+      "path": "reports/track_a/p0_selected_test_proofpack/selected_test_scope.md",
+      "sha256": "AF2AB4BF8DC5E439DA8073ACCAE3D4AA1C629265A8664D8F8E4485627FA8F763"
+    },
+    {
+      "path": "reports/track_a/p0_selected_test_proofpack/evidence_index.md",
+      "sha256": "015C9D77045BEDF669E29D746BD64DC4F696C09B8ABA7B1D6F6AFAA7DBE8E476"
+    },
+    {
+      "path": "reports/track_a/p0_selected_test_proofpack/non_escalation.md",
+      "sha256": "5F3316D47ACE096BF6D91F25A6B3C4CC573D30FB636839EAACA50D096C0143AA"
+    },
+    {
+      "path": "reports/track_a/p0_selected_test_proofpack/rollback_note.md",
+      "sha256": "1412D975315229564F63651A9A6ADD28013D9BDD1FAF9DB535971B500A667F66"
+    }
+  ],
+  "sha256sums_policy": {
+    "sha256sums_file": "reports/track_a/p0_selected_test_proofpack/SHA256SUMS",
+    "scope": "SHA256SUMS records the six evidence artifacts plus proofpack_manifest.json. SHA256SUMS self-hash is omitted from SHA256SUMS to avoid recursive hashing and may be reported separately."
+  },
+  "non_escalation": {
+    "F13_PASS": "GRANTED_BOUND_F13_PROOFPACK_ONLY",
+    "TRACK_A_PASS": "NOT_GRANTED",
+    "BETA_PASS": "NOT_GRANTED",
+    "RELEASE_PASS": "NOT_GRANTED",
+    "PRODUCT_PASS": "NOT_GRANTED",
+    "PRODUCTION_DB_PASS": "NOT_GRANTED",
+    "EXTERNAL_NETWORK_PASS": "NOT_GRANTED",
+    "TAG": "NOT_EXECUTED",
+    "PUSH": "NOT_EXECUTED",
+    "DEPLOYMENT_RELEASE": "NOT_GRANTED"
+  },
+  "r9zbm_non_execution": {
+    "tests": "NOT_EXECUTED",
+    "lint": "NOT_EXECUTED",
+    "build": "NOT_EXECUTED",
+    "server_runtime": "NOT_EXECUTED",
+    "http_requests": "NOT_EXECUTED",
+    "db_verification": "NOT_VERIFIED",
+    "production_db": "NOT_EXECUTED",
+    "external_network": "NOT_EXECUTED",
+    "git_add": "NOT_EXECUTED",
+    "git_commit": "NOT_EXECUTED",
+    "git_tag": "NOT_EXECUTED",
+    "git_push": "NOT_EXECUTED",
+    "deployment_release": "NOT_GRANTED"
+  }
+}
