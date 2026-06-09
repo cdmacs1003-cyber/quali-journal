@@ -1,0 +1,143 @@
+{
+  "manifest_version": "1.0",
+  "packet_id": "T-A1-07SOU_R9ZBT_TRACK_A_RAW_LEAK_BETA_GATE_PROOFPACK_MATERIALIZATION_APPROVAL_PACKET",
+  "created_at_kst": "2026-06-09T00:00:47+09:00",
+  "repository": "H:\\a\\퀄리저널_track_a_clean_standalone",
+  "branch": "track-a-07s-static-closure-proofpack",
+  "head_at_materialization_start": "016e6a3 T-A1-07SOU_R9ZBN commit Track A P0 selected test proofpack",
+  "parent": "655ba6c T-A1-07SOU_R9ZBG add R9ZBB handover document",
+  "grandparent": "2af1fe2 T-A1-07SOU_R9ZAZ commit bounded F13 proofpack",
+  "r9zbb_handover_sha256": "CF4F67FC5C6F5FF05E9996B3E425166386816D036ED9AED1155C2655ED32E409",
+  "evidence_source": "accepted terminal/session evidence from T-A1-07SOU_R9ZBR_TRACK_A_RAW_LEAK_BETA_GATE_APPROVAL_PACKET",
+  "prior_planning_packet": {
+    "packet_id": "T-A1-07SOU_R9ZBS_TRACK_A_RAW_LEAK_BETA_GATE_PROOFPACK_PLANNING_PACKET",
+    "result": "READY_FOR_TRACK_A_RAW_LEAK_BETA_GATE_PROOFPACK_MATERIALIZATION_PACKET"
+  },
+  "accepted_r9zbr_result": {
+    "R9ZBR_RESULT": "VERIFIED_WITH_LIMITS",
+    "RAW_LEAK_BETA_GATE": "PASS_BOUND_SELECTED_LOCAL_WITH_ROLE_MATRIX_LIMIT",
+    "BOUNDED_PYTEST_RESULT": "74_PASSED_5_WARNINGS",
+    "worktree_after": "clean",
+    "source_test_governance_modifications": "none",
+    "untracked_files_after": "none",
+    "proofpack_report_materialization": "NOT_EXECUTED"
+  },
+  "warning_register": {
+    "total_warnings": 5,
+    "warnings": [
+      {
+        "class": "python_multipart pending deprecation warning",
+        "count": 1,
+        "handling": "preserved; no source modification in R9ZBT"
+      },
+      {
+        "class": "Pydantic class-based config deprecation warning",
+        "count": 4,
+        "handling": "preserved; no source modification in R9ZBT"
+      }
+    ]
+  },
+  "raw_leak_findings": {
+    "paid_standard_raw_text_exposure": "PASS_BOUND_SELECTED_LOCAL",
+    "internal_repository_local_path_exposure": "PASS_BOUND_SELECTED_LOCAL",
+    "raw_prompt_storage_exposure": "PASS_BOUND_SELECTED_LOCAL",
+    "role_access_boundary": "VERIFIED_WITH_LIMITS",
+    "evidence_pointer_summary_only_behavior": "PASS_BOUND_SELECTED_LOCAL",
+    "fail_closed_policy_denial": "PASS_BOUND_SELECTED_LOCAL"
+  },
+  "role_matrix_limit": {
+    "role_access_boundary": "VERIFIED_WITH_LIMITS",
+    "full_beta_role_access_matrix": "NOT_VERIFIED",
+    "future_gate_required": true
+  },
+  "selected_test_command": {
+    "python_bytecode_generation": "disabled by PYTHONDONTWRITEBYTECODE=1 and python -B",
+    "pytest_cache": "disabled by -p no:cacheprovider",
+    "basetemp": "H:\\a\\_test_tmp\\R9ZBR",
+    "command": "python -B -m pytest -q admin/tests/test_f13_runtime_guard.py admin/tests/test_f13_bridge_api.py admin/tests/test_f13_bridge_contract_regression.py admin/tests/test_f13_bridge_check_policy_response_schema.py admin/tests/test_f13_bridge_evidence_response_schema.py admin/tests/test_f13_course_library_binding.py admin/tests/test_skillup_bridge_hold_feedback.py admin/tests/test_f13_skillup_bridge_runtime_wiring.py --basetemp \"H:\\a\\_test_tmp\\R9ZBR\" -p no:cacheprovider",
+    "executed_in_r9zbt": false
+  },
+  "selected_test_files": [
+    "admin/tests/test_f13_runtime_guard.py",
+    "admin/tests/test_f13_bridge_api.py",
+    "admin/tests/test_f13_bridge_contract_regression.py",
+    "admin/tests/test_f13_bridge_check_policy_response_schema.py",
+    "admin/tests/test_f13_bridge_evidence_response_schema.py",
+    "admin/tests/test_f13_course_library_binding.py",
+    "admin/tests/test_skillup_bridge_hold_feedback.py",
+    "admin/tests/test_f13_skillup_bridge_runtime_wiring.py"
+  ],
+  "proofpack_files": [
+    "reports/track_a/raw_leak_beta_gate_proofpack/raw_leak_beta_gate_results.md",
+    "reports/track_a/raw_leak_beta_gate_proofpack/raw_leak_beta_gate_command.txt",
+    "reports/track_a/raw_leak_beta_gate_proofpack/raw_leak_beta_gate_scope.md",
+    "reports/track_a/raw_leak_beta_gate_proofpack/role_matrix_limit.md",
+    "reports/track_a/raw_leak_beta_gate_proofpack/warnings_register.md",
+    "reports/track_a/raw_leak_beta_gate_proofpack/non_escalation.md",
+    "reports/track_a/raw_leak_beta_gate_proofpack/rollback_note.md",
+    "reports/track_a/raw_leak_beta_gate_proofpack/SHA256SUMS",
+    "reports/track_a/raw_leak_beta_gate_proofpack/proofpack_manifest.json"
+  ],
+  "artifact_hashes_embedded_in_manifest": [
+    {
+      "path": "reports/track_a/raw_leak_beta_gate_proofpack/raw_leak_beta_gate_results.md",
+      "sha256": "BBA16470E2C8311F8BEF78EA80B4265C66FAA3031BBA76A3D79053119E4C7962"
+    },
+    {
+      "path": "reports/track_a/raw_leak_beta_gate_proofpack/raw_leak_beta_gate_command.txt",
+      "sha256": "84480F75F94994635312AE92D8A7E1636A69FB9FC22B97D5330DABB5A2876D8D"
+    },
+    {
+      "path": "reports/track_a/raw_leak_beta_gate_proofpack/raw_leak_beta_gate_scope.md",
+      "sha256": "FED20540916CC3E4BF1E4AF5CB6DC4B61B49F85160DDCD96C5F53BD77FAED0B1"
+    },
+    {
+      "path": "reports/track_a/raw_leak_beta_gate_proofpack/role_matrix_limit.md",
+      "sha256": "BAC45EA0F536CB7161643BD0755F5E68CA25607C839E3EF0B868AD7F0BA8854E"
+    },
+    {
+      "path": "reports/track_a/raw_leak_beta_gate_proofpack/warnings_register.md",
+      "sha256": "CA334F2FA26CF464E51DA41CF5D606F4329D8AD9325E1957722B1EF0E1C956B3"
+    },
+    {
+      "path": "reports/track_a/raw_leak_beta_gate_proofpack/non_escalation.md",
+      "sha256": "F665E957C667FA6F77EBC39264B421813F2E930AAEB10F42C6581976F351769A"
+    },
+    {
+      "path": "reports/track_a/raw_leak_beta_gate_proofpack/rollback_note.md",
+      "sha256": "26ECA6E54A57F694EF78DC438B5074DEEDF32C4417D159E16F2E3810392564E7"
+    }
+  ],
+  "sha256sums_policy": {
+    "sha256sums_file": "reports/track_a/raw_leak_beta_gate_proofpack/SHA256SUMS",
+    "scope": "SHA256SUMS records the seven evidence artifacts plus proofpack_manifest.json. SHA256SUMS self-hash is omitted from SHA256SUMS to avoid recursive hashing and may be reported separately."
+  },
+  "non_escalation": {
+    "F13_PASS": "GRANTED_BOUND_F13_PROOFPACK_ONLY",
+    "TRACK_A_PASS": "NOT_GRANTED",
+    "BETA_PASS": "NOT_GRANTED",
+    "RELEASE_PASS": "NOT_GRANTED",
+    "PRODUCT_PASS": "NOT_GRANTED",
+    "PRODUCTION_DB_PASS": "NOT_GRANTED",
+    "EXTERNAL_NETWORK_PASS": "NOT_GRANTED",
+    "TAG": "NOT_EXECUTED",
+    "PUSH": "NOT_EXECUTED",
+    "DEPLOYMENT_RELEASE": "NOT_GRANTED"
+  },
+  "r9zbt_non_execution": {
+    "tests": "NOT_EXECUTED",
+    "lint": "NOT_EXECUTED",
+    "build": "NOT_EXECUTED",
+    "server_runtime": "NOT_EXECUTED",
+    "http_requests": "NOT_EXECUTED",
+    "db_verification": "NOT_VERIFIED",
+    "production_db": "NOT_EXECUTED",
+    "external_network": "NOT_EXECUTED",
+    "dependency_install": "NOT_EXECUTED",
+    "git_add": "NOT_EXECUTED",
+    "git_commit": "NOT_EXECUTED",
+    "git_tag": "NOT_EXECUTED",
+    "git_push": "NOT_EXECUTED",
+    "deployment_release": "NOT_GRANTED"
+  }
+}

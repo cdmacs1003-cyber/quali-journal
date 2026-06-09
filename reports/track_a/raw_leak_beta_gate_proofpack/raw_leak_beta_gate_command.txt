@@ -1,0 +1,18 @@
+Evidence source: accepted terminal/session evidence from T-A1-07SOU_R9ZBR_TRACK_A_RAW_LEAK_BETA_GATE_APPROVAL_PACKET
+
+Environment constraints:
+PYTHONDONTWRITEBYTECODE=1
+PYTEST_ADDOPTS=-p no:cacheprovider
+QLIB_R9ZBR_BASETEMP=H:\a\_test_tmp\R9ZBR
+
+Approved bounded command pattern:
+python -B -m pytest -q <exact tracked raw leak / policy / role / evidence test files only> --basetemp "H:\a\_test_tmp\R9ZBR" -p no:cacheprovider
+
+Accepted R9ZBR selected command:
+python -B -m pytest -q admin/tests/test_f13_runtime_guard.py admin/tests/test_f13_bridge_api.py admin/tests/test_f13_bridge_contract_regression.py admin/tests/test_f13_bridge_check_policy_response_schema.py admin/tests/test_f13_bridge_evidence_response_schema.py admin/tests/test_f13_course_library_binding.py admin/tests/test_skillup_bridge_hold_feedback.py admin/tests/test_f13_skillup_bridge_runtime_wiring.py --basetemp "H:\a\_test_tmp\R9ZBR" -p no:cacheprovider
+
+Accepted result:
+74 passed, 5 warnings
+
+R9ZBT did not execute this command.
+
