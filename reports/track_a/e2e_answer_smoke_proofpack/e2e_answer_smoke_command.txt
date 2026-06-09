@@ -1,0 +1,21 @@
+R9ZCB command evidence source:
+T-A1-07SOU_R9ZCB_TRACK_A_E2E_ANSWER_SMOKE_APPROVAL_PACKET terminal/session evidence
+
+Environment flags recorded from R9ZCB:
+$env:PYTHONDONTWRITEBYTECODE="1"
+$env:PYTEST_ADDOPTS="-p no:cacheprovider"
+$env:QLIB_R9ZCB_BASETEMP="H:\a\_test_tmp\R9ZCB"
+
+Exact bounded local command recorded from R9ZCB:
+python -B -m pytest -q admin/tests/test_skillup_bridge_hold_feedback.py admin/tests/test_f13_skillup_bridge_runtime_wiring.py admin/tests/test_f13_bridge_evidence_response_schema.py --basetemp "H:\a\_test_tmp\R9ZCB" -p no:cacheprovider
+
+Selected tracked local pytest surfaces:
+admin/tests/test_skillup_bridge_hold_feedback.py
+admin/tests/test_f13_skillup_bridge_runtime_wiring.py
+admin/tests/test_f13_bridge_evidence_response_schema.py
+
+R9ZCD execution note:
+Tests are not rerun in R9ZCD.
+E2E answer smoke is not rerun in R9ZCD.
+No external network, production DB, manual HTTP, or manual server execution was approved in R9ZCD.
+No git add, git commit, tag, push, deployment, or release is approved in R9ZCD.
