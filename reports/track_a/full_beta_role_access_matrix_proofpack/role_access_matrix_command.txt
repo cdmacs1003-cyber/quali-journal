@@ -1,0 +1,13 @@
+R9ZCL_SELECTED_PYTEST_COMMAND_CARRIED_FORWARD_ONLY
+
+$env:PYTHONDONTWRITEBYTECODE = "1"
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
+$pytestBase = Join-Path $env:TEMP "qlib_r9zcl_role_access_pytest"
+python -m pytest -q admin/tests/test_f13_bridge_api.py admin/tests/test_f13_bridge_check_policy_response_schema.py admin/tests/test_f13_bridge_contract_regression.py admin/tests/test_f13_bridge_evidence_response_schema.py admin/tests/test_f13_bridge_explain_trace_response_schema.py admin/tests/test_f13_course_library_binding.py admin/tests/test_f13_runtime_guard.py admin/tests/test_f13_skillup_bridge_runtime_wiring.py admin/tests/test_skillup_bridge_hold_feedback.py admin/tests/test_f13_role_access_matrix.py -p no:cacheprovider --basetemp "$pytestBase"
+
+R9ZCL_SELECTED_TEST_RESULT=100_PASSED_5_WARNINGS
+
+TESTS_RERUN_IN_R9ZCO=NOT_EXECUTED
+PYTEST_RERUN_IN_R9ZCO=NOT_EXECUTED
+
+This command is recorded as carried-forward evidence only. It was not rerun in R9ZCO.

@@ -1,0 +1,92 @@
+{
+  "proofpack_id": "T-A1-07SOU_R9ZCO_FULL_BETA_ROLE_ACCESS_MATRIX_PROOFPACK",
+  "proofpack_root": "reports/track_a/full_beta_role_access_matrix_proofpack/",
+  "materialization_mode": "PROOFPACK_MATERIALIZATION_ONLY",
+  "source_commit": "d6ad3d73fa73bf2a694919253add655edc371dcf",
+  "source_commit_subject": "T-A1-07SOU_R9ZCM commit full beta role access matrix source test schema changes",
+  "parent_commit": "5cc6cc032fe8094c864264141122d186d0b6d746",
+  "parent_commit_subject": "T-A1-07SOU_R9ZCE commit E2E answer smoke proofpack",
+  "boundary_review": {
+    "packet": "R9ZCN",
+    "result": "READY_FOR_TRACK_A_FULL_BETA_ROLE_ACCESS_MATRIX_PROOFPACK_MATERIALIZATION_PACKET",
+    "source_test_schema_commit": "CANONICAL_WITH_LIMITS"
+  },
+  "evidence_carried_forward": [
+    "R9ZCL_SELECTED_TEST_RESULT=100_PASSED_5_WARNINGS",
+    "ROLE_ACCESS_EXECUTION=VERIFIED_WITH_LIMITS",
+    "FULL_BETA_ROLE_ACCESS_MATRIX=VERIFIED_WITH_LIMITS",
+    "RAW_TEXT_EXPORT_COUNT=0",
+    "INTERNAL_PATH_LEAK_COUNT=0",
+    "RAW_PROMPT_OUTPUT_COUNT=0",
+    "SECRET_LEAK_COUNT=0",
+    "INSTRUCTOR_GUIDE_RAW_LEAK_COUNT=0"
+  ],
+  "pass_state": [
+    "ROLE_ACCESS_PASS=NOT_GRANTED",
+    "TRACK_A_PASS=NOT_GRANTED",
+    "BETA_PASS=NOT_GRANTED",
+    "RELEASE_PASS=NOT_GRANTED",
+    "PRODUCT_PASS=NOT_GRANTED",
+    "DEPLOYMENT_RELEASE=NOT_GRANTED"
+  ],
+  "artifacts": [
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/role_access_matrix_results.md",
+      "sha256": "d900899298306161493658808700dcdc57e53517dec8b512182c75f6d3b21cc2"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/role_access_matrix_command.txt",
+      "sha256": "b3f8e30cb809218d1f85c7187fa4b40f25a537480e0d52c009aa0952a1384f19"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/role_access_matrix_scope.md",
+      "sha256": "83033ad438c80ed344964a7c7151f90e362e121a5c1e2d1cb72bfb8d4137d7bf"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/role_access_matrix_coverage_table.md",
+      "sha256": "0a9cb20cd9653a305207b58ab6c53b622ba6aa46cd4be7b0034382841404d114"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/source_test_schema_commit_evidence.md",
+      "sha256": "80266b9d091e696bcab02249d075b1e3ef0bf06582fbdfd6002ca8a85aa074a6"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/zero_leak_counters.md",
+      "sha256": "21fef01f94a60c7777b59893aa6095e6c76050e87a5914f23b221206e2b0e7b7"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/warnings_register.md",
+      "sha256": "b5bb61addff7dc204f26ca1004f3c65c98faa8033942a5cb00733b454f174f43"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/not_executed_register.md",
+      "sha256": "98aecbf556adaf81fd1525a7dc563cb2913033165da814ca495e4fa523a2d3c9"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/non_escalation.md",
+      "sha256": "7310ff0b91cd2cf31c920ee9243b80a12573a6a54a434217bd2de5a4c880cae5"
+    },
+    {
+      "path": "reports/track_a/full_beta_role_access_matrix_proofpack/rollback_note.md",
+      "sha256": "c2ade0dd5e5ab02a25705d5a4c3dde17bb9f3bdc55b044d5211023a697b565a2"
+    }
+  ],
+  "not_executed": [
+    "TESTS_RERUN=NOT_EXECUTED",
+    "PYTEST_RERUN=NOT_EXECUTED",
+    "LINT=NOT_EXECUTED",
+    "BUILD=NOT_EXECUTED",
+    "FULL_REGRESSION=NOT_EXECUTED",
+    "E2E_SMOKE_RERUN=NOT_EXECUTED",
+    "SERVER_RUNTIME=NOT_EXECUTED",
+    "NETWORK_HTTP_REQUESTS=NOT_EXECUTED",
+    "PRODUCTION_DB_ACCESS=NOT_EXECUTED",
+    "PRODUCTION_DB_VERIFICATION=NOT_EXECUTED",
+    "EXTERNAL_NETWORK=NOT_EXECUTED",
+    "GIT_ADD=NOT_EXECUTED",
+    "GIT_COMMIT=NOT_EXECUTED",
+    "TAG=NOT_EXECUTED",
+    "PUSH=NOT_EXECUTED",
+    "DEPLOYMENT_RELEASE=NOT_GRANTED"
+  ]
+}
