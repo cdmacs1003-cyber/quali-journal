@@ -24,6 +24,13 @@ def test_check_policy_response_schema_status_and_required_fields():
         "hold_reason",
         "output_constraints",
         "blocked_fields",
+        "role",
+        "evidence_depth",
+        "raw_text_export_count",
+        "internal_path_leak_count",
+        "raw_prompt_output_count",
+        "secret_leak_count",
+        "instructor_guide_raw_leak_count",
         "feedback_candidate_required",
         "raw_text_included",
         "internal_path_included",
@@ -39,3 +46,19 @@ def test_check_policy_response_schema_blocks_raw_and_internal_flags():
     assert properties["feedback_candidate_required"]["type"] == "boolean"
     assert properties["blocked_fields"]["type"] == "array"
     assert properties["output_constraints"]["type"] == "array"
+    assert set(properties["role"]["enum"]) == {"student", "instructor", "reviewer", "admin", None}
+    assert set(properties["evidence_depth"]["enum"]) == {
+        "student_safe",
+        "instructor_safe",
+        "review_trace_safe_metadata",
+        "audit_trace_safe_metadata",
+        None,
+    }
+    for counter in (
+        "raw_text_export_count",
+        "internal_path_leak_count",
+        "raw_prompt_output_count",
+        "secret_leak_count",
+        "instructor_guide_raw_leak_count",
+    ):
+        assert properties[counter]["const"] == 0

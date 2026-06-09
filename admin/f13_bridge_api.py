@@ -7,6 +7,7 @@ Skillup runtime, files, network, or runtime indexes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -19,9 +20,11 @@ from admin.f13_runtime_guard import (
     RESULT_OK,
     detect_forbidden_fields,
     decide_bridge_result,
+    decide_role_access_policy,
     normalize_rights_status,
     project_bridge_safe_evidence,
     validate_human_redacted_preflight_replay_evidence,
+    zero_leak_counters,
 )
 from admin.f13_skillup_bridge import (
     skillup_answer_from_bridge_response,
@@ -41,6 +44,36 @@ _SCHEMA_REQUIRED_EVIDENCE_FIELDS = (
     "pointer_uri",
     "raw_text_policy",
     "rights_status",
+)
+_ROLE_POLICY_CONTEXT_FIELDS = (
+    "role",
+    "evidence_depth",
+    "requested_output_type",
+    "requested_action",
+    "action",
+    "trace_view",
+    "export_type",
+    "course_id",
+    "module_id",
+    "binding_id",
+    "course_library_binding",
+    "tenant_id",
+    "organization_id",
+    "cohort_id",
+    "target_tenant_id",
+    "target_organization_id",
+    "target_cohort_id",
+    "evidence_tenant_id",
+    "evidence_organization_id",
+    "evidence_cohort_id",
+    "license_tenant_id",
+    "license_organization_id",
+    "license_cohort_id",
+    "license_required",
+    "license_entitlement_id",
+    "license_entitlement_status",
+    "paid_standard",
+    "source_doc_kind",
 )
 
 
@@ -84,7 +117,16 @@ class BridgePolicyCheckRequest(BaseModel):
     pointer_uri: Optional[str] = None
     raw_text_policy: Optional[str] = None
     rights_status: Optional[str] = None
-    role: str = "Learner"
+    role: Optional[str] = None
+    evidence_depth: Optional[str] = None
+    course_id: Optional[str] = None
+    module_id: Optional[str] = None
+    binding_id: Optional[str] = None
+    tenant_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    cohort_id: Optional[str] = None
+    license_entitlement_id: Optional[str] = None
+    license_entitlement_status: Optional[str] = None
     requested_output_type: str = "safe_summary"
     requester_module: str = "Skillup"
     purpose: str = "answer"
@@ -100,6 +142,13 @@ class BridgePolicyCheckResponse(BaseModel):
     hold_reason: Optional[str]
     output_constraints: List[str]
     blocked_fields: List[str]
+    role: Optional[str]
+    evidence_depth: Optional[str]
+    raw_text_export_count: int
+    internal_path_leak_count: int
+    raw_prompt_output_count: int
+    secret_leak_count: int
+    instructor_guide_raw_leak_count: int
     feedback_candidate_required: bool
     raw_text_included: bool
     internal_path_included: bool
@@ -108,11 +157,15 @@ class BridgePolicyCheckResponse(BaseModel):
 
 class BridgeTraceExplainRequest(BaseModel):
     bridge_trace_id: Optional[str] = None
-    role: str = "Learner"
+    role: Optional[str] = None
+    evidence_depth: Optional[str] = None
     request_id: Optional[str] = None
     course_id: Optional[str] = None
     module_id: Optional[str] = None
     binding_id: Optional[str] = None
+    tenant_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    cohort_id: Optional[str] = None
     trace: Optional[Dict[str, Any]] = None
     evidence_items: Optional[List[Dict[str, Any]]] = None
 
@@ -130,6 +183,15 @@ class BridgeTraceExplainResponse(BaseModel):
     evidence_ids: List[str]
     policy_result: str
     hold_reason: Optional[str]
+    role: Optional[str]
+    evidence_depth: Optional[str]
+    review_trace: Optional[Dict[str, Any]]
+    audit_trace: Optional[Dict[str, Any]]
+    raw_text_export_count: int
+    internal_path_leak_count: int
+    raw_prompt_output_count: int
+    secret_leak_count: int
+    instructor_guide_raw_leak_count: int
     feedback_candidate_required: bool
     feedback_candidate: Optional[Dict[str, Any]]
     visible_trace_summary: str
@@ -192,17 +254,28 @@ def _safe_label(value: object, *, max_length: int = 96) -> Optional[str]:
     return text
 
 
-def _safe_role(value: object) -> str:
-    role = (_safe_label(value, max_length=32) or "Learner").lower()
-    if role in {"learner", "student"}:
-        return "Learner"
-    if role == "instructor":
-        return "Instructor"
-    if role == "reviewer":
-        return "Reviewer"
-    if role == "admin":
-        return "Admin"
-    return "Learner"
+def _role_policy_context(*sources: Mapping[str, Any]) -> Dict[str, Any]:
+    context: Dict[str, Any] = {}
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for key in _ROLE_POLICY_CONTEXT_FIELDS:
+            value = source.get(key)
+            if not _is_missing(value):
+                context[key] = value
+    return context
+
+
+def _role_policy_response_fields(decision: Mapping[str, Any] | None) -> Dict[str, Any]:
+    source = decision if isinstance(decision, Mapping) else {}
+    fields: Dict[str, Any] = {
+        "role": source.get("role"),
+        "evidence_depth": source.get("evidence_depth"),
+    }
+    counters = zero_leak_counters()
+    for key, default in counters.items():
+        fields[key] = int(source.get(key, default) or 0)
+    return fields
 
 
 def _safe_trace_id(value: object) -> Optional[str]:
@@ -246,18 +319,31 @@ def _bounded_blocked_fields(fields: List[str]) -> List[str]:
     return safe_fields
 
 
-def _policy_constraints(status: str) -> List[str]:
+def _policy_constraints(
+    status: str,
+    *,
+    role: Optional[str] = None,
+    evidence_depth: Optional[str] = None,
+) -> List[str]:
     if status == RESULT_OK:
-        return [
+        constraints = [
             "SAFE_SUMMARY_ONLY",
+            "NO_RAW_EXPORT",
             "NO_RAW_TEXT",
             "NO_INTERNAL_PATH",
             "BRIDGE_TRACE_REQUIRED",
+            "ZERO_ROLE_LEAK_COUNTERS",
         ]
+        if role:
+            constraints.append(f"ROLE_{role.upper()}")
+        if evidence_depth:
+            constraints.append(f"EVIDENCE_DEPTH_{evidence_depth.upper()}")
+        return constraints
     if status == RESULT_DENIED:
-        return ["BLOCK_OUTPUT", "NO_RAW_TEXT", "NO_INTERNAL_PATH"]
+        return ["BLOCK_OUTPUT", "NO_RAW_EXPORT", "NO_RAW_TEXT", "NO_INTERNAL_PATH"]
     return [
         "HOLD_UNTIL_EVIDENCE_TRACE_RIGHTS_POLICY_PASS",
+        "NO_RAW_EXPORT",
         "NO_RAW_TEXT",
         "NO_INTERNAL_PATH",
     ]
@@ -291,6 +377,7 @@ def _evidence_from_policy_request(payload: BridgePolicyCheckRequest) -> List[Dic
             "pointer_uri",
             "raw_text_policy",
             "rights_status",
+            *_ROLE_POLICY_CONTEXT_FIELDS,
         ):
             if _is_missing(item.get(key)) and not _is_missing(top_level.get(key)):
                 item[key] = top_level[key]
@@ -325,6 +412,35 @@ def _first_safe_value(*values: object) -> Optional[str]:
         if label is not None:
             return label
     return None
+
+
+def _safe_review_trace_metadata(
+    role: Optional[str],
+    evidence_ids: List[str],
+    status: str,
+    hold_reason: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if role not in {"reviewer", "admin"}:
+        return None
+    return {
+        "visibility": "review_trace_safe_metadata",
+        "evidence_match_status": "MATCHED" if evidence_ids else "MISSING",
+        "hold_queue_status": "not_required" if status == RESULT_OK else "review_required",
+        "policy_block_summary": None if status == RESULT_OK else (hold_reason or "Trace policy requires review"),
+    }
+
+
+def _safe_audit_trace_metadata(role: Optional[str]) -> Optional[Dict[str, Any]]:
+    if role != "admin":
+        return None
+    return {
+        "visibility": "audit_trace_safe_metadata",
+        "approval_metadata_visible": True,
+        "course_assignment_metadata_visible": True,
+        "role_assignment_metadata_visible": True,
+        "audit_metadata_visible": True,
+        "raw_export_allowed": False,
+    }
 
 
 def _safe_reason_code_token(value: Any) -> Optional[str]:
@@ -593,6 +709,7 @@ def check_bridge_policy(payload: BridgePolicyCheckRequest) -> Dict[str, Any]:
             "hold_reason": "forbidden fields or patterns detected",
             "output_constraints": _policy_constraints(RESULT_DENIED),
             "blocked_fields": _bounded_blocked_fields(forbidden),
+            **_role_policy_response_fields(None),
             "feedback_candidate_required": True,
             "raw_text_included": False,
             "internal_path_included": False,
@@ -608,9 +725,10 @@ def check_bridge_policy(payload: BridgePolicyCheckRequest) -> Dict[str, Any]:
             trace_ids.append(trace_id)
         decisions.append(
             decide_bridge_result(
-                evidence,
+                {**evidence, **_role_policy_context(request_payload, evidence)},
                 requester_module=payload.requester_module,
                 purpose=payload.purpose,
+                enforce_role_access=True,
             )
         )
 
@@ -625,14 +743,22 @@ def check_bridge_policy(payload: BridgePolicyCheckRequest) -> Dict[str, Any]:
     else:
         final_status = RESULT_OK
         hold_reason = None
+    selected_decision = (denied or holds or decisions or [{}])[0]
+    selected_role = selected_decision.get("role")
+    selected_depth = selected_decision.get("evidence_depth")
 
     return {
         "result_status": final_status,
         "bridge_trace_id": trace_ids[0] if trace_ids else None,
         "policy_result": _policy_label(final_status),
         "hold_reason": hold_reason,
-        "output_constraints": _policy_constraints(final_status),
+        "output_constraints": _policy_constraints(
+            final_status,
+            role=selected_role if isinstance(selected_role, str) else None,
+            evidence_depth=selected_depth if isinstance(selected_depth, str) else None,
+        ),
         "blocked_fields": [],
+        **_role_policy_response_fields(selected_decision),
         "feedback_candidate_required": final_status != RESULT_OK,
         "raw_text_included": False,
         "internal_path_included": False,
@@ -656,6 +782,9 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
             "evidence_ids": [],
             "policy_result": "DENIED",
             "hold_reason": hold_reason,
+            **_role_policy_response_fields(None),
+            "review_trace": None,
+            "audit_trace": None,
             "feedback_candidate_required": True,
             "feedback_candidate": _trace_feedback_candidate(RESULT_DENIED, hold_reason, None),
             "visible_trace_summary": "Trace explanation denied by Bridge safety boundary.",
@@ -666,6 +795,33 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
 
     trace = dict(payload.trace or {})
     evidence_items = [dict(item) for item in payload.evidence_items or [] if isinstance(item, dict)]
+    first_evidence = evidence_items[0] if evidence_items else {}
+    role_decision = decide_role_access_policy(_role_policy_context(request_payload, trace, first_evidence))
+    if role_decision.get("result_status") != RESULT_OK:
+        hold_reason = str(role_decision.get("hold_reason") or "HOLD_POLICY: trace role access requires review")
+        status = str(role_decision.get("result_status") or RESULT_HOLD)
+        safe_status = RESULT_DENIED if status == RESULT_DENIED else RESULT_HOLD
+        return {
+            "result_status": safe_status,
+            "request_id": None,
+            "bridge_trace_id": None,
+            "course_id": None,
+            "module_id": None,
+            "binding_id": None,
+            "evidence_ids": [],
+            "policy_result": _policy_label(safe_status),
+            "hold_reason": hold_reason,
+            **_role_policy_response_fields(role_decision),
+            "review_trace": None,
+            "audit_trace": None,
+            "feedback_candidate_required": True,
+            "feedback_candidate": _trace_feedback_candidate(safe_status, hold_reason, None),
+            "visible_trace_summary": "Trace explanation is on HOLD by role access policy.",
+            "raw_text_included": False,
+            "internal_path_included": False,
+            "created_at": _created_at(),
+        }
+
     bridge_trace_id = _safe_trace_id(
         payload.bridge_trace_id
         or trace.get("bridge_trace_id")
@@ -683,6 +839,14 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
             "evidence_ids": [],
             "policy_result": "HOLD",
             "hold_reason": hold_reason,
+            **_role_policy_response_fields(role_decision),
+            "review_trace": _safe_review_trace_metadata(
+                role_decision.get("role"),
+                [],
+                RESULT_HOLD,
+                hold_reason,
+            ),
+            "audit_trace": _safe_audit_trace_metadata(role_decision.get("role")),
             "feedback_candidate_required": True,
             "feedback_candidate": _trace_feedback_candidate(RESULT_HOLD, hold_reason, None),
             "visible_trace_summary": "Trace explanation is on HOLD because bridge_trace_id is missing.",
@@ -696,7 +860,8 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
     module_id = _first_safe_value(payload.module_id, trace.get("module_id"))
     binding_id = _first_safe_value(payload.binding_id, trace.get("binding_id"))
     request_id = _first_safe_value(payload.request_id, trace.get("request_id"))
-    role = _safe_role(payload.role or trace.get("role"))
+    role = role_decision.get("role")
+    evidence_depth = role_decision.get("evidence_depth")
 
     if not evidence_ids:
         status = RESULT_HOLD
@@ -708,7 +873,7 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
         policy_result = "PASS"
         hold_reason = None
         summary_parts = [
-            f"Trace {bridge_trace_id} is visible to {role} as a safe summary only.",
+            f"Trace {bridge_trace_id} is visible to {role} as {evidence_depth} metadata only.",
             f"Evidence count: {len(evidence_ids)}.",
             "Raw text included: false.",
             "Internal path included: false.",
@@ -731,6 +896,14 @@ def explain_bridge_trace(payload: BridgeTraceExplainRequest) -> Dict[str, Any]:
         "evidence_ids": evidence_ids,
         "policy_result": policy_result,
         "hold_reason": hold_reason,
+        **_role_policy_response_fields(role_decision),
+        "review_trace": _safe_review_trace_metadata(
+            role if isinstance(role, str) else None,
+            evidence_ids,
+            status,
+            hold_reason,
+        ),
+        "audit_trace": _safe_audit_trace_metadata(role if isinstance(role, str) else None),
         "feedback_candidate_required": status != RESULT_OK,
         "feedback_candidate": _trace_feedback_candidate(status, hold_reason, bridge_trace_id),
         "visible_trace_summary": summary,

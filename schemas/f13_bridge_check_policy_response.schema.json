@@ -11,6 +11,13 @@
     "hold_reason",
     "output_constraints",
     "blocked_fields",
+    "role",
+    "evidence_depth",
+    "raw_text_export_count",
+    "internal_path_leak_count",
+    "raw_prompt_output_count",
+    "secret_leak_count",
+    "instructor_guide_raw_leak_count",
     "feedback_candidate_required",
     "raw_text_included",
     "internal_path_included",
@@ -46,6 +53,35 @@
         "type": "string",
         "maxLength": 120
       }
+    },
+    "role": {
+      "type": ["string", "null"],
+      "enum": ["student", "instructor", "reviewer", "admin", null]
+    },
+    "evidence_depth": {
+      "type": ["string", "null"],
+      "enum": [
+        "student_safe",
+        "instructor_safe",
+        "review_trace_safe_metadata",
+        "audit_trace_safe_metadata",
+        null
+      ]
+    },
+    "raw_text_export_count": {
+      "const": 0
+    },
+    "internal_path_leak_count": {
+      "const": 0
+    },
+    "raw_prompt_output_count": {
+      "const": 0
+    },
+    "secret_leak_count": {
+      "const": 0
+    },
+    "instructor_guide_raw_leak_count": {
+      "const": 0
     },
     "feedback_candidate_required": {
       "type": "boolean"

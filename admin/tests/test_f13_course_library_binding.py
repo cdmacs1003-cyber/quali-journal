@@ -18,6 +18,14 @@ def _walk(value: Any) -> list[str]:
     return [str(value)]
 
 
+def _scope() -> dict[str, str]:
+    return {
+        "tenant_id": "tenant:diagnostic",
+        "organization_id": "org:diagnostic",
+        "cohort_id": "cohort:diagnostic",
+    }
+
+
 def _assert_no_raw_internal_or_secret_surface(result: dict[str, Any]) -> None:
     rendered = "\n".join(_walk(result)).lower()
     forbidden_keys = {
@@ -50,6 +58,7 @@ def test_course_library_binding_safe_ok_contract():
         {
             "course_id": "course:diagnostic-1",
             "module_id": "module:diagnostic-1",
+            **_scope(),
             "evidence_id": "ev:diagnostic-1",
             "approval_record_id": "approval:diagnostic-1",
             "bridge_trace_id": "btrace:diagnostic-1",
@@ -82,6 +91,7 @@ def test_course_library_binding_missing_evidence_holds_with_feedback():
         {
             "course_id": "course:diagnostic-1",
             "module_id": "module:diagnostic-1",
+            **_scope(),
             "bridge_trace_id": "btrace:diagnostic-1",
             "rights_status": "PUBLIC",
             "raw_text_policy": "SUMMARY_ONLY",
@@ -108,6 +118,7 @@ def test_course_library_binding_unknown_rights_blocks_skillup_use():
         {
             "course_id": "course:diagnostic-1",
             "lesson_id": "lesson:diagnostic-1",
+            **_scope(),
             "evidence_id": "ev:diagnostic-1",
             "bridge_trace_id": "btrace:diagnostic-1",
             "rights_status": "UNKNOWN",
@@ -134,6 +145,7 @@ def test_course_library_binding_warehouse_status_blocks_skillup_canonical_use():
         {
             "course_id": "course:diagnostic-1",
             "module_id": "module:diagnostic-1",
+            **_scope(),
             "library_node_id": "lib:diagnostic-1",
             "evidence_id": "ev:diagnostic-1",
             "approval_record_id": "approval:diagnostic-1",
@@ -156,6 +168,7 @@ def test_course_library_binding_dedup_key_stable_for_missing_evidence():
     payload = {
         "course_id": "course:diagnostic-1",
         "module_id": "module:diagnostic-1",
+        **_scope(),
         "bridge_trace_id": "btrace:diagnostic-1",
         "rights_status": "PUBLIC",
         "raw_text_policy": "SUMMARY_ONLY",
@@ -166,3 +179,83 @@ def test_course_library_binding_dedup_key_stable_for_missing_evidence():
 
     assert first["feedback_queue_item"]["dedup_key"] == second["feedback_queue_item"]["dedup_key"]
     assert first["feedback_queue_item"]["feedback_id"] == second["feedback_queue_item"]["feedback_id"]
+
+
+def test_course_library_binding_missing_course_or_module_holds_no_binding():
+    result = bind_course_library_reference(
+        {
+            **_scope(),
+            "evidence_id": "ev:diagnostic-missing-scope",
+            "bridge_trace_id": "btrace:diagnostic-missing-scope",
+            "current_status": "APPROVED_FOR_LIBRARY",
+            "approval_record_id": "approval:diagnostic-missing-scope",
+            "shape_validation_status": "PASS",
+            "rights_status": "PUBLIC",
+            "raw_text_policy": "SUMMARY_ONLY",
+        }
+    )
+
+    assert result["binding_status"] == "HOLD"
+    assert "HOLD_NO_BINDING" in result["hold_reason"]
+    assert result["skillup_use_allowed"] is False
+    _assert_no_raw_internal_or_secret_surface(result)
+
+
+def test_course_library_binding_missing_tenant_scope_holds_boundary():
+    result = bind_course_library_reference(
+        {
+            "course_id": "course:diagnostic-1",
+            "module_id": "module:diagnostic-1",
+            "evidence_id": "ev:diagnostic-missing-tenant",
+            "bridge_trace_id": "btrace:diagnostic-missing-tenant",
+            "current_status": "APPROVED_FOR_LIBRARY",
+            "approval_record_id": "approval:diagnostic-missing-tenant",
+            "shape_validation_status": "PASS",
+            "rights_status": "PUBLIC",
+            "raw_text_policy": "SUMMARY_ONLY",
+        }
+    )
+
+    assert result["binding_status"] == "HOLD"
+    assert "HOLD_TENANT_BOUNDARY" in result["hold_reason"]
+    assert result["skillup_use_allowed"] is False
+    _assert_no_raw_internal_or_secret_surface(result)
+
+
+def test_course_library_binding_licensed_entitlement_requires_active_pointer_only_scope():
+    missing_entitlement = bind_course_library_reference(
+        {
+            "course_id": "course:diagnostic-1",
+            "module_id": "module:diagnostic-1",
+            **_scope(),
+            "evidence_id": "ev:diagnostic-license",
+            "bridge_trace_id": "btrace:diagnostic-license",
+            "current_status": "APPROVED_FOR_LIBRARY",
+            "approval_record_id": "approval:diagnostic-license",
+            "shape_validation_status": "PASS",
+            "rights_status": "LICENSED",
+            "raw_text_policy": "POINTER_ONLY",
+        }
+    )
+    active_entitlement = bind_course_library_reference(
+        {
+            "course_id": "course:diagnostic-1",
+            "module_id": "module:diagnostic-1",
+            **_scope(),
+            "evidence_id": "ev:diagnostic-license",
+            "bridge_trace_id": "btrace:diagnostic-license",
+            "current_status": "APPROVED_FOR_LIBRARY",
+            "approval_record_id": "approval:diagnostic-license",
+            "shape_validation_status": "PASS",
+            "rights_status": "LICENSED",
+            "raw_text_policy": "POINTER_ONLY",
+            "license_entitlement_id": "lic:diagnostic",
+            "license_entitlement_status": "ACTIVE",
+        }
+    )
+
+    assert missing_entitlement["binding_status"] == "HOLD"
+    assert "license_entitlement_id" in missing_entitlement["hold_reason"]
+    assert active_entitlement["binding_status"] == "BOUND"
+    assert active_entitlement["skillup_use_allowed"] is True
+    _assert_no_raw_internal_or_secret_surface(active_entitlement)

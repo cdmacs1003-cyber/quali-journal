@@ -26,6 +26,14 @@ def _safe_evidence(**overrides: Any) -> dict[str, Any]:
         "pointer_uri": "pointer://diagnostic/skillup-route/safe-1",
         "raw_text_policy": "SUMMARY_ONLY",
         "rights_status": "PUBLIC",
+        "role": "student",
+        "evidence_depth": "student_safe",
+        "course_id": "course:skillup-route",
+        "module_id": "module:skillup-route",
+        "binding_id": "binding:skillup-route",
+        "tenant_id": "tenant:skillup",
+        "organization_id": "org:skillup",
+        "cohort_id": "cohort:skillup",
     }
     evidence.update(overrides)
     return evidence
@@ -57,7 +65,16 @@ def _assert_no_pass_fields(body: dict[str, Any]) -> None:
 
 
 def _assert_no_raw_internal_or_secret_echo(body: dict[str, Any]) -> None:
-    rendered = "\n".join(_walk(body)).lower()
+    allowed_counter_keys = {
+        "raw_text_export_count",
+        "internal_path_leak_count",
+        "raw_prompt_output_count",
+        "secret_leak_count",
+        "instructor_guide_raw_leak_count",
+    }
+    rendered = "\n".join(
+        item for item in _walk(body) if item not in allowed_counter_keys
+    ).lower()
     assert "raw_prompt" not in rendered
     assert "raw_query" not in rendered
     assert "raw_source_text" not in rendered

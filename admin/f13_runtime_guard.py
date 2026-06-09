@@ -30,6 +30,84 @@ RAW_TEXT_POLICY_REDACTED_SUMMARY_ONLY = "REDACTED_SUMMARY_ONLY"
 RAW_TEXT_POLICY_DENIED = "DENIED"
 RAW_TEXT_POLICY_NOT_VERIFIED = "NOT_VERIFIED"
 
+ROLE_STUDENT = "student"
+ROLE_INSTRUCTOR = "instructor"
+ROLE_REVIEWER = "reviewer"
+ROLE_ADMIN = "admin"
+
+EVIDENCE_DEPTH_STUDENT_SAFE = "student_safe"
+EVIDENCE_DEPTH_INSTRUCTOR_SAFE = "instructor_safe"
+EVIDENCE_DEPTH_REVIEW_TRACE_SAFE_METADATA = "review_trace_safe_metadata"
+EVIDENCE_DEPTH_AUDIT_TRACE_SAFE_METADATA = "audit_trace_safe_metadata"
+
+EVIDENCE_DEPTH_BY_ROLE = {
+    ROLE_STUDENT: EVIDENCE_DEPTH_STUDENT_SAFE,
+    ROLE_INSTRUCTOR: EVIDENCE_DEPTH_INSTRUCTOR_SAFE,
+    ROLE_REVIEWER: EVIDENCE_DEPTH_REVIEW_TRACE_SAFE_METADATA,
+    ROLE_ADMIN: EVIDENCE_DEPTH_AUDIT_TRACE_SAFE_METADATA,
+}
+
+_ROLE_ALIASES = {
+    "learner": ROLE_STUDENT,
+    "student": ROLE_STUDENT,
+    "instructor": ROLE_INSTRUCTOR,
+    "reviewer": ROLE_REVIEWER,
+    "admin": ROLE_ADMIN,
+}
+
+_SUPPORTED_EVIDENCE_DEPTHS = set(EVIDENCE_DEPTH_BY_ROLE.values())
+
+_ACTIVE_ENTITLEMENT_STATUSES = {
+    "ACTIVE",
+    "CURRENT",
+    "VALID",
+    "LICENSED",
+    "ENTITLED",
+}
+
+_FORBIDDEN_OUTPUT_REQUEST_MARKERS = (
+    "raw_standard_text",
+    "raw_text_export",
+    "raw_export",
+    "paid_standard_raw",
+    "raw_paid_standard",
+    "raw_instructor_guide",
+    "instructor_guide_raw",
+    "raw_prompt",
+    "internal_path",
+    "internal_route",
+    "local_path",
+    "secret",
+    "api_key",
+    "private_key",
+    "whole_log",
+    "admin_screen",
+    "private_tacit_knowledge",
+)
+
+_REVIEW_TRACE_REQUEST_MARKERS = (
+    "review_trace",
+    "review_trace_safe_metadata",
+)
+
+_AUDIT_TRACE_REQUEST_MARKERS = (
+    "audit_trace",
+    "audit_trace_safe_metadata",
+)
+
+_INSTRUCTOR_GUIDE_SAFE_REQUEST_MARKERS = (
+    "instructor_guide_summary",
+    "instructor_guide_metadata",
+)
+
+_ZERO_LEAK_COUNTERS = {
+    "raw_text_export_count": 0,
+    "internal_path_leak_count": 0,
+    "raw_prompt_output_count": 0,
+    "secret_leak_count": 0,
+    "instructor_guide_raw_leak_count": 0,
+}
+
 BRIDGE_EVIDENCE_ALLOWLIST_FIELDS = {
     "evidence_id",
     "bridge_trace_id",
@@ -164,6 +242,244 @@ def _safe_label(value: Any, max_length: int = 240) -> str | None:
     return text
 
 
+def zero_leak_counters() -> dict[str, int]:
+    return dict(_ZERO_LEAK_COUNTERS)
+
+
+def normalize_role(value: Any) -> str | None:
+    label = _safe_label(value, 64)
+    if label is None:
+        return None
+    token = label.strip().lower().replace("-", "_").replace(" ", "_")
+    return _ROLE_ALIASES.get(token)
+
+
+def evidence_depth_for_role(role: Any) -> str | None:
+    normalized = normalize_role(role)
+    if normalized is None:
+        return None
+    return EVIDENCE_DEPTH_BY_ROLE[normalized]
+
+
+def _context_value(context: Mapping[str, Any], key: str) -> Any:
+    value = context.get(key)
+    if not _is_missing(value):
+        return value
+    binding = context.get("course_library_binding")
+    if isinstance(binding, Mapping):
+        return binding.get(key)
+    return value
+
+
+def _safe_context_label(context: Mapping[str, Any], key: str, max_length: int = 160) -> str | None:
+    return _safe_label(_context_value(context, key), max_length)
+
+
+def _context_text(context: Mapping[str, Any], keys: tuple[str, ...]) -> str:
+    values = []
+    for key in keys:
+        value = _context_value(context, key)
+        if not _is_missing(value):
+            values.append(str(value))
+    return " ".join(values).lower()
+
+
+def _role_policy_decision(
+    status: str,
+    reason: str | None,
+    *,
+    role: str | None,
+    evidence_depth: str | None,
+) -> dict[str, Any]:
+    return {
+        "result_status": status,
+        "hold_reason": None if status == RESULT_OK else reason,
+        "feedback_candidate_required": status != RESULT_OK,
+        "role": role,
+        "evidence_depth": evidence_depth,
+        **zero_leak_counters(),
+    }
+
+
+def _has_mismatch(context: Mapping[str, Any], left_key: str, right_keys: tuple[str, ...]) -> bool:
+    left = _safe_context_label(context, left_key)
+    if left is None:
+        return False
+    for key in right_keys:
+        right = _safe_context_label(context, key)
+        if right is not None and right != left:
+            return True
+    return False
+
+
+def _requires_license_entitlement(context: Mapping[str, Any]) -> bool:
+    rights = normalize_rights_status(_context_value(context, "rights_status"))
+    if rights == RIGHTS_LICENSED:
+        return True
+    source_kind = _safe_token(_context_value(context, "source_doc_kind"))
+    if "PAID_STANDARD" in source_kind or "LICENSED_STANDARD" in source_kind:
+        return True
+    return _positive(_context_value(context, "license_required")) or _positive(
+        _context_value(context, "paid_standard")
+    )
+
+
+def _safe_requested_evidence_depth(context: Mapping[str, Any]) -> str | None:
+    value = _context_value(context, "evidence_depth")
+    if _is_missing(value):
+        return None
+    depth = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if depth in _SUPPORTED_EVIDENCE_DEPTHS:
+        return depth
+    return "UNSUPPORTED"
+
+
+def decide_role_access_policy(context: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Fail-closed Track A role, scope, license, and output-depth policy."""
+
+    source = context if isinstance(context, Mapping) else {}
+    role = normalize_role(_context_value(source, "role"))
+    if role is None:
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_PERMISSION: explicit supported role is required for Track A protected answer flow",
+            role=None,
+            evidence_depth=None,
+        )
+
+    requested_depth = _safe_requested_evidence_depth(source)
+    expected_depth = EVIDENCE_DEPTH_BY_ROLE[role]
+    if requested_depth == "UNSUPPORTED":
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_POLICY: unsupported evidence_depth",
+            role=role,
+            evidence_depth=None,
+        )
+    if requested_depth is not None and requested_depth != expected_depth:
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_POLICY: evidence_depth is not allowed for role",
+            role=role,
+            evidence_depth=expected_depth,
+        )
+
+    request_text = _context_text(
+        source,
+        (
+            "requested_output_type",
+            "requested_action",
+            "action",
+            "evidence_depth",
+            "trace_view",
+            "export_type",
+        ),
+    )
+    if any(marker in request_text for marker in _FORBIDDEN_OUTPUT_REQUEST_MARKERS):
+        return _role_policy_decision(
+            RESULT_DENIED,
+            "HOLD_POLICY: raw, internal, prompt, secret, or admin output is blocked for all roles",
+            role=role,
+            evidence_depth=expected_depth,
+        )
+
+    if any(marker in request_text for marker in _REVIEW_TRACE_REQUEST_MARKERS) and role not in {
+        ROLE_REVIEWER,
+        ROLE_ADMIN,
+    }:
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_PERMISSION: review_trace safe metadata is reviewer/admin only",
+            role=role,
+            evidence_depth=expected_depth,
+        )
+
+    if any(marker in request_text for marker in _AUDIT_TRACE_REQUEST_MARKERS) and role != ROLE_ADMIN:
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_PERMISSION: audit_trace safe metadata is admin only",
+            role=role,
+            evidence_depth=expected_depth,
+        )
+
+    if any(marker in request_text for marker in _INSTRUCTOR_GUIDE_SAFE_REQUEST_MARKERS) and role == ROLE_STUDENT:
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_PERMISSION: instructor guide metadata is not student visible",
+            role=role,
+            evidence_depth=expected_depth,
+        )
+
+    for key in ("course_id", "module_id", "binding_id"):
+        if _safe_context_label(source, key) is None:
+            return _role_policy_decision(
+                RESULT_HOLD,
+                f"HOLD_NO_BINDING: {key} is required for Track A protected answer flow",
+                role=role,
+                evidence_depth=expected_depth,
+            )
+
+    for key in ("tenant_id", "organization_id", "cohort_id"):
+        if _safe_context_label(source, key) is None:
+            return _role_policy_decision(
+                RESULT_HOLD,
+                f"HOLD_TENANT_BOUNDARY: {key} is required for Track A protected answer flow",
+                role=role,
+                evidence_depth=expected_depth,
+            )
+
+    if _has_mismatch(source, "tenant_id", ("target_tenant_id", "evidence_tenant_id", "license_tenant_id")):
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_TENANT_BOUNDARY: tenant scope mismatch",
+            role=role,
+            evidence_depth=expected_depth,
+        )
+    if _has_mismatch(
+        source,
+        "organization_id",
+        ("target_organization_id", "evidence_organization_id", "license_organization_id"),
+    ):
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_TENANT_BOUNDARY: organization scope mismatch",
+            role=role,
+            evidence_depth=expected_depth,
+        )
+    if _has_mismatch(source, "cohort_id", ("target_cohort_id", "evidence_cohort_id", "license_cohort_id")):
+        return _role_policy_decision(
+            RESULT_HOLD,
+            "HOLD_TENANT_BOUNDARY: cohort scope mismatch",
+            role=role,
+            evidence_depth=expected_depth,
+        )
+
+    if _requires_license_entitlement(source):
+        entitlement_id = _safe_context_label(source, "license_entitlement_id")
+        entitlement_status = _safe_token(_context_value(source, "license_entitlement_status"))
+        if entitlement_id is None:
+            return _role_policy_decision(
+                RESULT_HOLD,
+                "HOLD_PERMISSION: license_entitlement_id is required for licensed pointer-only access",
+                role=role,
+                evidence_depth=expected_depth,
+            )
+        if entitlement_status not in _ACTIVE_ENTITLEMENT_STATUSES:
+            return _role_policy_decision(
+                RESULT_HOLD,
+                "HOLD_LICENSE_EXPIRED: license entitlement is missing, expired, suspended, unknown, or unsupported",
+                role=role,
+                evidence_depth=expected_depth,
+            )
+
+    return _role_policy_decision(
+        RESULT_OK,
+        None,
+        role=role,
+        evidence_depth=expected_depth,
+    )
+
+
 def _field_violation_code(field_name: Any) -> str | None:
     text = str(field_name or "").strip()
     lowered = text.lower()
@@ -274,6 +590,7 @@ def decide_bridge_result(
     *,
     requester_module: str = "Skillup",
     purpose: str = "answer",
+    enforce_role_access: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(evidence, Mapping):
         return _decision(RESULT_HOLD, "evidence payload is missing or invalid")
@@ -284,6 +601,11 @@ def decide_bridge_result(
 
     if bool(evidence.get("direct_db_access_attempt")) and str(requester_module).lower() == "skillup":
         return _decision(RESULT_DENIED, "direct DB access is denied for Bridge-only Skillup requests")
+
+    if enforce_role_access:
+        role_decision = decide_role_access_policy(evidence)
+        if role_decision.get("result_status") != RESULT_OK:
+            return role_decision
 
     current_status = _safe_token(evidence.get("current_status"))
     purpose_token = _safe_token(purpose)
@@ -319,7 +641,10 @@ def decide_bridge_result(
     if rights == RIGHTS_LICENSED and raw_policy == RAW_TEXT_POLICY_POINTER_ONLY:
         if _safe_label(evidence.get("pointer_uri")) is None:
             return _decision(RESULT_HOLD, "licensed pointer-only evidence requires safe pointer_uri")
-    return _decision(RESULT_OK)
+    decision = _decision(RESULT_OK)
+    if enforce_role_access:
+        decision.update(decide_role_access_policy(evidence))
+    return decision
 
 
 def validate_bridge_safe_response(response: Mapping[str, Any]) -> dict[str, Any]:
@@ -466,6 +791,11 @@ def validate_human_redacted_preflight_replay_evidence(evidence: Mapping[str, Any
 
 __all__ = [
     "BRIDGE_EVIDENCE_ALLOWLIST_FIELDS",
+    "EVIDENCE_DEPTH_AUDIT_TRACE_SAFE_METADATA",
+    "EVIDENCE_DEPTH_BY_ROLE",
+    "EVIDENCE_DEPTH_INSTRUCTOR_SAFE",
+    "EVIDENCE_DEPTH_REVIEW_TRACE_SAFE_METADATA",
+    "EVIDENCE_DEPTH_STUDENT_SAFE",
     "RAW_TEXT_POLICY_DENIED",
     "RAW_TEXT_POLICY_NOT_VERIFIED",
     "RAW_TEXT_POLICY_POINTER_ONLY",
@@ -482,10 +812,14 @@ __all__ = [
     "RIGHTS_RESTRICTED",
     "RIGHTS_UNKNOWN",
     "detect_forbidden_fields",
+    "decide_role_access_policy",
     "decide_bridge_result",
+    "evidence_depth_for_role",
+    "normalize_role",
     "normalize_raw_text_policy",
     "normalize_rights_status",
     "project_bridge_safe_evidence",
     "validate_bridge_safe_response",
     "validate_human_redacted_preflight_replay_evidence",
+    "zero_leak_counters",
 ]

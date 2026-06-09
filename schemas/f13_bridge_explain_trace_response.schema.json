@@ -14,6 +14,15 @@
     "evidence_ids",
     "policy_result",
     "hold_reason",
+    "role",
+    "evidence_depth",
+    "review_trace",
+    "audit_trace",
+    "raw_text_export_count",
+    "internal_path_leak_count",
+    "raw_prompt_output_count",
+    "secret_leak_count",
+    "instructor_guide_raw_leak_count",
     "feedback_candidate_required",
     "feedback_candidate",
     "visible_trace_summary",
@@ -60,6 +69,96 @@
     "hold_reason": {
       "type": ["string", "null"],
       "maxLength": 240
+    },
+    "role": {
+      "type": ["string", "null"],
+      "enum": ["student", "instructor", "reviewer", "admin", null]
+    },
+    "evidence_depth": {
+      "type": ["string", "null"],
+      "enum": [
+        "student_safe",
+        "instructor_safe",
+        "review_trace_safe_metadata",
+        "audit_trace_safe_metadata",
+        null
+      ]
+    },
+    "review_trace": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "visibility",
+        "evidence_match_status",
+        "hold_queue_status",
+        "policy_block_summary"
+      ],
+      "properties": {
+        "visibility": {
+          "type": "string",
+          "enum": ["review_trace_safe_metadata"]
+        },
+        "evidence_match_status": {
+          "type": "string",
+          "enum": ["MATCHED", "MISSING"]
+        },
+        "hold_queue_status": {
+          "type": "string",
+          "enum": ["not_required", "review_required"]
+        },
+        "policy_block_summary": {
+          "type": ["string", "null"],
+          "maxLength": 240
+        }
+      }
+    },
+    "audit_trace": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "visibility",
+        "approval_metadata_visible",
+        "course_assignment_metadata_visible",
+        "role_assignment_metadata_visible",
+        "audit_metadata_visible",
+        "raw_export_allowed"
+      ],
+      "properties": {
+        "visibility": {
+          "type": "string",
+          "enum": ["audit_trace_safe_metadata"]
+        },
+        "approval_metadata_visible": {
+          "type": "boolean"
+        },
+        "course_assignment_metadata_visible": {
+          "type": "boolean"
+        },
+        "role_assignment_metadata_visible": {
+          "type": "boolean"
+        },
+        "audit_metadata_visible": {
+          "type": "boolean"
+        },
+        "raw_export_allowed": {
+          "const": false
+        }
+      }
+    },
+    "raw_text_export_count": {
+      "const": 0
+    },
+    "internal_path_leak_count": {
+      "const": 0
+    },
+    "raw_prompt_output_count": {
+      "const": 0
+    },
+    "secret_leak_count": {
+      "const": 0
+    },
+    "instructor_guide_raw_leak_count": {
+      "const": 0
     },
     "feedback_candidate_required": {
       "type": "boolean"

@@ -8,8 +8,10 @@ from admin.f13_runtime_guard import (
     RESULT_DENIED,
     RESULT_HOLD,
     RESULT_OK,
+    decide_role_access_policy,
     detect_forbidden_fields,
     project_bridge_safe_evidence,
+    zero_leak_counters,
 )
 
 
@@ -46,6 +48,44 @@ _UNSAFE_FEEDBACK_VALUE_MARKERS = (
     "token",
     "credential",
 )
+_SAFE_FEEDBACK_COUNTER_KEYS = {
+    "raw_text_export_count",
+    "internal_path_leak_count",
+    "raw_prompt_output_count",
+    "secret_leak_count",
+    "instructor_guide_raw_leak_count",
+}
+_ROLE_CONTEXT_FIELDS = (
+    "role",
+    "evidence_depth",
+    "requested_output_type",
+    "requested_action",
+    "action",
+    "trace_view",
+    "export_type",
+    "course_id",
+    "module_id",
+    "binding_id",
+    "course_library_binding",
+    "tenant_id",
+    "organization_id",
+    "cohort_id",
+    "target_tenant_id",
+    "target_organization_id",
+    "target_cohort_id",
+    "evidence_tenant_id",
+    "evidence_organization_id",
+    "evidence_cohort_id",
+    "license_tenant_id",
+    "license_organization_id",
+    "license_cohort_id",
+    "license_required",
+    "license_entitlement_id",
+    "license_entitlement_status",
+    "paid_standard",
+    "source_doc_kind",
+    "rights_status",
+)
 
 
 def _safe_text(value: Any, fallback: str, max_length: int = 240) -> str:
@@ -70,6 +110,8 @@ def _contains_unsafe_feedback_surface(value: Any) -> bool:
     if isinstance(value, Mapping):
         for key, child in value.items():
             lowered_key = str(key).lower()
+            if lowered_key in _SAFE_FEEDBACK_COUNTER_KEYS:
+                continue
             if lowered_key in {"raw_text_included", "internal_path_included"}:
                 continue
             if any(marker in lowered_key for marker in _UNSAFE_FEEDBACK_FIELD_MARKERS):
@@ -99,7 +141,33 @@ def _status_base() -> dict[str, Any]:
         "f13_pass": NOT_GRANTED,
         "track_a_pass": NOT_GRANTED,
         "beta_pass": NOT_GRANTED,
+        **zero_leak_counters(),
     }
+
+
+def _role_context_from_bridge_response(bridge_response: Mapping[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for key in _ROLE_CONTEXT_FIELDS:
+        value = bridge_response.get(key)
+        if value not in (None, ""):
+            context[key] = value
+    evidence_items = bridge_response.get("evidence_items") or []
+    if evidence_items and isinstance(evidence_items[0], Mapping):
+        for key in _ROLE_CONTEXT_FIELDS:
+            value = evidence_items[0].get(key)
+            if value not in (None, "") and key not in context:
+                context[key] = value
+    return context
+
+
+def _role_policy_fields(decision: Mapping[str, Any]) -> dict[str, Any]:
+    fields = {
+        "role": decision.get("role"),
+        "evidence_depth": decision.get("evidence_depth"),
+    }
+    for key, default in zero_leak_counters().items():
+        fields[key] = int(decision.get(key, default) or 0)
+    return fields
 
 
 def _feedback_candidate(reason: Any, bridge_trace_id: Any = None) -> dict[str, Any]:
@@ -148,6 +216,20 @@ def skillup_answer_from_bridge_response(bridge_response: Mapping[str, Any] | Non
             trace_id,
         )
 
+    role_decision = decide_role_access_policy(_role_context_from_bridge_response(bridge_response))
+    if role_decision.get("result_status") != RESULT_OK:
+        evidence_items_for_trace = bridge_response.get("evidence_items") or []
+        trace_id = None
+        if evidence_items_for_trace and isinstance(evidence_items_for_trace[0], Mapping):
+            trace_id = evidence_items_for_trace[0].get("bridge_trace_id")
+        blocked = _blocked(
+            RESULT_DENIED if role_decision.get("result_status") == RESULT_DENIED else RESULT_HOLD,
+            role_decision.get("hold_reason"),
+            trace_id,
+        )
+        blocked.update(_role_policy_fields(role_decision))
+        return blocked
+
     evidence_items = bridge_response.get("evidence_items") or []
     if not evidence_items or not isinstance(evidence_items[0], Mapping):
         return _blocked(RESULT_HOLD, "Bridge OK response did not include safe evidence.")
@@ -172,6 +254,7 @@ def skillup_answer_from_bridge_response(bridge_response: Mapping[str, Any] | Non
         "safe_summary": safe_summary,
         "evidence_id": projected["evidence_id"],
         "bridge_trace_id": projected["bridge_trace_id"],
+        **_role_policy_fields(role_decision),
     }
 
 

@@ -9,10 +9,12 @@ RESULT_BOUND = "BOUND"
 RESULT_DENIED = "DENIED"
 RESULT_HOLD = "HOLD"
 RAW_TEXT_POLICY_SUMMARY_ONLY = "SUMMARY_ONLY"
+RAW_TEXT_POLICY_POINTER_ONLY = "POINTER_ONLY"
 CREATED_AT = "1970-01-01T00:00:00Z"
 
 _DENIED_RIGHTS = {"DENIED", "RESTRICTED", "PRIVATE", "PROPRIETARY"}
 _HOLD_RIGHTS = {"", "UNKNOWN", "NOT_VERIFIED"}
+_ACTIVE_ENTITLEMENT_STATUSES = {"ACTIVE", "CURRENT", "VALID", "LICENSED", "ENTITLED"}
 _LIBRARY_BINDABLE_STATUS = "APPROVED_FOR_LIBRARY"
 _UNSAFE_FIELD_MARKERS = (
     "raw_text",
@@ -44,6 +46,10 @@ def _safe_text(value: Any, fallback: str, max_length: int = 160) -> str:
     if not text:
         text = fallback
     return text[:max_length]
+
+
+def _is_missing(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and value.strip() == "")
 
 
 def _safe_token(value: Any, fallback: str, max_length: int = 120) -> str:
@@ -84,6 +90,16 @@ def _normal_status(value: Any) -> str:
     return str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
 
 
+def _safe_scope_value(source: Mapping[str, Any], key: str) -> str:
+    return _safe_token(source.get(key), "", max_length=120)
+
+
+def _scope_mismatch(source: Mapping[str, Any], key: str, compare_key: str) -> bool:
+    left = _safe_scope_value(source, key)
+    right = _safe_scope_value(source, compare_key)
+    return bool(left and right and left != right)
+
+
 def _has_shape_pass(source: Mapping[str, Any]) -> bool:
     shape_ids = source.get("validation_shape_ids")
     if isinstance(shape_ids, list | tuple | set):
@@ -122,8 +138,8 @@ def _feedback_queue_item(
 
 def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     source = payload if isinstance(payload, Mapping) else {}
-    course_id = _safe_token(source.get("course_id"), "course:unknown")
-    module_ref = _safe_token(source.get("module_id") or source.get("lesson_id"), "module:unknown")
+    course_id = _safe_token(source.get("course_id"), "course:missing")
+    module_ref = _safe_token(source.get("module_id") or source.get("lesson_id"), "module:missing")
     evidence_ref = _safe_token(
         source.get("evidence_id") or source.get("library_node_id"),
         "missing_evidence",
@@ -136,6 +152,11 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
     raw_text_policy = _safe_token(source.get("raw_text_policy"), RAW_TEXT_POLICY_SUMMARY_ONLY)
     current_status = _normal_status(source.get("current_status"))
     approval_ref = _safe_token(source.get("approval_record_id"), "", max_length=120)
+    tenant_id = _safe_scope_value(source, "tenant_id")
+    organization_id = _safe_scope_value(source, "organization_id")
+    cohort_id = _safe_scope_value(source, "cohort_id")
+    entitlement_id = _safe_scope_value(source, "license_entitlement_id")
+    entitlement_status = _normal_status(source.get("license_entitlement_status"))
     shape_pass = _has_shape_pass(source)
     binding_id = f"binding:{_stable_digest(course_id, module_ref, evidence_ref, bridge_trace_id)}"
 
@@ -143,11 +164,15 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
         "binding_id": binding_id,
         "course_id": course_id,
         "module_id": module_ref,
+        "tenant_id": tenant_id,
+        "organization_id": organization_id,
+        "cohort_id": cohort_id,
         "library_node_id": _safe_token(source.get("library_node_id"), "", max_length=120),
         "evidence_id": "" if evidence_ref == "missing_evidence" else evidence_ref,
         "bridge_trace_id": bridge_trace_id,
         "rights_status": rights_status,
         "raw_text_policy": raw_text_policy,
+        "license_entitlement_id": entitlement_id,
         "created_at": CREATED_AT,
         "raw_text_included": False,
         "internal_path_included": False,
@@ -156,10 +181,37 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
     }
 
     unsafe_payload = _contains_unsafe_surface(source)
+    missing_binding_scope = _is_missing(source.get("course_id")) or _is_missing(
+        source.get("module_id") or source.get("lesson_id")
+    )
+    missing_tenant_scope = not tenant_id or not organization_id or not cohort_id
+    tenant_mismatch = (
+        _scope_mismatch(source, "tenant_id", "target_tenant_id")
+        or _scope_mismatch(source, "tenant_id", "evidence_tenant_id")
+        or _scope_mismatch(source, "tenant_id", "license_tenant_id")
+        or _scope_mismatch(source, "organization_id", "target_organization_id")
+        or _scope_mismatch(source, "organization_id", "evidence_organization_id")
+        or _scope_mismatch(source, "organization_id", "license_organization_id")
+        or _scope_mismatch(source, "cohort_id", "target_cohort_id")
+        or _scope_mismatch(source, "cohort_id", "evidence_cohort_id")
+        or _scope_mismatch(source, "cohort_id", "license_cohort_id")
+    )
     missing_evidence = evidence_ref == "missing_evidence"
     if unsafe_payload:
         status = RESULT_DENIED
         issue = "unsafe course library binding payload blocked by no-DB safety boundary"
+        feedback_type = "BINDING_POLICY_REVIEW"
+    elif missing_binding_scope:
+        status = RESULT_HOLD
+        issue = "HOLD_NO_BINDING: course_library_binding requires course_id and module_id"
+        feedback_type = "BINDING_POLICY_REVIEW"
+    elif missing_tenant_scope:
+        status = RESULT_HOLD
+        issue = "HOLD_TENANT_BOUNDARY: course_library_binding requires tenant_id, organization_id, and cohort_id"
+        feedback_type = "BINDING_POLICY_REVIEW"
+    elif tenant_mismatch:
+        status = RESULT_HOLD
+        issue = "HOLD_TENANT_BOUNDARY: course_library_binding scope mismatch"
         feedback_type = "BINDING_POLICY_REVIEW"
     elif missing_evidence:
         status = RESULT_HOLD
@@ -172,6 +224,18 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
     elif rights_status in _HOLD_RIGHTS:
         status = RESULT_HOLD
         issue = "rights_status requires review before Skillup use"
+        feedback_type = "RIGHTS_POLICY_REVIEW"
+    elif rights_status == "LICENSED" and raw_text_policy != RAW_TEXT_POLICY_POINTER_ONLY:
+        status = RESULT_HOLD
+        issue = "HOLD_POLICY: licensed course_library_binding requires pointer-only raw text policy"
+        feedback_type = "RIGHTS_POLICY_REVIEW"
+    elif rights_status == "LICENSED" and not entitlement_id:
+        status = RESULT_HOLD
+        issue = "HOLD_PERMISSION: license_entitlement_id is required before Skillup use"
+        feedback_type = "RIGHTS_POLICY_REVIEW"
+    elif rights_status == "LICENSED" and entitlement_status not in _ACTIVE_ENTITLEMENT_STATUSES:
+        status = RESULT_HOLD
+        issue = "HOLD_LICENSE_EXPIRED: license entitlement is missing, expired, suspended, unknown, or unsupported"
         feedback_type = "RIGHTS_POLICY_REVIEW"
     elif current_status != _LIBRARY_BINDABLE_STATUS:
         status = RESULT_HOLD
@@ -213,6 +277,7 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
 
 __all__ = [
     "CREATED_AT",
+    "RAW_TEXT_POLICY_POINTER_ONLY",
     "RAW_TEXT_POLICY_SUMMARY_ONLY",
     "RESULT_BOUND",
     "RESULT_DENIED",
