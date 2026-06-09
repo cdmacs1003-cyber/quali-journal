@@ -1,0 +1,118 @@
+{
+  "manifest_version": "1.0",
+  "packet_id": "T-A1-07SOU_R9ZBY_TRACK_A_SAMPLE_QA_MATERIALIZATION_APPROVAL_PACKET",
+  "created_at_kst": "2026-06-09T14:07:04+09:00",
+  "repository": "H:\\a\\<non_ascii_repo_name>_track_a_clean_standalone",
+  "branch": "track-a-07s-static-closure-proofpack",
+  "head_at_materialization_start": "7aa8f73 T-A1-07SOU_R9ZBU commit raw leak beta gate proofpack",
+  "parent": "016e6a3 T-A1-07SOU_R9ZBN commit Track A P0 selected test proofpack",
+  "r9zbb_handover_sha256": "CF4F67FC5C6F5FF05E9996B3E425166386816D036ED9AED1155C2655ED32E409",
+  "prior_planning_packet": {
+    "packet_id": "T-A1-07SOU_R9ZBX_TRACK_A_SAMPLE_QA_E2E_ANSWER_EVIDENCE_PLANNING_PACKET",
+    "result": "READY_FOR_TRACK_A_SAMPLE_QA_MATERIALIZATION_APPROVAL_PACKET",
+    "sample_qa_e2e_answer_evidence": "PLANNING_READY"
+  },
+  "materialization_boundary": {
+    "mode": "documentation_proofpack_materialization_only",
+    "source_modification": "NOT_EXECUTED",
+    "test_execution": "NOT_EXECUTED",
+    "e2e_answer_smoke": "NOT_EXECUTED",
+    "server_runtime": "NOT_EXECUTED",
+    "http_requests": "NOT_EXECUTED",
+    "db_verification": "NOT_EXECUTED",
+    "external_network": "NOT_EXECUTED",
+    "git_add": "NOT_EXECUTED",
+    "git_commit": "NOT_EXECUTED"
+  },
+  "canonical_evidence_baseline": {
+    "r9zbb_handover": "QLIB_TA1_07SOU_R9ZBB_HANDOVER_20260608.md",
+    "p0_selected_test_proofpack": "reports/track_a/p0_selected_test_proofpack/",
+    "raw_leak_beta_gate_proofpack": "reports/track_a/raw_leak_beta_gate_proofpack/",
+    "r9zbk_selected_tests": "76_PASSED_5_WARNINGS",
+    "r9zbr_raw_leak_beta_gate": "VERIFIED_WITH_LIMITS",
+    "bounded_raw_leak_pytest": "74_PASSED_5_WARNINGS",
+    "full_beta_role_access_matrix": "NOT_VERIFIED"
+  },
+  "sample_qa_counts": {
+    "sample_qa_entries": 20,
+    "answered_entries": 15,
+    "hold_or_denied_entries": 5,
+    "hold_scenarios": 6,
+    "minimum_required_sample_qa_entries": 20,
+    "minimum_required_hold_scenarios": 5
+  },
+  "contract_summary": {
+    "answered_requires_evidence_id": true,
+    "answered_requires_bridge_trace_id": true,
+    "answered_requires_safe_summary": true,
+    "hold_requires_safe_reason": true,
+    "hold_feedback_capture_required": true,
+    "raw_text_policy": "SUMMARY_ONLY_OR_STRICTER",
+    "raw_text_included": false,
+    "internal_path_included": false
+  },
+  "proofpack_files": [
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/sample_qa_catalog.md",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/hold_scenario_catalog.md",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/answer_evidence_contract.md",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/e2e_answer_smoke_plan.md",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/feedback_capture_contract.md",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/raw_leak_safe_output_contract.md",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/non_escalation.md",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/rollback_note.md",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/SHA256SUMS",
+    "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/proofpack_manifest.json"
+  ],
+  "artifact_hashes_embedded_in_manifest": [
+    {
+      "path": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/sample_qa_catalog.md",
+      "sha256": "A74C50A5AC3AD2873E4B64EDFF7D3CBFA451774BCE7544040C48F66B76659981"
+    },
+    {
+      "path": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/hold_scenario_catalog.md",
+      "sha256": "732BCE7646D16CAE2CB3377A21B7E0499162DEF86DE861EF2117C708553A3C1F"
+    },
+    {
+      "path": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/answer_evidence_contract.md",
+      "sha256": "7DB5C6F51D74030F1363457EF845BA73708A0214B0F5769A72DC36481AF7D349"
+    },
+    {
+      "path": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/e2e_answer_smoke_plan.md",
+      "sha256": "8FC1968F66354FAF5BA8A9B9C6F2916829CA267D01B59A0E5076FBDBFD8A19E5"
+    },
+    {
+      "path": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/feedback_capture_contract.md",
+      "sha256": "1F666CB791EF521A4E62D3AAF54300B9049C331626693C3253D68A32B1A327DB"
+    },
+    {
+      "path": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/raw_leak_safe_output_contract.md",
+      "sha256": "C416753CD07637226A42D8001BF19ACB54AF81B4914A848BCCBC384612AC84E3"
+    },
+    {
+      "path": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/non_escalation.md",
+      "sha256": "8E9BC98011E73CEA6245F59CF187D7B13669F763E085B6DB9084EC03DEACB63A"
+    },
+    {
+      "path": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/rollback_note.md",
+      "sha256": "FA3A7E787BD58AE64B757F3FDFDB73F1C31083312DB1CE13664A969AD2CBD987"
+    }
+  ],
+  "sha256sums_policy": {
+    "sha256sums_file": "reports/track_a/sample_qa_e2e_answer_evidence_proofpack/SHA256SUMS",
+    "scope": "SHA256SUMS records the eight materialized content artifacts plus proofpack_manifest.json. SHA256SUMS self-hash is omitted to avoid recursive hashing."
+  },
+  "non_escalation": {
+    "F13_PASS": "GRANTED_BOUND_F13_PROOFPACK_ONLY",
+    "TRACK_A_PASS": "NOT_GRANTED",
+    "BETA_PASS": "NOT_GRANTED",
+    "RELEASE_PASS": "NOT_GRANTED",
+    "PRODUCT_PASS": "NOT_GRANTED",
+    "PRODUCTION_DB_PASS": "NOT_GRANTED",
+    "EXTERNAL_NETWORK_PASS": "NOT_GRANTED",
+    "FULL_BETA_ROLE_ACCESS_MATRIX": "NOT_VERIFIED",
+    "TAG": "NOT_EXECUTED",
+    "PUSH": "NOT_EXECUTED",
+    "DEPLOYMENT_RELEASE": "NOT_GRANTED"
+  },
+  "next_recommended_packet": "TRACK_A_SAMPLE_QA_E2E_ANSWER_EVIDENCE_PROOFPACK_TARGET_REVIEW_READ_ONLY"
+}
