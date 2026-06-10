@@ -1,0 +1,77 @@
+{
+  "packet_id": "T-A1-07SOU_R9ZCW_LIMITED_SKILLUP_BETA_REVIEW_INCIDENT_HANDLING_NOTE_REMEDIATION_PACKET_WITH_LIMITS",
+  "repository": "H:\\a\\퀄리저널_track_a_clean_standalone",
+  "branch": "track-a-07s-static-closure-proofpack",
+  "expected_head": "d2d61dbad40a2114c08b43033c863bcfbb28014e",
+  "expected_head_subject": "T-A1-07SOU_R9ZCP commit full beta role access matrix proofpack",
+  "expected_parent": "d6ad3d73fa73bf2a694919253add655edc371dcf",
+  "expected_parent_subject": "T-A1-07SOU_R9ZCM commit full beta role access matrix source test schema changes",
+  "proofpack_root": "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/",
+  "scope": "LOCAL_PROOFPACK_BASED_LIMITED_SKILLUP_BETA_EDUCATION_REVIEW_ONLY",
+  "sha256sums_convention": "SHA256SUMS covers all approved remediation proofpack files except SHA256SUMS itself.",
+  "approved_files": [
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/remediation_scope.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/incident_handling_note.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/incident_stop_conditions.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/rollback_incident_linkage.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/non_escalation.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/not_executed_register.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/zero_leak_counters.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/proofpack_manifest.json",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/SHA256SUMS"
+  ],
+  "sha256_covered_files": [
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/remediation_scope.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/incident_handling_note.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/incident_stop_conditions.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/rollback_incident_linkage.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/non_escalation.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/not_executed_register.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/zero_leak_counters.md",
+    "reports/track_a/limited_skillup_beta_review_incident_handling_note_remediation/proofpack_manifest.json"
+  ],
+  "incident_handling_summary": [
+    "INCIDENT_HANDLING_NOTE=AVAILABLE_WITH_LIMITS",
+    "INCIDENT_HANDLING_SCOPE=LOCAL_PROOFPACK_BASED_LIMITED_SKILLUP_BETA_EDUCATION_REVIEW_ONLY",
+    "INCIDENT_HANDLING_EVIDENCE_PRESERVATION=LOCAL_PROOFPACK_POINTERS_ONLY",
+    "INCIDENT_HANDLING_REMEDIATION_PATH=SEPARATE_APPROVED_PACKET_REQUIRED",
+    "INCIDENT_HANDLING_OWNER=HUMAN_REVIEW_REQUIRED_BEFORE_ANY_FURTHER_EXECUTION"
+  ],
+  "not_executed_register_summary": [
+    "TESTS_RERUN=NOT_EXECUTED",
+    "PYTEST_RERUN=NOT_EXECUTED",
+    "LINT=NOT_EXECUTED",
+    "BUILD=NOT_EXECUTED",
+    "FULL_REGRESSION=NOT_EXECUTED",
+    "E2E_SMOKE_RERUN=NOT_EXECUTED",
+    "SERVER_RUNTIME=NOT_EXECUTED",
+    "NETWORK_HTTP_REQUESTS=NOT_EXECUTED",
+    "PRODUCTION_DB_ACCESS=NOT_EXECUTED",
+    "PRODUCTION_DB_VERIFICATION=NOT_EXECUTED",
+    "EXTERNAL_NETWORK=NOT_EXECUTED",
+    "GIT_ADD=NOT_EXECUTED",
+    "GIT_COMMIT=NOT_EXECUTED",
+    "TAG=NOT_EXECUTED",
+    "PUSH=NOT_EXECUTED"
+  ],
+  "non_escalation_summary": [
+    "ROLE_ACCESS_PASS=GRANTED_BOUND_ROLE_ACCESS_MATRIX_PROOFPACK_ONLY",
+    "TRACK_A_BETA_RELEASE_BOARD_DECISION=APPROVE_WITH_LIMITS",
+    "BETA_RELEASE_BOARD_DECISION=APPROVE_LIMITED_SKILLUP_BETA_EDUCATION_USE_REVIEW_ONLY",
+    "LIMITED_SKILLUP_BETA_EDUCATION_USE_REVIEW_PLANNING=READY_WITH_LIMITS",
+    "LIMITED_SKILLUP_BETA_EDUCATION_USE_REVIEW_EXECUTION=REVIEW_REQUIRED_CARRIED_FORWARD",
+    "TRACK_A_PASS=NOT_GRANTED",
+    "BETA_PASS=NOT_GRANTED",
+    "RELEASE_PASS=NOT_GRANTED",
+    "PRODUCT_PASS=NOT_GRANTED",
+    "DEPLOYMENT_RELEASE=NOT_GRANTED"
+  ],
+  "zero_leak_counter_summary": [
+    "RAW_TEXT_EXPORT_COUNT=0_CARRIED_FORWARD",
+    "INTERNAL_PATH_LEAK_COUNT=0_CARRIED_FORWARD",
+    "RAW_PROMPT_OUTPUT_COUNT=0_CARRIED_FORWARD",
+    "SECRET_LEAK_COUNT=0_CARRIED_FORWARD",
+    "INSTRUCTOR_GUIDE_RAW_LEAK_COUNT=0_CARRIED_FORWARD"
+  ],
+  "next_recommended_packet": "T-A1-07SOU_R9ZCX_LIMITED_SKILLUP_BETA_REVIEW_INCIDENT_HANDLING_NOTE_REMEDIATION_COMMIT_ONLY_PACKET_WITH_LIMITS"
+}
