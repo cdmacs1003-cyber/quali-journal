@@ -18,7 +18,7 @@ This gap map records the clean-worktree Bridge/F13 source recovery baseline afte
 |---|---|---|
 | check-policy schema static coverage missing | `admin/tests/test_f13_bridge_check_policy_response_schema.py` | Add static schema test; defer execution to a later test gate. |
 | explain-trace feedback-candidate coverage missing | `admin/tests/test_f13_bridge_explain_trace_response_schema.py` | Add static schema and feedback-candidate tests; defer execution to a later test gate. |
-| Shape documentation wrapper missing | `shapes/f13_bridge_runtime_contract_shape.md` | Add wrapper documenting JSON shape canonicality. |
+| Shape documentation wrapper status | `shapes/f13_bridge_runtime_contract_shape.md` | STATIC_DOC_GAP_CLOSED_WITH_LIMITS; wrapper exists and is committed at `662fc25` under `R9ZJJ_STATIC_DOC_WRAPPER_CANONICAL_WITH_LIMITS`; closed only for static wrapper documentation; runtime behavior remains NOT_VERIFIED; HTTP behavior remains NOT_VERIFIED; DB/network behavior remains NOT_VERIFIED; tests remain NOT_EXECUTED for this gap-map status packet; Track A PASS, Beta PASS, F13 PASS, release readiness, deployment readiness, production readiness, Bridge health PASS, answer quality PASS, and Skillup MVP PASS remain NOT_GRANTED; `raw_secret_leak_policy.md` remains QUARANTINE and was not opened, copied, hashed, summarized, inferred, deleted, inspected, printed, or used as a recovery source. |
 | Bridge tests present but not executed | `admin/tests/test_f13_bridge_*.py` | Defer execution to a later explicit test gate. |
 
 ## Deferred Gaps
