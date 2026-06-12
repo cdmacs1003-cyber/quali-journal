@@ -426,3 +426,33 @@ def test_tc32_quarantined_search_exposure_returns_hold_or_denied():
     result = decide_bridge_result(evidence, requester_module="Search", purpose="search_exposure")
 
     assert result["result_status"] in {RESULT_HOLD, RESULT_DENIED}
+
+
+def test_tc33_project_bridge_safe_evidence_applies_schema_max_lengths():
+    evidence = _base_evidence(
+        evidence_id="e" * 121,
+        bridge_trace_id="b" * 161,
+        source_doc_kind="s" * 121,
+        validation_shape_ids=["shape_a", "v" * 121],
+    )
+
+    projected = project_bridge_safe_evidence(evidence)
+
+    assert "evidence_id" not in projected
+    assert "bridge_trace_id" not in projected
+    assert "source_doc_kind" not in projected
+    assert projected["validation_shape_ids"] == ["shape_a"]
+
+
+def test_tc34_project_bridge_safe_evidence_keeps_schema_max_length_boundaries():
+    evidence = _base_evidence(
+        evidence_id="e" * 120,
+        bridge_trace_id="b" * 160,
+        source_doc_kind="s" * 120,
+    )
+
+    projected = project_bridge_safe_evidence(evidence)
+
+    assert projected["evidence_id"] == "e" * 120
+    assert projected["bridge_trace_id"] == "b" * 160
+    assert projected["source_doc_kind"] == "s" * 120

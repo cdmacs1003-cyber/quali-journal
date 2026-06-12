@@ -91,6 +91,33 @@ def test_ok_decision_aligns_with_schema_evidence_items_contract():
     assert detect_forbidden_fields(projected) == []
 
 
+def test_projected_evidence_lengths_do_not_exceed_schema_contract():
+    schema = _load_schema()
+    item_properties = schema["properties"]["evidence_items"]["items"]["properties"]
+
+    projected = project_bridge_safe_evidence(
+        _safe_evidence(
+            evidence_id="e" * (item_properties["evidence_id"]["maxLength"] + 1),
+            bridge_trace_id="b" * (item_properties["bridge_trace_id"]["maxLength"] + 1),
+            source_doc_kind="s" * (item_properties["source_doc_kind"]["maxLength"] + 1),
+        )
+    )
+    boundary_projected = project_bridge_safe_evidence(
+        _safe_evidence(
+            evidence_id="e" * item_properties["evidence_id"]["maxLength"],
+            bridge_trace_id="b" * item_properties["bridge_trace_id"]["maxLength"],
+            source_doc_kind="s" * item_properties["source_doc_kind"]["maxLength"],
+        )
+    )
+
+    assert "evidence_id" not in projected
+    assert "bridge_trace_id" not in projected
+    assert "source_doc_kind" not in projected
+    assert len(boundary_projected["evidence_id"]) == item_properties["evidence_id"]["maxLength"]
+    assert len(boundary_projected["bridge_trace_id"]) == item_properties["bridge_trace_id"]["maxLength"]
+    assert len(boundary_projected["source_doc_kind"]) == item_properties["source_doc_kind"]["maxLength"]
+
+
 def test_hold_decision_aligns_with_schema_hold_contract():
     schema = _load_schema()
     properties = schema["properties"]

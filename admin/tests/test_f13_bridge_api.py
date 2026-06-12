@@ -201,6 +201,44 @@ def test_hold_response_when_evidence_id_is_missing(client: TestClient):
     assert body["feedback_candidate_required"] is True
 
 
+@pytest.mark.parametrize(
+    ("field", "length"),
+    [
+        ("evidence_id", 121),
+        ("bridge_trace_id", 161),
+    ],
+)
+def test_hold_response_when_required_projected_field_exceeds_schema_cap(
+    client: TestClient,
+    field: str,
+    length: int,
+):
+    response = client.post(ROUTE, json=_payload([_safe_evidence(**{field: field[0] * length})]))
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert "projected evidence is missing Bridge schema required fields" in body["hold_reason"]
+
+
+def test_optional_source_doc_kind_exceeding_schema_cap_is_not_returned(client: TestClient):
+    item_schema = _schema()["properties"]["evidence_items"]["items"]["properties"]
+    source_doc_kind_cap = item_schema["source_doc_kind"]["maxLength"]
+
+    response = client.post(
+        ROUTE,
+        json=_payload([_safe_evidence(source_doc_kind="s" * (source_doc_kind_cap + 1))]),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert "source_doc_kind" not in body["evidence_items"][0]
+
+
 def test_denied_response_for_restricted_rights(client: TestClient):
     response = client.post(ROUTE, json=_payload([_safe_evidence(rights_status="RESTRICTED")]))
 

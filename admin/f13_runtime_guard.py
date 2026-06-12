@@ -119,6 +119,13 @@ BRIDGE_EVIDENCE_ALLOWLIST_FIELDS = {
     "validation_shape_ids",
 }
 
+_BRIDGE_EVIDENCE_FIELD_MAX_LENGTHS = {
+    "evidence_id": 120,
+    "bridge_trace_id": 160,
+    "source_doc_kind": 120,
+    "validation_shape_ids": 120,
+}
+
 _REDACTED_PREFLIGHT_FIELD = "redacted_preflight_replay_evidence"
 
 _SAFE_METADATA_FIELD_NAMES = {
@@ -568,10 +575,16 @@ def project_bridge_safe_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             continue
         if field == "validation_shape_ids":
             if isinstance(value, list):
-                safe_ids = [_safe_label(item, 120) for item in value]
+                safe_ids = [
+                    _safe_label(
+                        item,
+                        _BRIDGE_EVIDENCE_FIELD_MAX_LENGTHS["validation_shape_ids"],
+                    )
+                    for item in value
+                ]
                 projected[field] = [item for item in safe_ids if item is not None]
             continue
-        label = _safe_label(value)
+        label = _safe_label(value, _BRIDGE_EVIDENCE_FIELD_MAX_LENGTHS.get(field, 240))
         if label is not None:
             projected[field] = label
     return projected
