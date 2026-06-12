@@ -1,123 +1,177 @@
-# F13 Bridge Runtime Contract Shape
+# F13 Bridge Runtime Contract Shape Wrapper
 
-## Purpose
+## 0. Metadata
 
-This Markdown file is the human-readable static contract wrapper for
-`shapes/f13_bridge_runtime_contract_shape.json`. The JSON shape remains the
-canonical machine-readable Bridge/F13 runtime contract. This wrapper records
-the Bridge Runtime MVP boundary and the verification status for later gates.
+* Task ID: R9ZJI_STATIC_GAP_MAP_DOC_ONLY_CLOSURE_DRAFT_PACKET_NO_RUNTIME_NO_HTTP_NO_DB
+* Document status: DRAFT_STATIC_DOC_WRAPPER
+* Scope: Static documentation wrapper for existing F13 Bridge runtime contract shape surfaces only.
+* Created from:
+  * admin/f13_bridge_api.py
+  * admin/f13_runtime_guard.py
+  * schemas/f13_bridge_evidence_response.schema.json
+  * schemas/f13_bridge_check_policy_response.schema.json
+  * schemas/f13_bridge_explain_trace_response.schema.json
+  * gap_maps/F13_current_gap_map.md
+  * docs/feature_specs/F13_library_auto_intake_and_curation_v0.1.md
+* Runtime execution: NOT_EXECUTED
+* HTTP behavior: NOT_VERIFIED
+* DB/network behavior: NOT_VERIFIED
+* Release readiness: NOT_GRANTED
 
-Artifact state: `DRAFT_PENDING_STATIC_VERIFICATION`
+## 1. Purpose
 
-## Scope Boundary
+This file is a static documentation wrapper for the existing F13 Bridge runtime
+contract shape surfaces. It summarizes the current documented and schema-backed
+Bridge/F13 response shapes for retrieve-evidence, check-policy, explain-trace,
+safe evidence projection, and visible HOLD or fail-closed posture.
 
-The Bridge Runtime MVP boundary is limited to Skillup-facing evidence
-retrieval, policy checking, and trace explanation. Bridge/F13 routes must
-consume caller-provided evidence only.
+This file is not a schema replacement, not a runtime proof, not a release
+proof, and not a test result. The JSON schemas remain the machine-readable
+response contracts for the response surfaces listed below, and the feature spec
+continues to identify the matching runtime contract shape as the canonical
+machine-readable shape.
 
-Bridge/F13 routes must not query databases, warehouses, library indexes,
-files, networks, runtime services, environment variables, or secret stores.
-They must not expose raw evidence, internal paths, DB or DSN details, raw
-prompts, secret-like values, or admin-only values in external responses.
+## 2. Source Surfaces
 
-## Endpoint / Function Map
+Existing static surfaces used as inputs:
 
-| Endpoint | Function | Static contract |
-|---|---|---|
-| `POST /api/f13/bridge/retrieve-evidence` | `retrieve_bridge_evidence` | Accepts caller-provided evidence and returns safe pointer metadata or HOLD/DENIED. |
-| `POST /api/f13/bridge/check-policy` | `check_bridge_policy` | Applies evidence, role, scope, license, and output constraints with fail-closed results. |
-| `POST /api/f13/bridge/explain-trace` | `explain_bridge_trace` | Returns safe trace metadata and a bounded feedback candidate when trace explanation is not OK. |
+* admin/f13_bridge_api.py
+* admin/f13_runtime_guard.py
+* schemas/f13_bridge_evidence_response.schema.json
+* schemas/f13_bridge_check_policy_response.schema.json
+* schemas/f13_bridge_explain_trace_response.schema.json
+* gap_maps/F13_current_gap_map.md
+* docs/feature_specs/F13_library_auto_intake_and_curation_v0.1.md
 
-## Evidence Requirement
+## 3. Contract Shape Summary
 
-`evidence_id` and `safe_summary` are required for OK Bridge evidence
-decisions. Evidence returned across the Bridge boundary must be pointer-only
-safe metadata and must keep `raw_text_included=false` and
-`internal_path_included=false`.
+### retrieve-evidence response
 
-Allowed safe evidence metadata:
+The retrieve-evidence response shape is bounded by
+schemas/f13_bridge_evidence_response.schema.json. Its required top-level fields
+are result_status, evidence_items, hold_reason, feedback_candidate_required,
+raw_text_included, internal_path_included, policy_result, and created_at.
 
-- `evidence_id`
-- `bridge_trace_id`
-- `safe_summary`
-- `pointer_uri`
-- `raw_text_policy`
-- `rights_status`
-- optional `source_doc_kind`
-- optional `validation_shape_ids`
+The allowed result statuses are OK, HOLD, and DENIED. Returned evidence items
+are pointer-only safe metadata with required evidence_id, bridge_trace_id,
+safe_summary, pointer_uri, raw_text_policy, and rights_status fields. Optional
+static fields include source_doc_kind and validation_shape_ids. The schema
+requires raw_text_included to be false and internal_path_included to be false.
 
-## Trace Requirement
+The current limited remediation for retrieve-evidence is accepted only within
+the max-length contract scope: evidence_id is capped at 120 characters,
+bridge_trace_id at 160 characters, and source_doc_kind at 120 characters.
 
-`bridge_trace_id` and safe evidence identifiers are required for OK trace
-explanation. A missing or unsafe trace identifier, missing safe evidence IDs,
-or forbidden trace content must return HOLD or DENIED.
+### check-policy response
 
-The explain-trace response must expose top-level
-`feedback_candidate_required` and `feedback_candidate` fields.
-`feedback_candidate` is `null` when the trace explanation is OK. Otherwise it
-must be a bounded safe review object without raw evidence, internal path,
-secret-like values, or DB/DSN detail.
+The check-policy response shape is bounded by
+schemas/f13_bridge_check_policy_response.schema.json. Its required top-level
+fields include result_status, bridge_trace_id, policy_result, hold_reason,
+output_constraints, blocked_fields, role, evidence_depth, leak counters,
+feedback_candidate_required, raw_text_included, internal_path_included, and
+created_at.
 
-## Policy / Fail-Closed Requirement
+The allowed result statuses are OK, HOLD, and DENIED. policy_result is PASS,
+HOLD, or DENIED. The raw text, internal path, raw prompt, secret, and instructor
+guide leak counters are fixed at zero by the schema. raw_text_included and
+internal_path_included are fixed as false.
 
-The Bridge guard must return HOLD or DENIED for:
+### explain-trace response
 
-- unsafe or missing evidence
-- restricted rights
-- unverified rights
-- denied or unverified raw text policy
-- missing role, course, module, binding, tenant, organization, or cohort scope
-- role/evidence-depth mismatch
-- tenant, organization, cohort, or license scope mismatch
-- missing or inactive license entitlement when required
-- schema/model mismatch
+The explain-trace response shape is bounded by
+schemas/f13_bridge_explain_trace_response.schema.json. Its required top-level
+fields include result_status, request_id, bridge_trace_id, course_id, module_id,
+binding_id, evidence_ids, policy_result, hold_reason, role, evidence_depth,
+review_trace, audit_trace, leak counters, feedback_candidate_required,
+feedback_candidate, visible_trace_summary, raw_text_included,
+internal_path_included, and created_at.
 
-## Raw Leak Blocking Requirement
+feedback_candidate is null when the trace explanation is OK. Otherwise the
+static schema permits a bounded BRIDGE_TRACE_REVIEW object with reason,
+next_action, and optional bridge_trace_id. review_trace and audit_trace are
+safe metadata shapes only; audit_trace keeps raw_export_allowed false.
 
-The Bridge boundary must not return raw text, raw prompts, raw standard text,
-internal paths, local paths, DB fields, DSN values, secret markers, token
-markers, private keys, credential markers, admin-only output, audit-only output,
-or raw instructor-guide values.
+### Bridge safe evidence projection
 
-External response leak counters must remain zero where present:
+admin/f13_runtime_guard.py defines BRIDGE_EVIDENCE_ALLOWLIST_FIELDS for
+evidence_id, bridge_trace_id, safe_summary, pointer_uri, raw_text_policy,
+rights_status, source_doc_kind, and validation_shape_ids. The same source
+normalizes rights_status and raw_text_policy, omits forbidden fields from the
+projection, and applies field-specific max lengths for evidence_id,
+bridge_trace_id, source_doc_kind, and validation_shape_ids.
 
-- `raw_text_export_count`
-- `internal_path_leak_count`
-- `raw_prompt_output_count`
-- `secret_leak_count`
-- `instructor_guide_raw_leak_count`
+The projection summary here is static documentation only. It does not prove
+runtime behavior.
 
-## Schema References
+### HOLD and fail-closed posture visible from static surfaces
 
-- `schemas/f13_bridge_evidence_response.schema.json`
-- `schemas/f13_bridge_check_policy_response.schema.json`
-- `schemas/f13_bridge_explain_trace_response.schema.json`
+The static surfaces show HOLD or DENIED outcomes for missing or invalid
+evidence, missing evidence_id, missing safe_summary, restricted rights,
+unverified rights, denied or unverified raw text policy, forbidden field or
+pattern detection, direct DB access attempts for Bridge-only Skillup requests,
+role or evidence-depth policy mismatch, tenant or license boundary issues, and
+missing bridge_trace_id or evidence_ids for trace explanation.
 
-## Test Candidate References
+The feature spec states a no-DB Bridge boundary for Skillup-facing evidence
+retrieval, policy checks, and trace explanation, and it keeps functional 200
+behavior, runtime smoke, authenticated smoke, Track A approval, Beta approval,
+F13 approval, and release approval outside this static gate.
 
-These are static future test candidates only. They are not executed by this
-materialization packet.
+## 4. Static Boundaries
 
-- `admin/tests/test_f13_bridge_evidence_response_schema.py`
-- `admin/tests/test_f13_bridge_check_policy_response_schema.py`
-- `admin/tests/test_f13_bridge_explain_trace_response_schema.py`
+* Static documentation only
+* No runtime/server execution
+* No HTTP/browser/healthcheck
+* No DB/network
+* No tests executed
+* No schema changes
+* No code changes
 
-## Explicit Status
+## 5. Gap Map Relationship
 
-| Item | Status |
-|---|---|
-| Runtime behavior | `NOT_VERIFIED` |
-| Functional Bridge 200 behavior | `NOT_VERIFIED` |
-| Tests | `NOT_EXECUTED` |
-| Track A PASS | `NOT_GRANTED` |
-| Beta PASS | `NOT_GRANTED` |
-| F13 PASS | `NOT_GRANTED` |
-| Release PASS | `NOT_GRANTED` |
+This file addresses the gap-map item:
 
-## Prohibited Claims
+* Gap: Shape documentation wrapper missing
+* Source path: shapes/f13_bridge_runtime_contract_shape.md
+* Classification: STATIC_DOC_GAP
+* Static-only closable: YES
 
-- Do not claim runtime PASS.
-- Do not claim Beta PASS.
-- Do not claim F13 PASS.
-- Do not claim Release PASS.
+This file does not update gap_maps/F13_current_gap_map.md. Any gap-map status
+change requires a later explicit packet.
 
+## 6. NOT_EXECUTED / NOT_VERIFIED / NOT_GRANTED
+
+* NOT_EXECUTED:
+  tests, lint, build, integration, E2E, runtime/server,
+  HTTP/browser/healthcheck, DB/network, deploy/release/tag/push
+* NOT_VERIFIED:
+  full regression, runtime behavior, HTTP behavior, DB/network behavior,
+  production/release/deployment behavior, answer quality, Bridge health,
+  Skillup MVP
+* NOT_GRANTED:
+  Track A PASS, Beta PASS, F13 PASS, release readiness, deployment readiness,
+  production readiness, Bridge health PASS, answer quality PASS,
+  Skillup MVP PASS
+
+## 7. Quarantine Statement
+
+reports/track_a/limited_skillup_beta_use_operation_runbook/raw_secret_leak_policy.md
+remains QUARANTINE. It was not opened, hashed, summarized, inferred, copied,
+deleted, inspected, printed, or used as a recovery source for this wrapper.
+
+## 8. Future Gates
+
+Any stronger claim requires a later explicit gate:
+
+* explicit test packet
+* explicit runtime packet
+* explicit HTTP packet
+* explicit DB/network packet
+* explicit release/readiness packet
+* explicit security-specific packet for any secret-bearing file handling
+
+## 9. Final Static Doc Wrapper Status
+
+* Status: DRAFT_STATIC_DOC_WRAPPER
+* Completion claim: STATIC_DOC_WRAPPER_CREATED_WITH_LIMITS
+* No PASS escalation.
