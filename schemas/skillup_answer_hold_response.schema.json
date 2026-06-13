@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.local/schemas/skillup_answer_hold_response.schema.json",
+  "title": "Skillup Answer/HOLD Response Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "trace_id",
+    "answer_status",
+    "result_status",
+    "evidence_required",
+    "evidence",
+    "policy",
+    "raw_text_included",
+    "internal_path_included",
+    "review_required"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "contract_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "course_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "module_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "binding_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "answer_status": {
+      "type": "string",
+      "enum": [
+        "ANSWERED",
+        "HOLD",
+        "REDACTED",
+        "INVALIDATED"
+      ]
+    },
+    "result_status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "HOLD",
+        "ERROR"
+      ]
+    },
+    "answer": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "hold_reason_code": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "hold_reason": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "evidence_required": {
+      "type": "boolean"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "node_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "pointer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "source_label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "rights_status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "sensitivity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_leak_check_passed",
+        "rights_check_passed",
+        "sensitivity_check_passed",
+        "evidence_check_passed"
+      ],
+      "properties": {
+        "raw_leak_check_passed": {
+          "type": "boolean"
+        },
+        "rights_check_passed": {
+          "type": "boolean"
+        },
+        "sensitivity_check_passed": {
+          "type": "boolean"
+        },
+        "evidence_check_passed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "raw_text_included": {
+      "type": "boolean",
+      "const": false
+    },
+    "internal_path_included": {
+      "type": "boolean",
+      "const": false
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 400
+      }
+    },
+    "review_required": {
+      "type": "boolean"
+    }
+  }
+}
