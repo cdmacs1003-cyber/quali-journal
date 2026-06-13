@@ -1,0 +1,133 @@
+{
+  "schema_version": "1",
+  "contract_version": "R9ZKY-2026-06-13",
+  "mapping_id": "skillup_answer_hold_route_mapping_r9zky_20260613",
+  "source_schema": "schemas/skillup_answer_hold_response.schema.json",
+  "mapping_status": "CANDIDATE_WITH_LIMITS",
+  "purpose": "Document the static candidate mapping between the dedicated Skillup answer/HOLD response schema and the existing route, helper, Bridge schema, and static test surfaces without runtime execution.",
+  "field_mappings": [
+    {
+      "schema_field": "trace_id",
+      "route_static_surface_candidate": "bridge_trace_id",
+      "mapping_decision": "MAP_WITH_ALIAS",
+      "limit": "route integration not executed"
+    },
+    {
+      "schema_field": "evidence",
+      "route_static_surface_candidate": "evidence_items",
+      "mapping_decision": "MAP_WITH_ALIAS",
+      "limit": "route integration not executed"
+    },
+    {
+      "schema_field": "policy",
+      "route_static_surface_candidate": "policy_result",
+      "mapping_decision": "MAP_WITH_ALIAS",
+      "limit": "route integration not executed"
+    },
+    {
+      "schema_field": "hold_reason_code",
+      "route_static_surface_candidate": "no direct field found",
+      "mapping_decision": "UNRESOLVED_GAP",
+      "limit": "requires later schema or route model repair"
+    },
+    {
+      "schema_field": "schema_version",
+      "route_static_surface_candidate": "no direct field found",
+      "mapping_decision": "UNRESOLVED_GAP",
+      "limit": "requires later schema or route model repair"
+    },
+    {
+      "schema_field": "contract_version",
+      "route_static_surface_candidate": "no direct field found",
+      "mapping_decision": "UNRESOLVED_GAP",
+      "limit": "requires later schema or route model repair"
+    },
+    {
+      "schema_field": "warnings",
+      "route_static_surface_candidate": "no direct field found",
+      "mapping_decision": "UNRESOLVED_GAP",
+      "limit": "requires later schema or route model repair"
+    },
+    {
+      "schema_field": "review_required",
+      "route_static_surface_candidate": "no direct field found",
+      "mapping_decision": "UNRESOLVED_GAP",
+      "limit": "requires later schema or route model repair"
+    }
+  ],
+  "enum_mappings": [
+    {
+      "schema_enum": "result_status.ERROR",
+      "route_static_surface_candidate": "DENIED",
+      "mapping_decision": "MAP_WITH_CAUTION",
+      "limit": "semantic equivalence is not runtime verified"
+    },
+    {
+      "schema_enum": "result_status.OK",
+      "route_static_surface_candidate": "OK",
+      "mapping_decision": "DIRECT_MATCH",
+      "limit": "static only"
+    },
+    {
+      "schema_enum": "result_status.HOLD",
+      "route_static_surface_candidate": "HOLD",
+      "mapping_decision": "DIRECT_MATCH_OR_UNRESOLVED",
+      "limit": "static only"
+    }
+  ],
+  "policy_mappings": [
+    {
+      "schema_policy_field": "raw_leak_check_passed",
+      "route_static_surface_candidate": "policy_result.raw_leak_pass",
+      "mapping_decision": "MAP_WITH_ALIAS",
+      "limit": "nearest observed static surface; route integration not executed"
+    },
+    {
+      "schema_policy_field": "rights_check_passed",
+      "route_static_surface_candidate": "policy_result.rights_pass",
+      "mapping_decision": "MAP_WITH_ALIAS",
+      "limit": "nearest observed static surface; route integration not executed"
+    },
+    {
+      "schema_policy_field": "sensitivity_check_passed",
+      "route_static_surface_candidate": "policy_result.sensitivity_pass",
+      "mapping_decision": "MAP_WITH_ALIAS",
+      "limit": "nearest observed static surface; route integration not executed"
+    },
+    {
+      "schema_policy_field": "evidence_check_passed",
+      "route_static_surface_candidate": "policy_result.evidence_required_pass",
+      "mapping_decision": "MAP_WITH_ALIAS",
+      "limit": "nearest observed static surface; route integration not executed"
+    }
+  ],
+  "unresolved_gaps": [
+    "direct hold_reason_code route field absent",
+    "direct schema_version route field absent",
+    "direct contract_version route field absent",
+    "direct warnings route field absent",
+    "direct review_required route field absent",
+    "route integration not executed",
+    "runtime behavior not verified",
+    "answer quality not verified",
+    "Skillup MVP not granted"
+  ],
+  "limits": [
+    "mapping candidate only",
+    "static JSON document only",
+    "source schema not modified",
+    "source code not modified",
+    "tests not modified",
+    "runtime/server not executed",
+    "real HTTP not executed",
+    "DB/network not executed",
+    "pytest not executed",
+    "TestClient not executed",
+    "lint/build/integration/E2E not executed",
+    "deploy/release/tag/push not executed",
+    "route integration PASS not granted",
+    "Skillup MVP PASS not granted",
+    "answer quality PASS not granted",
+    "Bridge health PASS not granted"
+  ]
+}
