@@ -203,6 +203,63 @@ Artifact state table format:
 
 ---
 
+## 7.1 Global Codex Completion Report Output Policy
+
+Every completed Codex task must create exactly one external Codex Completion Report markdown file.
+
+External completion report root:
+    H:\장기기억\docs\codex
+
+Normal task completion reports must be saved under:
+    H:\장기기억\docs\codex\<YYYY>\<MM>\
+
+Required filename format:
+    <YYYYMMDD>_<TASK_ID>_Completion_Report.md
+
+Example:
+    H:\장기기억\docs\codex\2026\06\20260613_R9ZKQ_Completion_Report.md
+
+Required folder roles:
+
+| Folder | Purpose |
+|---|---|
+| H:\장기기억\docs\codex\<YYYY>\<MM>\ | Normal task completion reports |
+| H:\장기기억\docs\codex\active\ | Current active task pointers, latest task summary, current-session basis documents |
+| H:\장기기억\docs\codex\handover\ | Final handover reports |
+| H:\장기기억\docs\codex\proofpack\ | Evidence bundles, hashes, manifests, logs, proofpack indexes |
+
+The completion report must include at minimum:
+
+1. Task Summary
+2. Repository path, branch, starting HEAD, final HEAD, worktree before/after
+3. Changed files
+4. Commands executed
+5. Verification
+6. Tests
+7. NOT_EXECUTED
+8. NOT_VERIFIED
+9. NOT_GRANTED claims
+10. Risks
+11. Rollback plan
+12. Next recommended task
+13. Final recommendation
+
+Evidence priority:
+
+1. Completion Report .md = primary evidence
+2. Full terminal log .txt = secondary evidence
+3. Screenshot = supporting evidence only
+4. User summary = supporting context only
+
+No exception rule:
+
+GLOBAL_CODEX_COMPLETION_REPORT_POLICY=ENABLED
+EVERY_COMPLETED_TASK_MUST_CREATE_EXTERNAL_COMPLETION_REPORT=true
+
+This external completion report is evidence. It does not replace repository commits, ProofPacks, or task-specific reports when those are required by the task scope.
+
+---
+
 ## 8. Prohibited actions
 
 Do not:

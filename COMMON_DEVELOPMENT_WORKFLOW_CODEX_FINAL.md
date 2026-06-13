@@ -1325,6 +1325,35 @@ ADR 기본 템플릿:
 
 ---
 
+## Global Codex Completion Report Output Policy
+
+Every completed Codex task should create one external Codex Completion Report markdown file when the user's project policy enables it.
+
+Default external report root:
+    H:\장기기억\docs\codex
+
+Default normal task report location:
+    H:\장기기억\docs\codex\<YYYY>\<MM>\
+
+Default filename format:
+    <YYYYMMDD>_<TASK_ID>_Completion_Report.md
+
+Purpose:
+- preserve execution evidence outside transient terminal output
+- reduce screenshot-only review
+- improve handover quality
+- support long-term memory and auditability
+
+Evidence priority:
+1. Completion Report .md
+2. Full terminal log .txt
+3. Screenshot
+4. User summary
+
+This policy does not weaken any safety rule. It does not authorize file modification, command execution, runtime/server, HTTP, DB/network, external calls, deployment, release, secret inspection, deletion, reset, or rollback. Those actions still require their normal approval gates.
+
+---
+
 ## 30. 마지막 원칙
 
 ```text

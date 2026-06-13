@@ -148,6 +148,49 @@ secret-like filename presence
 
 ---
 
+## Global Codex Completion Report Policy
+
+For this project, every completed Codex task must create exactly one external Codex Completion Report markdown file.
+
+External report root:
+    H:\장기기억\docs\codex
+
+Normal task report location:
+    H:\장기기억\docs\codex\<YYYY>\<MM>\
+
+Filename format:
+    <YYYYMMDD>_<TASK_ID>_Completion_Report.md
+
+This policy exists because screenshots are supporting evidence only. The external Completion Report .md is the primary evidence for downstream review, handover, and long-term memory.
+
+Evidence priority:
+1. Completion Report .md
+2. Full terminal log .txt
+3. Screenshot
+4. User summary
+
+The external report must preserve:
+- task ID
+- purpose
+- repository path
+- branch
+- starting HEAD
+- final HEAD
+- changed files
+- commands executed
+- verification
+- NOT_EXECUTED
+- NOT_VERIFIED
+- NOT_GRANTED claims
+- risks
+- rollback plan
+- next recommended task
+- final recommendation
+
+The report policy does not grant runtime/server, real HTTP, DB/network, deploy, release, secret inspection, or broad regression permission. Those actions still require separate explicit approval.
+
+---
+
 ## 6. Recovery Package 규칙
 
 Recovery Package는 dirty worktree에서 clean worktree로 필요한 자료를 옮기기 전 필요한 승인 단위다.
