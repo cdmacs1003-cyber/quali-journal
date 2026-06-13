@@ -120,11 +120,23 @@ def _assert_payload_matches_schema_contract(payload: dict[str, Any], schema: dic
         assert payload[counter] == properties[counter]["const"]
 
 
+def _assert_unknown_root_field_rejected_by_strict_schema(
+    payload: dict[str, Any], schema: dict[str, Any]
+) -> None:
+    assert schema.get("additionalProperties") is False
+    over_permissive = {**payload, "unexpected_root_field": "not allowed"}
+
+    assert set(payload) == set(schema["required"])
+    assert "unexpected_root_field" not in schema["properties"]
+    assert not set(over_permissive).issubset(schema["properties"])
+
+
 def test_check_policy_response_schema_status_and_required_fields():
     schema = _schema()
     properties = schema["properties"]
     required = set(schema["required"])
 
+    assert schema.get("type") == "object"
     assert schema["additionalProperties"] is False
     assert set(properties["result_status"]["enum"]) == {"OK", "HOLD", "DENIED"}
     assert {
@@ -169,6 +181,14 @@ def test_check_policy_representative_hold_and_denied_responses_match_schema_cont
         assert FORBIDDEN_RESPONSE_FIELDS.isdisjoint(payload)
 
 
+def test_check_policy_response_schema_rejects_unknown_root_fields_when_strict():
+    schema = _schema()
+    payload = _safe_ok_response()
+
+    _assert_payload_matches_schema_contract(payload, schema)
+    _assert_unknown_root_field_rejected_by_strict_schema(payload, schema)
+
+
 def test_check_policy_response_schema_blocks_raw_and_internal_flags():
     properties = _schema()["properties"]
 
@@ -193,4 +213,3 @@ def test_check_policy_response_schema_blocks_raw_and_internal_flags():
         "instructor_guide_raw_leak_count",
     ):
         assert properties[counter]["const"] == 0
-
