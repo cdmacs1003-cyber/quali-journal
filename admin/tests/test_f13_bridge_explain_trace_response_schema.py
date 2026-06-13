@@ -111,8 +111,13 @@ def test_explain_trace_response_schema_status_and_required_fields():
     schema = _schema()
     properties = schema["properties"]
     required = set(schema["required"])
+    unexpected_root_payload = _safe_ok_trace_response(unexpected_root_field="not allowed")
 
+    assert schema.get("type") == "object"
     assert schema["additionalProperties"] is False
+    assert "unexpected_root_field" not in properties
+    assert set(unexpected_root_payload) != required
+    assert not set(unexpected_root_payload).issubset(properties)
     assert set(properties["result_status"]["enum"]) == {"OK", "HOLD", "DENIED"}
     assert {
         "result_status",
