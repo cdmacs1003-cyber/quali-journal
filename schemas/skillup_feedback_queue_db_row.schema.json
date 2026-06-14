@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.local/schemas/skillup_feedback_queue_db_row.schema.json",
+  "title": "Skillup Feedback Queue SQLite Fixture Row Contract",
+  "description": "Normalized DB-row contract for the local disposable SQLite feedback queue fixture. This schema is not executable validation evidence and does not grant durable DB-backed persistence PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "persistence_mechanism",
+    "feedback_id",
+    "origin_event_id",
+    "current_status",
+    "dedup_key",
+    "created_at",
+    "review_reason_code",
+    "safe_summary",
+    "raw_text_included",
+    "internal_path_included",
+    "db_access_executed"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "R9ZMH-2026-06-14"
+    },
+    "persistence_mechanism": {
+      "type": "string",
+      "const": "DB_BACKED_QUEUE_DEFERRED",
+      "description": "The durable record keeps the deferred DB-backed contract marker. The local disposable SQLite fixture mechanism is execution context, not a selected-route response field."
+    },
+    "feedback_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    },
+    "origin_event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    },
+    "current_status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "review_required",
+        "resolved",
+        "rejected",
+        "duplicate"
+      ]
+    },
+    "dedup_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 220,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "review_reason_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Z0-9_]+$"
+    },
+    "safe_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "Safe minimized reviewer summary only; raw/internal/secret-like data is forbidden."
+    },
+    "trace_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    },
+    "raw_text_included": {
+      "type": "boolean",
+      "const": false
+    },
+    "internal_path_included": {
+      "type": "boolean",
+      "const": false
+    },
+    "db_access_executed": {
+      "type": "boolean",
+      "const": false,
+      "description": "Durable row payload field remains false. Future fixture execution evidence must be reported outside the selected-route response and outside this persisted payload."
+    }
+  }
+}
