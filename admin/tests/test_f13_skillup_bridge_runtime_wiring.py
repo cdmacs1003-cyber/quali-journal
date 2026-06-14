@@ -143,6 +143,26 @@ def _assert_no_raw_internal_or_secret_echo(body: dict[str, Any]) -> None:
     assert "token" not in rendered
 
 
+def _assert_no_forbidden_reason_label_tokens(*values: Any) -> None:
+    rendered = "\n".join(str(value) for value in values if value is not None).lower()
+    for token in (
+        "raw_text",
+        "raw text",
+        "raw_query",
+        "raw query",
+        "internal_path",
+        "internal path",
+        "api_token",
+        "secret",
+        "credential",
+        ".env",
+        "h:\\",
+        "c:\\",
+        "file://",
+    ):
+        assert token not in rendered
+
+
 def test_skillup_bridge_route_hold_returns_schema_shaped_review_response(client: TestClient):
     response = client.post(
         ROUTE,
@@ -166,6 +186,7 @@ def test_skillup_bridge_route_hold_returns_schema_shaped_review_response(client:
     assert body["evidence"] == []
     assert body["hold_reason_code"] == "EVIDENCE_REQUIRED"
     assert "evidence_items" in body["hold_reason"]
+    _assert_no_forbidden_reason_label_tokens(body["hold_reason_code"], body["hold_reason"])
     assert body["policy"]["raw_leak_check_passed"] is True
     assert body["policy"]["evidence_check_passed"] is False
     assert "answer" not in body
@@ -222,6 +243,42 @@ def test_skillup_bridge_route_ok_uses_schema_answer_evidence_and_trace(client: T
     _assert_no_raw_internal_or_secret_echo(body)
 
 
+def test_skillup_bridge_route_sanitizes_unsafe_source_content_reason_labels(client: TestClient):
+    response = client.post(
+        ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "result_status": "OK",
+            "evidence_items": [
+                _safe_evidence(
+                    safe_summary="synthetic raw_text marker should not echo",
+                    pointer_uri="file://synthetic/internal/source.txt",
+                    source_label="synthetic credential marker should not echo",
+                    secret="synthetic-secret-marker",
+                )
+            ],
+            "raw_text_included": True,
+            "internal_path_included": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_schema_shaped_response(body)
+    assert body["result_status"] == "ERROR"
+    assert body["answer_status"] == "INVALIDATED"
+    assert body["evidence_required"] is True
+    assert body["review_required"] is True
+    assert body["hold_reason_code"] == "SOURCE_CONTENT_BLOCKED"
+    assert body["hold_reason"] == "Unsafe source content was blocked."
+    _assert_no_forbidden_reason_label_tokens(body["hold_reason_code"], body["hold_reason"])
+    assert "SOURCE_DENIED_NORMALIZED_TO_ERROR" in body.get("warnings", [])
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    _assert_no_pass_fields(body)
+    _assert_no_raw_internal_or_secret_echo(body)
+
+
 def test_skillup_bridge_route_direct_db_attempt_denied_without_db(client: TestClient):
     response = client.post(
         ROUTE,
@@ -244,6 +301,7 @@ def test_skillup_bridge_route_direct_db_attempt_denied_without_db(client: TestCl
     assert body["evidence"] == []
     assert body["hold_reason_code"] == "NO_DB_BOUNDARY"
     assert "no-DB safety boundary" in body["hold_reason"]
+    _assert_no_forbidden_reason_label_tokens(body["hold_reason_code"], body["hold_reason"])
     assert "SOURCE_DENIED_NORMALIZED_TO_ERROR" in body.get("warnings", [])
     assert body["policy"] == {
         "raw_leak_check_passed": True,

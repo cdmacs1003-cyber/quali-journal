@@ -67,6 +67,25 @@ _UNSAFE_STRING_MARKERS = (
     "h:\\",
     "c:\\",
 )
+_FORBIDDEN_REASON_LABEL_MARKERS = (
+    "raw_text",
+    "raw text",
+    "raw_query",
+    "raw query",
+    "raw prompt",
+    "internal_path",
+    "internal path",
+    "api_token",
+    "api token",
+    "secret",
+    "token",
+    "credential",
+    ".env",
+    "file://",
+    "h:\\",
+    "c:\\",
+)
+_SANITIZED_SOURCE_CONTENT_HOLD_REASON = "Unsafe source content was blocked."
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:
@@ -97,6 +116,20 @@ def _safe_string(value: Any, *, max_length: int) -> str | None:
 
 def _safe_optional(source: Mapping[str, Any], key: str, *, max_length: int = 160) -> str | None:
     return _safe_string(source.get(key), max_length=max_length)
+
+
+def _has_forbidden_reason_label(value: Any) -> bool:
+    if _is_missing(value):
+        return False
+    lowered = str(value).strip().lower()
+    return any(marker in lowered for marker in _FORBIDDEN_REASON_LABEL_MARKERS)
+
+
+def _safe_hold_reason(source: Mapping[str, Any], *, max_length: int = 1000) -> str | None:
+    value = source.get("hold_reason")
+    if _has_forbidden_reason_label(value):
+        return _SANITIZED_SOURCE_CONTENT_HOLD_REASON
+    return _safe_string(value, max_length=max_length)
 
 
 def _first_safe(*values: Any, max_length: int = 160) -> str | None:
@@ -189,10 +222,8 @@ def _hold_reason_code(result_status: str, response: Mapping[str, Any], warnings:
 
     reason = str(response.get("hold_reason") or "").strip().lower()
     if result_status == RESULT_ERROR:
-        if "raw text" in reason or "raw_text" in reason:
-            return "RAW_TEXT_BLOCKED"
-        if "internal path" in reason or "internal_path" in reason:
-            return "INTERNAL_PATH_BLOCKED"
+        if _has_forbidden_reason_label(reason):
+            return "SOURCE_CONTENT_BLOCKED"
         if "db" in reason or "no-db" in reason:
             return "NO_DB_BOUNDARY"
         if "role" in reason or "access" in reason:
@@ -333,7 +364,7 @@ def adapt_skillup_answer_hold_response(
     else:
         if hold_reason_code is not None:
             adapted["hold_reason_code"] = hold_reason_code
-        hold_reason = _safe_optional(response, "hold_reason", max_length=1000)
+        hold_reason = _safe_hold_reason(response, max_length=1000)
         if hold_reason is not None:
             adapted["hold_reason"] = hold_reason
 
