@@ -4,63 +4,72 @@
   "mapping_id": "skillup_answer_hold_route_mapping_r9zky_20260613",
   "source_schema": "schemas/skillup_answer_hold_response.schema.json",
   "mapping_status": "CANDIDATE_WITH_LIMITS",
-  "purpose": "Document the static candidate mapping between the dedicated Skillup answer/HOLD response schema and the existing route, helper, Bridge schema, and static test surfaces without runtime execution.",
+  "purpose": "Document the static candidate mapping between the dedicated Skillup answer/HOLD response schema and the existing route, helper, Bridge schema, adapter, and static test surfaces without runtime execution.",
   "field_mappings": [
     {
       "schema_field": "trace_id",
-      "route_static_surface_candidate": "bridge_trace_id",
-      "mapping_decision": "MAP_WITH_ALIAS",
-      "limit": "route integration not executed"
+      "route_static_surface_candidate": "bridge_trace_id via adapter alias/fallback",
+      "mapping_decision": "ADAPTER_DERIVED_WITH_ALIAS",
+      "evidence_basis": "adapter _trace_id maps response.bridge_trace_id, evidence bridge_trace_id, feedback origin_event_id, request origin_event_id, or feedback_candidate.bridge_trace_id before deterministic fallback",
+      "limit": "fallback trace is adapter-derived; route integration not executed"
     },
     {
       "schema_field": "evidence",
-      "route_static_surface_candidate": "evidence_items",
-      "mapping_decision": "MAP_WITH_ALIAS",
-      "limit": "route integration not executed"
+      "route_static_surface_candidate": "evidence_items through adapter schema projection",
+      "mapping_decision": "ADAPTER_NORMALIZED_SCHEMA_PROJECTION",
+      "evidence_basis": "adapter _evidence_items projects safe evidence_items and fallback evidence_id/pointer_uri into schema evidence objects",
+      "limit": "schema validator and route integration not executed"
     },
     {
       "schema_field": "policy",
-      "route_static_surface_candidate": "policy_result",
-      "mapping_decision": "MAP_WITH_ALIAS",
-      "limit": "route integration not executed"
+      "route_static_surface_candidate": "policy_result through adapter policy mapper",
+      "mapping_decision": "ADAPTER_NORMALIZED_WITH_DEFAULTS",
+      "evidence_basis": "adapter _policy maps raw_leak_pass, rights_pass, sensitivity_pass, and evidence_required_pass or conservative defaults into required policy booleans",
+      "limit": "defaulted policy values are not runtime policy proof"
     },
     {
       "schema_field": "hold_reason_code",
-      "route_static_surface_candidate": "no direct field found",
-      "mapping_decision": "UNRESOLVED_GAP",
-      "limit": "requires later schema or route model repair"
+      "route_static_surface_candidate": "derived by adapter from result_status and hold_reason",
+      "mapping_decision": "DERIVED_BY_ADAPTER",
+      "evidence_basis": "adapter _hold_reason_code derives RAW_TEXT_BLOCKED, INTERNAL_PATH_BLOCKED, NO_DB_BOUNDARY, ROLE_ACCESS_DENIED, DENIED_POLICY_BOUNDARY, BRIDGE_RESPONSE_REQUIRED, EVIDENCE_REQUIRED, UNSUPPORTED_STATUS_HOLD, or HOLD_REVIEW_REQUIRED",
+      "limit": "reason-text derivation remains static and brittle; route integration not executed"
     },
     {
       "schema_field": "schema_version",
-      "route_static_surface_candidate": "no direct field found",
-      "mapping_decision": "UNRESOLVED_GAP",
-      "limit": "requires later schema or route model repair"
+      "route_static_surface_candidate": "adapter constant SCHEMA_VERSION",
+      "mapping_decision": "SUPPLIED_BY_ADAPTER_CONSTANT",
+      "evidence_basis": "adapter emits schema_version from SCHEMA_VERSION = \"1\"",
+      "limit": "route integration not executed"
     },
     {
       "schema_field": "contract_version",
-      "route_static_surface_candidate": "no direct field found",
-      "mapping_decision": "UNRESOLVED_GAP",
-      "limit": "requires later schema or route model repair"
+      "route_static_surface_candidate": "adapter constant CONTRACT_VERSION",
+      "mapping_decision": "SUPPLIED_BY_ADAPTER_CONSTANT",
+      "evidence_basis": "adapter emits contract_version from CONTRACT_VERSION = \"R9ZKY-2026-06-13\"",
+      "limit": "route integration not executed"
     },
     {
       "schema_field": "warnings",
-      "route_static_surface_candidate": "no direct field found",
-      "mapping_decision": "UNRESOLVED_GAP",
-      "limit": "requires later schema or route model repair"
+      "route_static_surface_candidate": "adapter safe warning array",
+      "mapping_decision": "DERIVED_BY_ADAPTER",
+      "evidence_basis": "adapter collects TRACE_ID_FALLBACK_USED, SOURCE_DENIED_NORMALIZED_TO_ERROR, and EVIDENCE_ARRAY_EMPTY_FOR_HOLD then filters them into schema warnings",
+      "limit": "warning cases not executed"
     },
     {
       "schema_field": "review_required",
-      "route_static_surface_candidate": "no direct field found",
-      "mapping_decision": "UNRESOLVED_GAP",
-      "limit": "requires later schema or route model repair"
+      "route_static_surface_candidate": "derived by adapter from result_status",
+      "mapping_decision": "DERIVED_BY_ADAPTER",
+      "evidence_basis": "adapter emits review_required as result_status != OK",
+      "limit": "route integration not executed"
     }
   ],
   "enum_mappings": [
     {
       "schema_enum": "result_status.ERROR",
       "route_static_surface_candidate": "DENIED",
-      "mapping_decision": "MAP_WITH_CAUTION",
-      "limit": "semantic equivalence is not runtime verified"
+      "mapping_decision": "ADAPTER_NORMALIZED_WITH_CAUTION",
+      "evidence_basis": "adapter _normalize_statuses maps source DENIED to schema result_status ERROR and answer_status INVALIDATED with SOURCE_DENIED_NORMALIZED_TO_ERROR warning",
+      "limit": "broad DENIED semantic equivalence is not granted; runtime not verified"
     },
     {
       "schema_enum": "result_status.OK",
@@ -70,52 +79,107 @@
     },
     {
       "schema_enum": "result_status.HOLD",
-      "route_static_surface_candidate": "HOLD",
-      "mapping_decision": "DIRECT_MATCH_OR_UNRESOLVED",
-      "limit": "static only"
+      "route_static_surface_candidate": "HOLD or unknown non-OK",
+      "mapping_decision": "DIRECT_MATCH_OR_ADAPTER_DEFAULT_HOLD",
+      "evidence_basis": "adapter _normalize_statuses returns HOLD for HOLD or unknown non-OK statuses not normalized to ERROR",
+      "limit": "static only; runtime not verified"
     }
   ],
   "policy_mappings": [
     {
       "schema_policy_field": "raw_leak_check_passed",
       "route_static_surface_candidate": "policy_result.raw_leak_pass",
-      "mapping_decision": "MAP_WITH_ALIAS",
+      "mapping_decision": "ADAPTER_NORMALIZED_WITH_ALIAS_OR_DEFAULT",
+      "evidence_basis": "adapter _policy maps raw_leak_pass or defaults from raw_text_included/internal_path_included false flags",
       "limit": "nearest observed static surface; route integration not executed"
     },
     {
       "schema_policy_field": "rights_check_passed",
       "route_static_surface_candidate": "policy_result.rights_pass",
-      "mapping_decision": "MAP_WITH_ALIAS",
+      "mapping_decision": "ADAPTER_NORMALIZED_WITH_ALIAS_OR_DEFAULT",
+      "evidence_basis": "adapter _policy maps rights_pass or defaults from result_status",
       "limit": "nearest observed static surface; route integration not executed"
     },
     {
       "schema_policy_field": "sensitivity_check_passed",
       "route_static_surface_candidate": "policy_result.sensitivity_pass",
-      "mapping_decision": "MAP_WITH_ALIAS",
+      "mapping_decision": "ADAPTER_NORMALIZED_WITH_ALIAS_OR_DEFAULT",
+      "evidence_basis": "adapter _policy maps sensitivity_pass or defaults from result_status",
       "limit": "nearest observed static surface; route integration not executed"
     },
     {
       "schema_policy_field": "evidence_check_passed",
       "route_static_surface_candidate": "policy_result.evidence_required_pass",
-      "mapping_decision": "MAP_WITH_ALIAS",
+      "mapping_decision": "ADAPTER_NORMALIZED_WITH_ALIAS_OR_DEFAULT",
+      "evidence_basis": "adapter _policy maps evidence_required_pass or defaults from OK status and evidence presence",
       "limit": "nearest observed static surface; route integration not executed"
     }
   ],
+  "legacy_field_mappings": [
+    {
+      "legacy_field": "safe_summary",
+      "selected_response_surface": "answer",
+      "mapping_decision": "INTENTIONALLY_OMITTED_TOP_LEVEL_ABSORBED_BY_ADAPTER",
+      "evidence_basis": "adapter uses safe_summary only as fallback source for schema answer when result_status is OK; R9ZLK selected-route tests reject safe_summary as a top-level field",
+      "limit": "legacy caller compatibility not verified"
+    },
+    {
+      "legacy_field": "top-level evidence_id",
+      "selected_response_surface": "evidence[].evidence_id",
+      "mapping_decision": "INTENTIONALLY_OMITTED_TOP_LEVEL_SCHEMA_NESTED",
+      "evidence_basis": "adapter projects safe evidence_id into schema evidence objects; R9ZLK selected-route tests reject top-level evidence_id",
+      "limit": "legacy caller compatibility not verified"
+    },
+    {
+      "legacy_field": "top-level bridge_trace_id",
+      "selected_response_surface": "trace_id",
+      "mapping_decision": "INTENTIONALLY_OMITTED_TOP_LEVEL_ALIAS_TO_TRACE_ID",
+      "evidence_basis": "adapter maps safe bridge_trace_id candidates into schema trace_id; R9ZLK selected-route tests reject top-level bridge_trace_id",
+      "limit": "legacy caller compatibility not verified"
+    },
+    {
+      "legacy_field": "feedback_queue_item",
+      "selected_response_surface": "internal adapter input only",
+      "mapping_decision": "INTENTIONALLY_OMITTED_INTERNAL_QUEUE_SURFACE",
+      "evidence_basis": "selected route may build feedback_queue_item before adaptation, but adapter top-level allowlist omits it and R9ZLK tests reject it",
+      "limit": "feedback queue persistence not verified"
+    },
+    {
+      "legacy_field": "created_at",
+      "selected_response_surface": "omitted from selected schema-shaped response",
+      "mapping_decision": "INTENTIONALLY_OMITTED_ROUTE_TIMESTAMP",
+      "evidence_basis": "selected route adds created_at before adaptation, but adapter top-level allowlist omits it and response schema has no created_at property",
+      "limit": "legacy caller compatibility not verified"
+    },
+    {
+      "legacy_field": "db_access_executed",
+      "selected_response_surface": "omitted from selected schema-shaped response",
+      "mapping_decision": "INTENTIONALLY_OMITTED_HELPER_BOUNDARY_FLAG",
+      "evidence_basis": "helper surfaces may expose db_access_executed=false, but adapter top-level allowlist omits it and R9ZLK tests reject it",
+      "limit": "no-DB boundary remains static evidence only; runtime not verified"
+    },
+    {
+      "legacy_field": "pointer_uri",
+      "selected_response_surface": "evidence[].pointer",
+      "mapping_decision": "INTENTIONALLY_OMITTED_TOP_LEVEL_SCHEMA_NESTED",
+      "evidence_basis": "adapter maps safe pointer_uri into schema evidence pointer; R9ZLK selected-route tests reject top-level pointer_uri",
+      "limit": "legacy caller compatibility not verified"
+    }
+  ],
   "unresolved_gaps": [
-    "direct hold_reason_code route field absent",
-    "direct schema_version route field absent",
-    "direct contract_version route field absent",
-    "direct warnings route field absent",
-    "direct review_required route field absent",
     "route integration not executed",
     "runtime behavior not verified",
+    "executable schema validation not executed",
+    "legacy caller compatibility not verified",
+    "feedback queue persistence not verified",
     "answer quality not verified",
     "Skillup MVP not granted"
   ],
   "limits": [
     "mapping candidate only",
-    "static JSON document only",
-    "source schema not modified",
+    "static JSON mapping document only",
+    "response schema not modified",
+    "route mapping schema labels only modified",
     "source code not modified",
     "tests not modified",
     "runtime/server not executed",
