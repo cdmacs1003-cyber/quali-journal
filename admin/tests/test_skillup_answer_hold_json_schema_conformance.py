@@ -6,11 +6,24 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from admin.f13_skillup_answer_hold_adapter import adapt_skillup_answer_hold_response
+from admin.f13_skillup_bridge import (
+    skillup_answer_from_bridge_response,
+    skillup_answer_from_request,
+    skillup_feedback_queue_item_from_hold,
+)
+from admin.f13_skillup_feedback_queue_persistence import (
+    SELECTED_ROUTE_FORBIDDEN_QUEUE_FIELDS,
+    durable_feedback_queue_item_from_hold,
+)
+
 
 # R9ZMZ creates this bounded test surface only. The file is not executed by
 # R9ZMZ, and no validator execution evidence is granted by its creation.
 # FULL_JSON_SCHEMA_CONFORMANCE_PASS remains NOT_GRANTED until a later approved
 # execution packet runs bounded node IDs and records evidence.
+# R9ZN3 adds future adapter-produced synthetic payload nodes only. R9ZN3 does
+# not execute helper calls, pytest, or JSON Schema validation.
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -187,6 +200,153 @@ def _payload_missing_required_shape_field() -> dict[str, Any]:
     return payload
 
 
+def _adapter_request_context() -> dict[str, Any]:
+    return {
+        "request_id": "req:skillup-jsonschema-adapter-1",
+        "course_id": "course:skillup-jsonschema",
+        "module_id": "module:skillup-jsonschema",
+        "binding_id": "binding:skillup-jsonschema",
+        "origin_event_id": "hold:skillup_jsonschema_adapter_1",
+        "requester_module": "Skillup",
+    }
+
+
+def _adapter_bridge_ok_response() -> dict[str, Any]:
+    return {
+        "result_status": "OK",
+        "role": "student",
+        "evidence_depth": "student_safe",
+        "course_id": "course:skillup-jsonschema",
+        "module_id": "module:skillup-jsonschema",
+        "binding_id": "binding:skillup-jsonschema",
+        "tenant_id": "tenant:skillup-jsonschema",
+        "organization_id": "org:skillup-jsonschema",
+        "cohort_id": "cohort:skillup-jsonschema",
+        "policy_result": {
+            "raw_leak_pass": True,
+            "rights_pass": True,
+            "sensitivity_pass": True,
+            "evidence_required_pass": True,
+        },
+        "evidence_items": [
+            {
+                "evidence_id": "ev:skillup-jsonschema-adapter-1",
+                "node_id": "node:skillup-jsonschema-adapter-1",
+                "bridge_trace_id": "btrace:skillup-jsonschema-adapter-ok-1",
+                "safe_summary": "Synthetic adapter-produced safe summary.",
+                "pointer_uri": "pointer://diagnostic/skillup-jsonschema/adapter-ok-1",
+                "source_label": "Skillup Bridge safe evidence",
+                "rights_status": "PUBLIC",
+                "sensitivity": "LOW",
+                "raw_text_policy": "SUMMARY_ONLY",
+                "source_doc_kind": "PUBLIC_REFERENCE",
+            }
+        ],
+    }
+
+
+def _adapter_produced_ok_payload() -> dict[str, Any]:
+    bridge_response = _adapter_bridge_ok_response()
+    helper_response = skillup_answer_from_bridge_response(bridge_response)
+    return adapt_skillup_answer_hold_response(
+        helper_response,
+        request_context=_adapter_request_context(),
+        bridge_payload=bridge_response,
+    )
+
+
+def _adapter_produced_hold_payload() -> dict[str, Any]:
+    request_context = _adapter_request_context()
+    helper_response = skillup_answer_from_request(request_context)
+    return adapt_skillup_answer_hold_response(
+        helper_response,
+        request_context=request_context,
+        bridge_payload={},
+    )
+
+
+def _adapter_denied_bridge_response() -> dict[str, Any]:
+    bridge_response = _adapter_bridge_ok_response()
+    bridge_response["result_status"] = "DENIED"
+    bridge_response["hold_reason"] = "Bridge response included raw text."
+    bridge_response["raw_text_included"] = True
+    bridge_response["policy_result"] = {
+        "raw_leak_pass": False,
+        "rights_pass": False,
+        "sensitivity_pass": False,
+        "evidence_required_pass": False,
+    }
+    return bridge_response
+
+
+def _adapter_produced_denied_error_payload() -> dict[str, Any]:
+    bridge_response = _adapter_denied_bridge_response()
+    helper_response = skillup_answer_from_bridge_response(bridge_response)
+    return adapt_skillup_answer_hold_response(
+        helper_response,
+        request_context=_adapter_request_context(),
+        bridge_payload=bridge_response,
+    )
+
+
+def _adapter_produced_no_db_boundary_payload() -> dict[str, Any]:
+    direct_db_attempt = {
+        **_adapter_request_context(),
+        "direct_db_access_attempt": True,
+    }
+    helper_response = skillup_answer_from_request(direct_db_attempt)
+    return adapt_skillup_answer_hold_response(
+        helper_response,
+        request_context=_adapter_request_context(),
+        bridge_payload={},
+    )
+
+
+def _adapter_source_with_queue_internal_payload() -> dict[str, Any]:
+    request_context = _adapter_request_context()
+    helper_response = skillup_answer_from_request(request_context)
+    queue_source = {
+        **helper_response,
+        "origin_module": request_context["requester_module"],
+        "origin_event_id": request_context["origin_event_id"],
+    }
+    return {
+        **queue_source,
+        "feedback_queue_item": skillup_feedback_queue_item_from_hold(queue_source),
+    }
+
+
+def _adapter_produced_queue_internal_omission_payload() -> dict[str, Any]:
+    return adapt_skillup_answer_hold_response(
+        _adapter_source_with_queue_internal_payload(),
+        request_context=_adapter_request_context(),
+        bridge_payload={},
+    )
+
+
+def _adapter_produced_durable_queue_payload() -> dict[str, Any]:
+    request_context = _adapter_request_context()
+    hold_response = skillup_answer_from_request(request_context)
+    durable_item = durable_feedback_queue_item_from_hold(
+        {
+            "feedback_id": "fbq:skillup_jsonschema_adapter_1",
+            "origin_event_id": request_context["origin_event_id"],
+            "current_status": "queued",
+            "dedup_key": "Skillup:EVIDENCE_GAP:skillup_jsonschema_adapter_1",
+            "created_at": "1970-01-01T00:00:00Z",
+            "review_reason_code": "BRIDGE_RESPONSE_REQUIRED",
+            "safe_summary": hold_response["hold_reason"],
+            "trace_id": "btrace:skillup-jsonschema-adapter-hold-1",
+            "request_id": request_context["request_id"],
+            "raw_text_included": False,
+            "internal_path_included": False,
+            "db_access_executed": False,
+        }
+    )
+    # This is schema-only contract validation, not persistence proof.
+    return durable_item.to_persistence_dict()
+
+
 def test_skillup_answer_hold_response_schema_accepts_static_ok_payload() -> None:
     _validate(ANSWER_HOLD_RESPONSE_SCHEMA, _sample_ok_answer_payload())
 
@@ -221,6 +381,55 @@ def test_skillup_feedback_queue_item_schema_accepts_static_contract_payload() ->
 
 def test_skillup_feedback_queue_db_row_schema_accepts_static_fixture_row_payload() -> None:
     _validate(FEEDBACK_QUEUE_DB_ROW_SCHEMA, _sample_feedback_queue_db_row_payload())
+
+
+def test_skillup_answer_hold_response_schema_accepts_adapter_produced_ok_payload() -> None:
+    payload = _adapter_produced_ok_payload()
+    assert payload["result_status"] == "OK"
+    assert payload["answer_status"] == "ANSWERED"
+    _validate(ANSWER_HOLD_RESPONSE_SCHEMA, payload)
+
+
+def test_skillup_answer_hold_response_schema_accepts_adapter_produced_hold_payload() -> None:
+    payload = _adapter_produced_hold_payload()
+    assert payload["result_status"] == "HOLD"
+    assert payload["answer_status"] == "HOLD"
+    assert payload["hold_reason_code"] == "BRIDGE_RESPONSE_REQUIRED"
+    _validate(ANSWER_HOLD_RESPONSE_SCHEMA, payload)
+
+
+def test_skillup_answer_hold_response_schema_accepts_adapter_produced_denied_error_payload() -> None:
+    payload = _adapter_produced_denied_error_payload()
+    assert payload["result_status"] == "ERROR"
+    assert payload["answer_status"] == "INVALIDATED"
+    assert payload["hold_reason_code"] == "SOURCE_CONTENT_BLOCKED"
+    _validate(ANSWER_HOLD_RESPONSE_SCHEMA, payload)
+
+
+def test_skillup_answer_hold_response_schema_accepts_adapter_produced_no_db_boundary_payload() -> None:
+    payload = _adapter_produced_no_db_boundary_payload()
+    assert payload["result_status"] == "ERROR"
+    assert payload["answer_status"] == "INVALIDATED"
+    assert payload["hold_reason_code"] == "NO_DB_BOUNDARY"
+    _validate(ANSWER_HOLD_RESPONSE_SCHEMA, payload)
+
+
+def test_skillup_answer_hold_response_schema_omits_adapter_source_queue_internals() -> None:
+    payload = _adapter_produced_queue_internal_omission_payload()
+    assert SELECTED_ROUTE_FORBIDDEN_QUEUE_FIELDS.isdisjoint(payload)
+    _validate(ANSWER_HOLD_RESPONSE_SCHEMA, payload)
+
+
+def test_skillup_answer_hold_response_schema_rejects_unadapted_queue_internal_payload() -> None:
+    errors = _validation_errors(
+        ANSWER_HOLD_RESPONSE_SCHEMA,
+        _adapter_source_with_queue_internal_payload(),
+    )
+    assert any(error.validator == "additionalProperties" for error in errors)
+
+
+def test_skillup_feedback_queue_item_schema_accepts_adapter_produced_durable_queue_payload() -> None:
+    _validate(FEEDBACK_QUEUE_ITEM_SCHEMA, _adapter_produced_durable_queue_payload())
 
 
 def test_skillup_route_mapping_references_existing_schema_surfaces() -> None:
