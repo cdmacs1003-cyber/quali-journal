@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from admin.f13_skillup_answer_hold_adapter import adapt_skillup_answer_hold_response
 from admin.f13_runtime_guard import (
     RESULT_DENIED,
     RESULT_HOLD,
@@ -577,7 +578,11 @@ def skillup_bridge_answer(payload: SkillupBridgeAnswerRequest) -> Dict[str, Any]
             pointer_uri = _safe_skillup_pointer_uri(evidence_items[0].get("pointer_uri"))
             if pointer_uri is not None:
                 response["pointer_uri"] = pointer_uri
-        return response
+        return adapt_skillup_answer_hold_response(
+            response,
+            request_context=request_payload,
+            bridge_payload=bridge_payload,
+        )
 
     queue_source = {
         **response,
@@ -585,7 +590,11 @@ def skillup_bridge_answer(payload: SkillupBridgeAnswerRequest) -> Dict[str, Any]
         "origin_event_id": request_payload.get("origin_event_id") or response.get("bridge_trace_id"),
     }
     response["feedback_queue_item"] = skillup_feedback_queue_item_from_hold(queue_source)
-    return response
+    return adapt_skillup_answer_hold_response(
+        response,
+        request_context=request_payload,
+        bridge_payload=bridge_payload,
+    )
 
 
 @router.post("/retrieve-evidence", response_model=BridgeEvidenceResponse)
