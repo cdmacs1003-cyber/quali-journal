@@ -175,6 +175,19 @@
     "answer quality not verified",
     "Skillup MVP not granted"
   ],
+  "feedback_queue_persistence_contract": {
+    "status": "DEFERRED_UNTIL_IMPLEMENTED_AND_VALIDATED",
+    "durable_schema": "schemas/skillup_feedback_queue_item.schema.json",
+    "recommended_mechanism": "DB_BACKED_QUEUE_DEFERRED",
+    "selected_route_exposure": "FORBIDDEN_QUEUE_INTERNALS",
+    "db_backed_execution_boundary": "SEPARATE_APPROVAL_REQUIRED",
+    "notes": [
+      "R9ZMH adds only additive contract/source/schema/test surfaces for deferred persistence.",
+      "Selected-route answer/HOLD responses must not expose feedback_queue_item, feedback_candidate, feedback_candidate_required, created_at, db_access_executed, durable queue records, DB status, or repository result objects.",
+      "DB-backed persistence execution, DB fixtures, migrations, config/DSN handling, runtime/server startup, real HTTP/browser behavior, and persistence write/read validation require separate approval.",
+      "FEEDBACK_QUEUE_PERSISTENCE_PASS remains NOT_GRANTED until a later approved execution gate verifies durable write/read behavior."
+    ]
+  },
   "limits": [
     "mapping candidate only",
     "static JSON mapping document only",

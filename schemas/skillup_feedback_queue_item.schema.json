@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.local/schemas/skillup_feedback_queue_item.schema.json",
+  "title": "Skillup Feedback Queue Durable Item Contract",
+  "description": "Deferred DB-backed feedback queue item contract for Skillup answer/HOLD review. This schema defines minimized durable-record fields only; it is not persistence execution evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "persistence_mechanism",
+    "feedback_id",
+    "origin_event_id",
+    "current_status",
+    "dedup_key",
+    "created_at",
+    "review_reason_code",
+    "safe_summary",
+    "raw_text_included",
+    "internal_path_included",
+    "db_access_executed"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "R9ZMH-2026-06-14"
+    },
+    "persistence_mechanism": {
+      "type": "string",
+      "const": "DB_BACKED_QUEUE_DEFERRED",
+      "description": "DB-backed queue is the deferred intended mechanism. This value does not prove that DB persistence executed."
+    },
+    "feedback_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$",
+      "description": "Stable opaque feedback identifier. Must not encode raw text, internal paths, secrets, tokens, credentials, DSNs, or prompt contents."
+    },
+    "origin_event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$",
+      "description": "Safe origin event or trace pointer, not a raw event payload."
+    },
+    "current_status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "review_required",
+        "resolved",
+        "rejected",
+        "duplicate"
+      ]
+    },
+    "dedup_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 220,
+      "pattern": "^[A-Za-z0-9:._-]+$",
+      "description": "Idempotency key built from safe bounded identifiers and reason codes only."
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "Creation timestamp or deterministic contract timestamp. This field alone is not durable persistence proof."
+    },
+    "review_reason_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Z0-9_]+$"
+    },
+    "safe_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "Bounded reviewer triage summary only. Must not contain raw standard text, raw restricted prompt content, internal paths, file URIs, localhost URLs, hostnames, filesystem locations, secrets, DSNs, tokens, credentials, keys, service-account data, raw Bridge evidence payloads, or raw source payloads."
+    },
+    "trace_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    },
+    "raw_text_included": {
+      "type": "boolean",
+      "const": false,
+      "description": "Hard durable-record assertion: raw standard text must not be persisted."
+    },
+    "internal_path_included": {
+      "type": "boolean",
+      "const": false,
+      "description": "Hard durable-record assertion: internal paths and filesystem locations must not be persisted."
+    },
+    "db_access_executed": {
+      "type": "boolean",
+      "const": false,
+      "description": "R9ZMH contract construction is no-DB. This false value is not persistence success evidence and must not be reused as DB-backed persistence PASS."
+    }
+  }
+}
