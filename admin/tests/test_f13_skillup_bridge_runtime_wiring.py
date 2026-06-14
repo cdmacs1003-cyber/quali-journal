@@ -9,6 +9,47 @@ import admin.f13_bridge_api as bridge_api
 
 ROUTE = "/api/f13/bridge/skillup/bridge-answer"
 
+_SCHEMA_REQUIRED_TOP_LEVEL_FIELDS = {
+    "schema_version",
+    "contract_version",
+    "trace_id",
+    "answer_status",
+    "result_status",
+    "evidence_required",
+    "evidence",
+    "policy",
+    "raw_text_included",
+    "internal_path_included",
+    "review_required",
+}
+_SCHEMA_ALLOWED_TOP_LEVEL_FIELDS = _SCHEMA_REQUIRED_TOP_LEVEL_FIELDS | {
+    "request_id",
+    "course_id",
+    "module_id",
+    "binding_id",
+    "answer",
+    "hold_reason_code",
+    "hold_reason",
+    "warnings",
+}
+_POLICY_FIELDS = {
+    "raw_leak_check_passed",
+    "rights_check_passed",
+    "sensitivity_check_passed",
+    "evidence_check_passed",
+}
+_LEGACY_SELECTED_ROUTE_TOP_LEVEL_FIELDS = {
+    "safe_summary",
+    "evidence_id",
+    "bridge_trace_id",
+    "feedback_queue_item",
+    "feedback_candidate",
+    "feedback_candidate_required",
+    "created_at",
+    "db_access_executed",
+    "pointer_uri",
+}
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -26,6 +67,7 @@ def _safe_evidence(**overrides: Any) -> dict[str, Any]:
         "pointer_uri": "pointer://diagnostic/skillup-route/safe-1",
         "raw_text_policy": "SUMMARY_ONLY",
         "rights_status": "PUBLIC",
+        "request_id": "req:skillup-route-safe-1",
         "role": "student",
         "evidence_depth": "student_safe",
         "course_id": "course:skillup-route",
@@ -58,10 +100,22 @@ def _assert_no_pass_fields(body: dict[str, Any]) -> None:
     assert "f13_pass" not in body
     assert "track_a_pass" not in body
     assert "beta_pass" not in body
-    if isinstance(body.get("feedback_queue_item"), dict):
-        assert "f13_pass" not in body["feedback_queue_item"]
-        assert "track_a_pass" not in body["feedback_queue_item"]
-        assert "beta_pass" not in body["feedback_queue_item"]
+
+
+def _assert_schema_shaped_response(body: dict[str, Any]) -> None:
+    assert _SCHEMA_REQUIRED_TOP_LEVEL_FIELDS <= set(body)
+    assert set(body) <= _SCHEMA_ALLOWED_TOP_LEVEL_FIELDS
+    assert not (_LEGACY_SELECTED_ROUTE_TOP_LEVEL_FIELDS & set(body))
+    assert isinstance(body["trace_id"], str)
+    assert body["trace_id"]
+    assert isinstance(body["evidence"], list)
+    assert isinstance(body["policy"], dict)
+    assert set(body["policy"]) == _POLICY_FIELDS
+    assert all(isinstance(value, bool) for value in body["policy"].values())
+    assert isinstance(body.get("warnings", []), list)
+    assert all(isinstance(value, str) for value in body.get("warnings", []))
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
 
 
 def _assert_no_raw_internal_or_secret_echo(body: dict[str, Any]) -> None:
@@ -89,7 +143,7 @@ def _assert_no_raw_internal_or_secret_echo(body: dict[str, Any]) -> None:
     assert "token" not in rendered
 
 
-def test_skillup_bridge_route_hold_returns_feedback_queue_item(client: TestClient):
+def test_skillup_bridge_route_hold_returns_schema_shaped_review_response(client: TestClient):
     response = client.post(
         ROUTE,
         json={
@@ -104,25 +158,28 @@ def test_skillup_bridge_route_hold_returns_feedback_queue_item(client: TestClien
 
     assert response.status_code == 200
     body = response.json()
-    queue_item = body["feedback_queue_item"]
+    _assert_schema_shaped_response(body)
     assert body["result_status"] == "HOLD"
     assert body["answer_status"] == "HOLD"
-    assert body["feedback_candidate_required"] is True
-    assert queue_item["feedback_id"]
-    assert queue_item["dedup_key"]
-    assert queue_item["feedback_type"] in {"EVIDENCE_GAP", "HOLD_CASE"}
+    assert body["evidence_required"] is True
+    assert body["review_required"] is True
+    assert body["evidence"] == []
+    assert body["hold_reason_code"] == "EVIDENCE_REQUIRED"
+    assert "evidence_items" in body["hold_reason"]
+    assert body["policy"]["raw_leak_check_passed"] is True
+    assert body["policy"]["evidence_check_passed"] is False
+    assert "answer" not in body
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
-    assert queue_item["raw_text_included"] is False
-    assert queue_item["internal_path_included"] is False
     _assert_no_pass_fields(body)
     _assert_no_raw_internal_or_secret_echo(body)
 
 
-def test_skillup_bridge_route_ok_uses_safe_summary_and_trace(client: TestClient):
+def test_skillup_bridge_route_ok_uses_schema_answer_evidence_and_trace(client: TestClient):
     response = client.post(
         ROUTE,
         json={
+            "request_id": "req:skillup-route-safe-1",
             "result_status": "OK",
             "evidence_items": [_safe_evidence()],
             "feedback_candidate_required": False,
@@ -133,14 +190,32 @@ def test_skillup_bridge_route_ok_uses_safe_summary_and_trace(client: TestClient)
 
     assert response.status_code == 200
     body = response.json()
+    _assert_schema_shaped_response(body)
     assert body["result_status"] == "OK"
     assert body["answer_status"] == "ANSWERED"
-    assert body["evidence_id"] == "ev:skillup-bridge-safe-1"
-    assert body["bridge_trace_id"] == "btrace:skillup-bridge-safe-1"
-    assert body["safe_summary"] == "Synthetic safe summary for Skillup route wiring."
-    assert body["answer"] == body["safe_summary"]
-    assert body["pointer_uri"] == "pointer://diagnostic/skillup-route/safe-1"
-    assert "feedback_queue_item" not in body
+    assert body["trace_id"] == "btrace:skillup-bridge-safe-1"
+    assert body["request_id"] == "req:skillup-route-safe-1"
+    assert body["course_id"] == "course:skillup-route"
+    assert body["module_id"] == "module:skillup-route"
+    assert body["binding_id"] == "binding:skillup-route"
+    assert body["answer"] == "Synthetic safe summary for Skillup route wiring."
+    assert body["evidence_required"] is False
+    assert body["review_required"] is False
+    assert body["evidence"] == [
+        {
+            "evidence_id": "ev:skillup-bridge-safe-1",
+            "pointer": "pointer://diagnostic/skillup-route/safe-1",
+            "source_label": "Skillup Bridge safe evidence",
+            "rights_status": "PUBLIC",
+        }
+    ]
+    assert body["policy"] == {
+        "raw_leak_check_passed": True,
+        "rights_check_passed": True,
+        "sensitivity_check_passed": True,
+        "evidence_check_passed": True,
+    }
+    assert body.get("warnings", []) == []
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
     _assert_no_pass_fields(body)
@@ -161,12 +236,21 @@ def test_skillup_bridge_route_direct_db_attempt_denied_without_db(client: TestCl
 
     assert response.status_code == 200
     body = response.json()
-    assert body["result_status"] in {"DENIED", "HOLD"}
-    assert body["answer_status"] in {"DENIED", "HOLD"}
-    assert body["db_access_executed"] is False
-    assert body["feedback_candidate_required"] is True
-    assert body["feedback_queue_item"]["feedback_id"]
-    assert body["feedback_queue_item"]["dedup_key"]
+    _assert_schema_shaped_response(body)
+    assert body["result_status"] == "ERROR"
+    assert body["answer_status"] == "INVALIDATED"
+    assert body["evidence_required"] is True
+    assert body["review_required"] is True
+    assert body["evidence"] == []
+    assert body["hold_reason_code"] == "NO_DB_BOUNDARY"
+    assert "no-DB safety boundary" in body["hold_reason"]
+    assert "SOURCE_DENIED_NORMALIZED_TO_ERROR" in body.get("warnings", [])
+    assert body["policy"] == {
+        "raw_leak_check_passed": True,
+        "rights_check_passed": False,
+        "sensitivity_check_passed": False,
+        "evidence_check_passed": False,
+    }
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
     _assert_no_pass_fields(body)
