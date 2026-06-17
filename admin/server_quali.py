@@ -61,14 +61,15 @@ except Exception:  # pragma: no cover
 PYEXE = os.getenv("PYTHON_EXE") or sys.executable or "python"
 
 # ---------------------------------------------------------------------------
-# .env (optional) - load first; define MODE fallback regardless of availability
+# .env (optional) - load first unless explicitly skipped; define MODE fallback regardless of availability
 # ---------------------------------------------------------------------------
-try:
-    from dotenv import load_dotenv  # type: ignore
-    load_dotenv()
-except Exception:
-    # dotenv is optional; ignore if not present
-    pass
+if os.environ.get("QUALIJOURNAL_SKIP_DOTENV", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    try:
+        from dotenv import load_dotenv  # type: ignore
+        load_dotenv()
+    except Exception:
+        # dotenv is optional; ignore if not present
+        pass
 
 MODE = (os.getenv("QUALI_DB_MODE") or "local").lower().strip()
 
