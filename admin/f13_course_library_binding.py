@@ -145,9 +145,14 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
         "missing_evidence",
     )
     bridge_trace_id = _safe_token(
-        source.get("bridge_trace_id") or source.get("trace_ref"),
+        source.get("bridge_trace_id") or source.get("trace_id") or source.get("trace_ref"),
         "btrace:pending",
     )
+    trace_id = _safe_token(source.get("trace_id") or bridge_trace_id, bridge_trace_id, max_length=160)
+    request_id = _safe_scope_value(source, "request_id")
+    bridge_family = _safe_scope_value(source, "bridge_family")
+    bridge_id = _safe_scope_value(source, "bridge_id")
+    standard_pack_id = _safe_scope_value(source, "standard_pack_id")
     rights_status = _normal_rights(source.get("rights_status"))
     raw_text_policy = _safe_token(source.get("raw_text_policy"), RAW_TEXT_POLICY_SUMMARY_ONLY)
     current_status = _normal_status(source.get("current_status"))
@@ -158,10 +163,27 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
     entitlement_id = _safe_scope_value(source, "license_entitlement_id")
     entitlement_status = _normal_status(source.get("license_entitlement_status"))
     shape_pass = _has_shape_pass(source)
-    binding_id = f"binding:{_stable_digest(course_id, module_ref, evidence_ref, bridge_trace_id)}"
+    binding_digest = _stable_digest(
+        bridge_family,
+        bridge_id,
+        standard_pack_id,
+        tenant_id,
+        organization_id,
+        cohort_id,
+        course_id,
+        module_ref,
+        evidence_ref,
+        bridge_trace_id,
+    )
+    binding_id = f"binding:{binding_digest}"
 
     base = {
         "binding_id": binding_id,
+        "bridge_family": bridge_family,
+        "bridge_id": bridge_id,
+        "standard_pack_id": standard_pack_id,
+        "request_id": request_id,
+        "trace_id": trace_id,
         "course_id": course_id,
         "module_id": module_ref,
         "tenant_id": tenant_id,
@@ -196,6 +218,12 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
         or _scope_mismatch(source, "cohort_id", "evidence_cohort_id")
         or _scope_mismatch(source, "cohort_id", "license_cohort_id")
     )
+    missing_bridge_scope = not bridge_family or not bridge_id or not standard_pack_id
+    missing_trace_scope = (
+        _is_missing(source.get("bridge_trace_id"))
+        and _is_missing(source.get("trace_id"))
+        and _is_missing(source.get("trace_ref"))
+    )
     missing_evidence = evidence_ref == "missing_evidence"
     if unsafe_payload:
         status = RESULT_DENIED
@@ -213,6 +241,14 @@ def bind_course_library_reference(payload: Mapping[str, Any] | None) -> dict[str
         status = RESULT_HOLD
         issue = "HOLD_TENANT_BOUNDARY: course_library_binding scope mismatch"
         feedback_type = "BINDING_POLICY_REVIEW"
+    elif missing_bridge_scope:
+        status = RESULT_HOLD
+        issue = "HOLD_BRIDGE_BOUNDARY: course_library_binding requires bridge_family, bridge_id, and standard_pack_id"
+        feedback_type = "BINDING_POLICY_REVIEW"
+    elif missing_trace_scope:
+        status = RESULT_HOLD
+        issue = "HOLD_TRACE_REQUIRED: course_library_binding requires trace_id or bridge_trace_id"
+        feedback_type = "EVIDENCE_GAP"
     elif missing_evidence:
         status = RESULT_HOLD
         issue = "course_library_binding requires evidence_id or library_node_id"
