@@ -82,6 +82,7 @@ def test_ready_payload_returns_ready_and_policy_block_ready_true():
         "secret_like_surface_count": 0,
     }
     assert result["checks"]["evidence_linked"] is True
+    assert result["checks"]["output_surface_internal_data_absent"] is True
     _assert_no_execution_flags(result)
 
 
@@ -244,6 +245,15 @@ def test_unsafe_output_surface_raw_text_marker_returns_hold_or_invalid():
     _assert_hold_or_invalid(result)
 
 
+def test_forbidden_raw_field_key_returns_hold_or_invalid():
+    payload = _ready_payload()
+    payload["output_surface"]["raw_text"] = "synthetic raw standard text should be blocked"
+
+    result = validate_raw_leak_policy_block(payload)
+
+    _assert_hold_or_invalid(result)
+
+
 def test_unsafe_output_surface_internal_path_marker_returns_hold_or_invalid():
     payload = _ready_payload()
     payload["output_surface"]["storage_hint"] = "H:\\restricted\\standard.txt"
@@ -251,6 +261,20 @@ def test_unsafe_output_surface_internal_path_marker_returns_hold_or_invalid():
     result = validate_raw_leak_policy_block(payload)
 
     _assert_hold_or_invalid(result)
+
+
+def test_unsafe_output_surface_internal_data_markers_return_hold_or_invalid():
+    payload = _ready_payload()
+    payload["output_surface"] = {
+        "direct_db_row": {"id": "row-1"},
+        "warehouse_internal_object": "warehouse internal object",
+        "library_internal_object": "library internal object",
+    }
+
+    result = validate_raw_leak_policy_block(payload)
+
+    _assert_hold_or_invalid(result)
+    assert result["checks"]["output_surface_internal_data_absent"] is False
 
 
 def test_unsafe_output_surface_secret_like_marker_returns_hold_or_invalid():

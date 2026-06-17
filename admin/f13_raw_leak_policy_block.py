@@ -53,6 +53,22 @@ _INTERNAL_FIELD_MARKERS = (
     "file_path",
     "file://",
 )
+_INTERNAL_DATA_FIELD_MARKERS = (
+    "direct_db",
+    "direct db",
+    "db_row",
+    "db row",
+    "database_row",
+    "database row",
+    "warehouse_internal",
+    "warehouse internal",
+    "warehouse_internal_object",
+    "warehouse object",
+    "library_internal",
+    "library internal",
+    "library_internal_object",
+    "library object",
+)
 _SECRET_FIELD_MARKERS = (
     "api_key",
     "api key",
@@ -74,6 +90,15 @@ _INTERNAL_VALUE_MARKERS = (
     "file://",
     "localhost",
     "127.0.0.1",
+)
+_INTERNAL_DATA_VALUE_MARKERS = (
+    "direct_db_row",
+    "direct db row",
+    "database row",
+    "warehouse_internal_object",
+    "warehouse internal object",
+    "library_internal_object",
+    "library internal object",
 )
 
 
@@ -124,6 +149,8 @@ def _field_marker_code(key: Any) -> str | None:
         return "RAW_STANDARD_TEXT_SURFACE"
     if any(marker in lowered for marker in _INTERNAL_FIELD_MARKERS):
         return "INTERNAL_PATH_SURFACE"
+    if any(marker in lowered for marker in _INTERNAL_DATA_FIELD_MARKERS):
+        return "INTERNAL_DATA_SURFACE"
     if any(marker in lowered for marker in _SECRET_FIELD_MARKERS):
         return "SECRET_LIKE_SURFACE"
     return None
@@ -137,6 +164,8 @@ def _value_marker_code(value: Any) -> str | None:
         return "INTERNAL_PATH_SURFACE"
     if any(marker in lowered for marker in _INTERNAL_VALUE_MARKERS):
         return "INTERNAL_PATH_SURFACE"
+    if any(marker in lowered for marker in _INTERNAL_DATA_VALUE_MARKERS):
+        return "INTERNAL_DATA_SURFACE"
     if any(marker in lowered for marker in _SECRET_FIELD_MARKERS):
         return "SECRET_LIKE_SURFACE"
     return None
@@ -320,6 +349,7 @@ def validate_raw_leak_policy_block(payload: Any) -> dict[str, Any]:
     output_findings = _surface_findings(payload.get("output_surface", {}))
     checks["output_surface_raw_standard_text_absent"] = "RAW_STANDARD_TEXT_SURFACE" not in output_findings
     checks["output_surface_internal_path_absent"] = "INTERNAL_PATH_SURFACE" not in output_findings
+    checks["output_surface_internal_data_absent"] = "INTERNAL_DATA_SURFACE" not in output_findings
     checks["output_surface_secret_like_absent"] = "SECRET_LIKE_SURFACE" not in output_findings
     for finding in output_findings:
         errors.append(f"HOLD_UNSAFE_OUTPUT_SURFACE_{finding}")
