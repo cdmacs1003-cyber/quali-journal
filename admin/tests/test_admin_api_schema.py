@@ -37,6 +37,12 @@ def _auth_headers() -> dict:
     return {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 
+def _validate_model(model_cls, payload: dict):
+    if hasattr(model_cls, "model_validate"):
+        return model_cls.model_validate(payload)
+    return model_cls.parse_obj(payload)
+
+
 def test_status_schema_basic():
     """
     /api/status 응답 스키마 검증
@@ -50,7 +56,7 @@ def test_status_schema_basic():
 
     body = resp.json()
     # Pydantic 모델로 1차 구조 검증 (필수 필드와 타입)
-    StatusData.parse_obj(body)
+    _validate_model(StatusData, body)
 
     assert isinstance(body["gate_required"], int)
     assert isinstance(body["selection_total"], int)
@@ -71,7 +77,7 @@ def test_items_ready_schema_basic():
     assert resp.status_code == 200
 
     body = resp.json()
-    ItemsData.parse_obj(body)
+    _validate_model(ItemsData, body)
 
     assert "items" in body
     assert isinstance(body["items"], list)
@@ -90,7 +96,7 @@ def test_gate_required_get_and_patch_schema():
     assert resp_get.status_code == 200
     data_get = resp_get.json()
 
-    GateConfigData.parse_obj(data_get)
+    _validate_model(GateConfigData, data_get)
     original = int(data_get["gate_required"])
 
     # 2) PATCH로 같은 값 다시 세팅 (상태 변화 없음)
@@ -123,7 +129,7 @@ def test_report_schema_basic():
     assert body.get("ok") is True
 
     # ReportData 는 op/path/count/duration_ms 중심으로 스키마를 고정
-    ReportData.parse_obj(body)
+    _validate_model(ReportData, body)
 
     assert isinstance(body["path"], str)
     assert body["path"]  # 빈 문자열이 아니어야 함
@@ -148,7 +154,7 @@ def test_tasks_flow_daily_schema():
     assert resp.status_code == 200
 
     body = resp.json()
-    TasksFlowData.parse_obj(body)
+    _validate_model(TasksFlowData, body)
 
     assert isinstance(body["job_id"], str)
     assert isinstance(body["status"], str)

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from admin.f13_skillup_answer_hold_adapter import adapt_skillup_answer_hold_response
 from admin.f13_runtime_guard import (
@@ -79,6 +79,8 @@ _ROLE_POLICY_CONTEXT_FIELDS = (
 
 
 class BridgeEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     query: Optional[str] = None
     purpose: str = "answer"
     requester_module: str = "Skillup"
@@ -86,9 +88,6 @@ class BridgeEvidenceRequest(BaseModel):
     max_items: Optional[int] = Field(default=None, ge=1)
     evidence_items: Optional[List[Dict[str, Any]]] = None
     redacted_preflight_replay_evidence: Optional[Dict[str, Any]] = None
-
-    class Config:
-        extra = "allow"
 
 
 class BridgePolicyResult(BaseModel):
@@ -110,6 +109,8 @@ class BridgeEvidenceResponse(BaseModel):
 
 
 class BridgePolicyCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     evidence: Optional[Dict[str, Any]] = None
     evidence_items: Optional[List[Dict[str, Any]]] = None
     evidence_id: Optional[str] = None
@@ -131,9 +132,6 @@ class BridgePolicyCheckRequest(BaseModel):
     requested_output_type: str = "safe_summary"
     requester_module: str = "Skillup"
     purpose: str = "answer"
-
-    class Config:
-        extra = "allow"
 
 
 class BridgePolicyCheckResponse(BaseModel):
@@ -157,6 +155,8 @@ class BridgePolicyCheckResponse(BaseModel):
 
 
 class BridgeTraceExplainRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     bridge_trace_id: Optional[str] = None
     role: Optional[str] = None
     evidence_depth: Optional[str] = None
@@ -169,9 +169,6 @@ class BridgeTraceExplainRequest(BaseModel):
     cohort_id: Optional[str] = None
     trace: Optional[Dict[str, Any]] = None
     evidence_items: Optional[List[Dict[str, Any]]] = None
-
-    class Config:
-        extra = "allow"
 
 
 class BridgeTraceExplainResponse(BaseModel):
@@ -202,12 +199,11 @@ class BridgeTraceExplainResponse(BaseModel):
 
 
 class SkillupBridgeAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     bridge_response: Optional[Dict[str, Any]] = None
     request_payload: Optional[Dict[str, Any]] = None
     requester_module: str = "Skillup"
-
-    class Config:
-        extra = "allow"
 
 
 
