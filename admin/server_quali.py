@@ -463,7 +463,7 @@ def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(authorize)):
     return {"ok": True, "gate_required": cfg["gate_required"]}
 
 app.include_router(ready_router)
-app.include_router(f13_bridge_router)
+app.include_router(f13_bridge_router, dependencies=[Depends(authorize)])
 # === READY/SSOT PATCH END ===================================================
 # ---------------------------------------------------------------------------
 # Paths / Constants
