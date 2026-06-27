@@ -59,6 +59,12 @@ def _assert_minimized_durable_item(item):
     payload = item.to_persistence_dict()
     assert set(payload) == DURABLE_FEEDBACK_QUEUE_ITEM_FIELDS
     assert payload["persistence_mechanism"] == DB_BACKED_QUEUE_DEFERRED
+    assert payload["result_status"] == "HOLD"
+    assert payload["answer_status"] == "HOLD"
+    assert payload["evidence_required"] is True
+    assert payload["review_required"] is True
+    assert payload["evidence_count"] == 0
+    assert payload["warning_codes"] == ("EVIDENCE_ARRAY_EMPTY_FOR_HOLD",)
     assert payload["raw_text_included"] is False
     assert payload["internal_path_included"] is False
     assert payload["db_access_executed"] is False

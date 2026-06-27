@@ -176,6 +176,12 @@ def _sample_feedback_queue_item_payload() -> dict[str, Any]:
         "created_at": "1970-01-01T00:00:00Z",
         "review_reason_code": "EVIDENCE_REQUIRED",
         "safe_summary": "Synthetic safe feedback queue summary.",
+        "result_status": "HOLD",
+        "answer_status": "HOLD",
+        "evidence_required": True,
+        "review_required": True,
+        "evidence_count": 0,
+        "warning_codes": ["EVIDENCE_ARRAY_EMPTY_FOR_HOLD"],
         "trace_id": "btrace:skillup-jsonschema-static-hold-1",
         "request_id": "req:skillup-jsonschema-static-hold-1",
         "raw_text_included": False,
@@ -336,6 +342,12 @@ def _adapter_produced_durable_queue_payload() -> dict[str, Any]:
             "created_at": "1970-01-01T00:00:00Z",
             "review_reason_code": "BRIDGE_RESPONSE_REQUIRED",
             "safe_summary": hold_response["hold_reason"],
+            "result_status": "HOLD",
+            "answer_status": "HOLD",
+            "evidence_required": True,
+            "review_required": True,
+            "evidence_count": 0,
+            "warning_codes": ["EVIDENCE_ARRAY_EMPTY_FOR_HOLD"],
             "trace_id": "btrace:skillup-jsonschema-adapter-hold-1",
             "request_id": request_context["request_id"],
             "raw_text_included": False,
@@ -381,6 +393,15 @@ def test_skillup_feedback_queue_item_schema_accepts_static_contract_payload() ->
 
 def test_skillup_feedback_queue_db_row_schema_accepts_static_fixture_row_payload() -> None:
     _validate(FEEDBACK_QUEUE_DB_ROW_SCHEMA, _sample_feedback_queue_db_row_payload())
+
+
+def test_skillup_feedback_queue_item_schema_requires_minimal_bridge_answer_metadata() -> None:
+    payload = _sample_feedback_queue_item_payload()
+    payload.pop("evidence_count")
+
+    errors = _validation_errors(FEEDBACK_QUEUE_ITEM_SCHEMA, payload)
+
+    assert any(error.validator == "required" for error in errors)
 
 
 def test_skillup_answer_hold_response_schema_accepts_adapter_produced_ok_payload() -> None:

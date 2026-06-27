@@ -18,6 +18,9 @@ RAW_TEXT_INCLUDED = False
 INTERNAL_PATH_INCLUDED = False
 DB_ACCESS_EXECUTED = False
 
+RESULT_STATUS_VALUES = frozenset({"OK", "HOLD", "ERROR"})
+ANSWER_STATUS_VALUES = frozenset({"ANSWERED", "HOLD", "REDACTED", "INVALIDATED"})
+
 CURRENT_STATUS_VALUES = frozenset(
     {
         "queued",
@@ -40,6 +43,12 @@ DURABLE_FEEDBACK_QUEUE_ITEM_FIELDS = frozenset(
         "created_at",
         "review_reason_code",
         "safe_summary",
+        "result_status",
+        "answer_status",
+        "evidence_required",
+        "review_required",
+        "evidence_count",
+        "warning_codes",
         "trace_id",
         "request_id",
         "raw_text_included",
@@ -173,6 +182,12 @@ class DurableFeedbackQueueItem:
     created_at: str
     review_reason_code: str
     safe_summary: str
+    result_status: str = "HOLD"
+    answer_status: str = "HOLD"
+    evidence_required: bool = True
+    review_required: bool = True
+    evidence_count: int = 0
+    warning_codes: tuple[str, ...] = ()
     trace_id: str | None = None
     request_id: str | None = None
     raw_text_included: bool = RAW_TEXT_INCLUDED
@@ -279,6 +294,62 @@ def _current_status(value: Any) -> str:
     return "review_required"
 
 
+def _result_status(value: Any) -> str:
+    status = str(value or "HOLD").strip().upper()
+    if status in RESULT_STATUS_VALUES:
+        return status
+    return "HOLD"
+
+
+def _answer_status(value: Any, result_status: str) -> str:
+    default = "ANSWERED" if result_status == "OK" else "HOLD"
+    status = str(value or default).strip().upper()
+    if status in ANSWER_STATUS_VALUES:
+        return status
+    return default
+
+
+def _bool_metadata(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    return default
+
+
+def _evidence_count(source: Mapping[str, Any], result_status: str) -> int:
+    value = source.get("evidence_count")
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return min(value, 1000)
+    for key in ("evidence", "evidence_items"):
+        items = source.get(key)
+        if isinstance(items, list):
+            return min(len(items), 1000)
+    return 1 if result_status == "OK" else 0
+
+
+def _warning_codes(source: Mapping[str, Any], result_status: str, evidence_count: int) -> tuple[str, ...]:
+    values = source.get("warning_codes", source.get("warnings", ()))
+    if values in (None, ""):
+        values = ()
+    if isinstance(values, str):
+        values = (values,)
+    if not isinstance(values, (list, tuple)):
+        raise UnsafeFeedbackQueuePayloadError("warning_codes must be a safe string list")
+
+    safe_codes: list[str] = []
+    for value in values:
+        code = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+        if not code:
+            continue
+        if len(code) > 80 or any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for char in code):
+            raise UnsafeFeedbackQueuePayloadError("warning_codes contains an unsafe code")
+        if code not in safe_codes:
+            safe_codes.append(code)
+
+    if result_status == "HOLD" and evidence_count == 0 and "EVIDENCE_ARRAY_EMPTY_FOR_HOLD" not in safe_codes:
+        safe_codes.append("EVIDENCE_ARRAY_EMPTY_FOR_HOLD")
+    return tuple(safe_codes[:16])
+
+
 def _optional_token(value: Any, *, max_length: int = 160) -> str | None:
     if value in (None, ""):
         return None
@@ -324,6 +395,12 @@ def durable_feedback_queue_item_from_hold(hold_payload: Mapping[str, Any] | None
         f"Skillup:{review_reason}:{seed}",
         max_length=220,
     )
+    result_status = _result_status(source.get("result_status"))
+    answer_status = _answer_status(source.get("answer_status"), result_status)
+    evidence_count = _evidence_count(source, result_status)
+    evidence_required = _bool_metadata(source.get("evidence_required"), default=result_status != "OK")
+    review_required = _bool_metadata(source.get("review_required"), default=result_status != "OK")
+    warning_codes = _warning_codes(source, result_status, evidence_count)
 
     item = DurableFeedbackQueueItem(
         feedback_id=feedback_id,
@@ -333,6 +410,12 @@ def durable_feedback_queue_item_from_hold(hold_payload: Mapping[str, Any] | None
         created_at=_safe_token(source.get("created_at"), "1970-01-01T00:00:00Z"),
         review_reason_code=review_reason,
         safe_summary=safe_summary,
+        result_status=result_status,
+        answer_status=answer_status,
+        evidence_required=evidence_required,
+        review_required=review_required,
+        evidence_count=evidence_count,
+        warning_codes=warning_codes,
         trace_id=_optional_token(source.get("trace_id") or source.get("bridge_trace_id")),
         request_id=_optional_token(source.get("request_id")),
     )
@@ -356,6 +439,27 @@ def validate_minimized_feedback_queue_item(item: DurableFeedbackQueueItem | Mapp
     status = payload.get("current_status")
     if status not in CURRENT_STATUS_VALUES:
         raise UnsafeFeedbackQueuePayloadError("current_status is outside the durable queue contract")
+    if payload.get("result_status") not in RESULT_STATUS_VALUES:
+        raise UnsafeFeedbackQueuePayloadError("result_status is outside the durable queue contract")
+    if payload.get("answer_status") not in ANSWER_STATUS_VALUES:
+        raise UnsafeFeedbackQueuePayloadError("answer_status is outside the durable queue contract")
+    if not isinstance(payload.get("evidence_required"), bool):
+        raise UnsafeFeedbackQueuePayloadError("evidence_required must be boolean")
+    if not isinstance(payload.get("review_required"), bool):
+        raise UnsafeFeedbackQueuePayloadError("review_required must be boolean")
+    evidence_count = payload.get("evidence_count")
+    if not isinstance(evidence_count, int) or isinstance(evidence_count, bool) or evidence_count < 0:
+        raise UnsafeFeedbackQueuePayloadError("evidence_count must be a non-negative integer")
+    warning_codes = payload.get("warning_codes")
+    if not isinstance(warning_codes, (list, tuple)):
+        raise UnsafeFeedbackQueuePayloadError("warning_codes must be a safe string list")
+    normalized_warning_codes = _warning_codes(
+        {"warning_codes": warning_codes},
+        str(payload["result_status"]),
+        evidence_count,
+    )
+    if tuple(warning_codes) != normalized_warning_codes:
+        raise UnsafeFeedbackQueuePayloadError("warning_codes are outside the durable queue contract")
     _assert_no_unsafe_surface(payload)
     return True
 
@@ -416,6 +520,8 @@ __all__ = [
     "INITIAL_CURRENT_STATUS_VALUES",
     "INTERNAL_PATH_INCLUDED",
     "RAW_TEXT_INCLUDED",
+    "ANSWER_STATUS_VALUES",
+    "RESULT_STATUS_VALUES",
     "SELECTED_ROUTE_FORBIDDEN_QUEUE_FIELDS",
     "DisabledFeedbackQueueRepository",
     "DurableFeedbackQueueItem",

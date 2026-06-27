@@ -40,6 +40,12 @@ def _assert_minimized_persistence_payload(payload):
     assert payload["dedup_key"]
     assert payload["review_reason_code"]
     assert payload["safe_summary"]
+    assert payload["result_status"] == "HOLD"
+    assert payload["answer_status"] == "HOLD"
+    assert payload["evidence_required"] is True
+    assert payload["review_required"] is True
+    assert payload["evidence_count"] == 0
+    assert payload["warning_codes"] == ("EVIDENCE_ARRAY_EMPTY_FOR_HOLD",)
     assert payload["raw_text_included"] is False
     assert payload["internal_path_included"] is False
     assert payload["db_access_executed"] is False
@@ -52,6 +58,30 @@ def test_durable_feedback_queue_item_from_safe_helper_item_is_minimized_contract
     item = durable_feedback_queue_item_from_hold(_safe_helper_feedback_queue_item())
 
     _assert_minimized_persistence_payload(item.to_persistence_dict())
+
+
+def test_durable_feedback_queue_item_carries_safe_hold_metadata_only():
+    item = durable_feedback_queue_item_from_hold(
+        {
+            **_safe_helper_feedback_queue_item(),
+            "result_status": "HOLD",
+            "answer_status": "HOLD",
+            "evidence_required": True,
+            "review_required": True,
+            "evidence_count": 0,
+            "warnings": ["EVIDENCE_ARRAY_EMPTY_FOR_HOLD"],
+        }
+    )
+    payload = item.to_persistence_dict()
+
+    assert payload["result_status"] == "HOLD"
+    assert payload["answer_status"] == "HOLD"
+    assert payload["evidence_required"] is True
+    assert payload["review_required"] is True
+    assert payload["evidence_count"] == 0
+    assert payload["warning_codes"] == ("EVIDENCE_ARRAY_EMPTY_FOR_HOLD",)
+    assert "answer" not in payload
+    assert "evidence" not in payload
 
 
 def test_durable_feedback_queue_item_rejects_raw_internal_and_secret_like_payload():

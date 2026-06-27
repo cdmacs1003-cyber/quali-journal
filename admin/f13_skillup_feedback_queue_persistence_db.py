@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from admin.f13_skillup_feedback_queue_persistence import (
+    ANSWER_STATUS_VALUES,
     CONTRACT_VERSION,
     CURRENT_STATUS_VALUES,
     DB_BACKED_QUEUE_DEFERRED,
     DURABLE_FEEDBACK_QUEUE_ITEM_FIELDS,
+    RESULT_STATUS_VALUES,
     SELECTED_ROUTE_FORBIDDEN_QUEUE_FIELDS,
     DurableFeedbackQueueItem,
     FeedbackQueuePersistenceResult,
@@ -38,6 +41,12 @@ _SQLITE_ROW_COLUMNS = (
     "created_at",
     "review_reason_code",
     "safe_summary",
+    "result_status",
+    "answer_status",
+    "evidence_required",
+    "review_required",
+    "evidence_count",
+    "warning_codes",
     "trace_id",
     "request_id",
     "raw_text_included",
@@ -64,6 +73,8 @@ def validate_sqlite_fixture_table_name(table_name: str = SQLITE_FIXTURE_TABLE_NA
 def build_sqlite_feedback_queue_schema_sql(table_name: str = SQLITE_FIXTURE_TABLE_NAME) -> str:
     safe_table_name = validate_sqlite_fixture_table_name(table_name)
     status_literals = ", ".join(f"'{status}'" for status in sorted(CURRENT_STATUS_VALUES))
+    result_status_literals = ", ".join(f"'{status}'" for status in sorted(RESULT_STATUS_VALUES))
+    answer_status_literals = ", ".join(f"'{status}'" for status in sorted(ANSWER_STATUS_VALUES))
     return f"""
 -- {SQLITE_FIXTURE_MIGRATION_ID}
 -- Test-scoped local disposable SQLite fixture only.
@@ -78,6 +89,12 @@ CREATE TABLE IF NOT EXISTS {safe_table_name} (
     created_at TEXT NOT NULL,
     review_reason_code TEXT NOT NULL,
     safe_summary TEXT NOT NULL,
+    result_status TEXT NOT NULL CHECK (result_status IN ({result_status_literals})),
+    answer_status TEXT NOT NULL CHECK (answer_status IN ({answer_status_literals})),
+    evidence_required INTEGER NOT NULL CHECK (evidence_required IN (0, 1)),
+    review_required INTEGER NOT NULL CHECK (review_required IN (0, 1)),
+    evidence_count INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
+    warning_codes TEXT NOT NULL DEFAULT '[]',
     trace_id TEXT,
     request_id TEXT,
     raw_text_included INTEGER NOT NULL DEFAULT 0 CHECK (raw_text_included = 0),
@@ -110,6 +127,24 @@ def _sqlite_false(value: Any, field_name: str) -> bool:
     raise UnsafeFeedbackQueuePayloadError(f"{field_name} must remain false in SQLite fixture rows")
 
 
+def _sqlite_bool(value: Any, field_name: str) -> bool:
+    if value in (1, True):
+        return True
+    if value in (0, False):
+        return False
+    raise UnsafeFeedbackQueuePayloadError(f"{field_name} must be a SQLite boolean")
+
+
+def _sqlite_warning_codes(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        loaded = json.loads(value)
+    else:
+        loaded = value
+    if not isinstance(loaded, list):
+        raise UnsafeFeedbackQueuePayloadError("warning_codes must decode to a safe string list")
+    return tuple(str(code) for code in loaded)
+
+
 def normalize_durable_feedback_queue_item(
     item: DurableFeedbackQueueItem | Mapping[str, Any],
 ) -> DurableFeedbackQueueItem:
@@ -132,6 +167,12 @@ def normalize_durable_feedback_queue_item(
         created_at=str(payload["created_at"]),
         review_reason_code=str(payload["review_reason_code"]),
         safe_summary=str(payload["safe_summary"]),
+        result_status=str(payload["result_status"]),
+        answer_status=str(payload["answer_status"]),
+        evidence_required=payload["evidence_required"],
+        review_required=payload["review_required"],
+        evidence_count=int(payload["evidence_count"]),
+        warning_codes=tuple(payload["warning_codes"]),
         trace_id=payload.get("trace_id") if payload.get("trace_id") is not None else None,
         request_id=payload.get("request_id") if payload.get("request_id") is not None else None,
         raw_text_included=payload["raw_text_included"],
@@ -157,6 +198,12 @@ def durable_item_to_sqlite_row(
         "created_at": row["created_at"],
         "review_reason_code": row["review_reason_code"],
         "safe_summary": row["safe_summary"],
+        "result_status": row["result_status"],
+        "answer_status": row["answer_status"],
+        "evidence_required": 1 if row["evidence_required"] else 0,
+        "review_required": 1 if row["review_required"] else 0,
+        "evidence_count": row["evidence_count"],
+        "warning_codes": json.dumps(list(row["warning_codes"]), separators=(",", ":")),
         "trace_id": row.get("trace_id"),
         "request_id": row.get("request_id"),
         "raw_text_included": 0,
@@ -179,6 +226,9 @@ def _row_to_mapping(row: sqlite3.Row | Mapping[str, Any] | Sequence[Any]) -> dic
 
 def sqlite_row_to_durable_item(row: sqlite3.Row | Mapping[str, Any] | Sequence[Any]) -> DurableFeedbackQueueItem:
     payload = _row_to_mapping(row)
+    payload["evidence_required"] = _sqlite_bool(payload.get("evidence_required"), "evidence_required")
+    payload["review_required"] = _sqlite_bool(payload.get("review_required"), "review_required")
+    payload["warning_codes"] = _sqlite_warning_codes(payload.get("warning_codes"))
     payload["raw_text_included"] = _sqlite_false(payload.get("raw_text_included"), "raw_text_included")
     payload["internal_path_included"] = _sqlite_false(
         payload.get("internal_path_included"),

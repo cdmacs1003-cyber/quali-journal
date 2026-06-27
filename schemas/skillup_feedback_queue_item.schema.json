@@ -15,6 +15,12 @@
     "created_at",
     "review_reason_code",
     "safe_summary",
+    "result_status",
+    "answer_status",
+    "evidence_required",
+    "review_required",
+    "evidence_count",
+    "warning_codes",
     "raw_text_included",
     "internal_path_included",
     "db_access_executed"
@@ -77,6 +83,51 @@
       "minLength": 1,
       "maxLength": 500,
       "description": "Bounded reviewer triage summary only. Must not contain raw standard text, raw restricted prompt content, internal paths, file URIs, localhost URLs, hostnames, filesystem locations, secrets, DSNs, tokens, credentials, keys, service-account data, raw Bridge evidence payloads, or raw source payloads."
+    },
+    "result_status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "HOLD",
+        "ERROR"
+      ],
+      "description": "Safe selected-route result status metadata only; not a PASS claim."
+    },
+    "answer_status": {
+      "type": "string",
+      "enum": [
+        "ANSWERED",
+        "HOLD",
+        "REDACTED",
+        "INVALIDATED"
+      ],
+      "description": "Safe selected-route answer status metadata only; answer text is not persisted."
+    },
+    "evidence_required": {
+      "type": "boolean",
+      "description": "Safe boolean copied from the selected public contract. HOLD normally requires evidence; OK normally does not."
+    },
+    "review_required": {
+      "type": "boolean",
+      "description": "Safe boolean copied from the selected public contract. HOLD normally requires review; OK normally does not."
+    },
+    "evidence_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000,
+      "description": "Count only. Evidence bodies, raw excerpts, and answer text must not be persisted."
+    },
+    "warning_codes": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80,
+        "pattern": "^[A-Z0-9_]+$"
+      },
+      "description": "Safe warning codes only. Raw warning payloads or response bodies are forbidden."
     },
     "trace_id": {
       "type": [
