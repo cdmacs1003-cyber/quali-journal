@@ -5,9 +5,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import admin.f13_bridge_api as bridge_api
+from admin.server_quali import app as full_app
 
 
 ROUTE = "/api/f13/bridge/skillup/bridge-answer"
+TEST_AUTH_ENV_KEY = "ADMIN_TOKEN"
+TEST_AUTH_ALT_ENV_KEY = "API_TOKEN"
+TEST_AUTH_HEADER = "X-Admin-Token"
+TEST_AUTH_PLACEHOLDER = "test-scope-placeholder-auth"
 
 _SCHEMA_REQUIRED_TOP_LEVEL_FIELDS = {
     "schema_version",
@@ -57,6 +62,22 @@ def client() -> TestClient:
     app.include_router(bridge_api.router)
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def full_app_client() -> TestClient:
+    with TestClient(full_app) as test_client:
+        yield test_client
+
+
+def _configure_expected_test_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(TEST_AUTH_ENV_KEY, TEST_AUTH_PLACEHOLDER)
+    monkeypatch.delenv(TEST_AUTH_ALT_ENV_KEY, raising=False)
+
+
+def _test_auth_headers(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    _configure_expected_test_auth(monkeypatch)
+    return {TEST_AUTH_HEADER: TEST_AUTH_PLACEHOLDER}
 
 
 def _safe_evidence(**overrides: Any) -> dict[str, Any]:
@@ -190,6 +211,144 @@ def test_skillup_bridge_route_hold_returns_schema_shaped_review_response(client:
     assert body["policy"]["raw_leak_check_passed"] is True
     assert body["policy"]["evidence_check_passed"] is False
     assert "answer" not in body
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    _assert_no_pass_fields(body)
+    _assert_no_raw_internal_or_secret_echo(body)
+
+
+def test_skillup_bridge_full_app_route_requires_auth_without_token(
+    monkeypatch: pytest.MonkeyPatch,
+    full_app_client: TestClient,
+) -> None:
+    _configure_expected_test_auth(monkeypatch)
+
+    response = full_app_client.post(
+        ROUTE,
+        json={
+            "result_status": "HOLD",
+            "evidence_items": [],
+            "hold_reason": "selected full-app auth boundary check",
+            "feedback_candidate_required": False,
+            "raw_text_included": False,
+            "internal_path_included": False,
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_skillup_bridge_full_app_route_ok_uses_schema_answer_evidence_and_trace_with_test_auth(
+    monkeypatch: pytest.MonkeyPatch,
+    full_app_client: TestClient,
+) -> None:
+    payload = {
+        "request_id": "req:skillup-full-app-selected-ok",
+        "result_status": "OK",
+        "evidence_items": [_safe_evidence()],
+        "feedback_candidate_required": False,
+        "raw_text_included": False,
+        "internal_path_included": False,
+    }
+
+    response = full_app_client.post(
+        ROUTE,
+        headers=_test_auth_headers(monkeypatch),
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_schema_shaped_response(body)
+    assert body["result_status"] == "OK"
+    assert body["answer_status"] == "ANSWERED"
+    assert body["trace_id"] == "btrace:skillup-bridge-safe-1"
+    assert isinstance(body["answer"], str)
+    assert body["evidence"] == [
+        {
+            "evidence_id": "ev:skillup-bridge-safe-1",
+            "pointer": "pointer://diagnostic/skillup-route/safe-1",
+            "source_label": "Skillup Bridge safe evidence",
+            "rights_status": "PUBLIC",
+        }
+    ]
+    assert body["policy"] == {
+        "raw_leak_check_passed": True,
+        "rights_check_passed": True,
+        "sensitivity_check_passed": True,
+        "evidence_check_passed": True,
+    }
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    _assert_no_pass_fields(body)
+    _assert_no_raw_internal_or_secret_echo(body)
+
+
+def test_skillup_bridge_full_app_route_sanitizes_unsafe_source_content_with_test_auth(
+    monkeypatch: pytest.MonkeyPatch,
+    full_app_client: TestClient,
+) -> None:
+    response = full_app_client.post(
+        ROUTE,
+        headers=_test_auth_headers(monkeypatch),
+        json={
+            "requester_module": "full-app-selected-sanitization",
+            "result_status": "OK",
+            "evidence_items": [
+                _safe_evidence(
+                    safe_summary="unsafe source content withheld",
+                    pointer_uri="withheld-by-policy",
+                    source_label="withheld-source-label",
+                    secret=True,
+                )
+            ],
+            "raw_text_included": True,
+            "internal_path_included": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_schema_shaped_response(body)
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    _assert_no_forbidden_reason_label_tokens(body["hold_reason_code"], body["hold_reason"])
+    _assert_no_pass_fields(body)
+    _assert_no_raw_internal_or_secret_echo(body)
+
+
+def test_skillup_bridge_full_app_route_direct_db_attempt_denied_without_db_with_test_auth(
+    monkeypatch: pytest.MonkeyPatch,
+    full_app_client: TestClient,
+) -> None:
+    response = full_app_client.post(
+        ROUTE,
+        headers=_test_auth_headers(monkeypatch),
+        json={
+            "requester_module": "full-app-selected-db-denial",
+            "direct_db_access_attempt": True,
+            "raw_query": True,
+            "internal_path": True,
+            "api_token": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_schema_shaped_response(body)
+    assert body["result_status"] == "ERROR"
+    assert body["answer_status"] == "INVALIDATED"
+    assert body["evidence_required"] is True
+    assert body["review_required"] is True
+    assert body["evidence"] == []
+    _assert_no_forbidden_reason_label_tokens(body["hold_reason_code"], body["hold_reason"])
+    assert "SOURCE_DENIED_NORMALIZED_TO_ERROR" in body.get("warnings", [])
+    assert body["policy"] == {
+        "raw_leak_check_passed": True,
+        "rights_check_passed": False,
+        "sensitivity_check_passed": False,
+        "evidence_check_passed": False,
+    }
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
     _assert_no_pass_fields(body)
