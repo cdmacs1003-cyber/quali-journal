@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quali.local/schemas/evidence.schema.json",
+  "title": "Quali UI Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "standard_id",
+    "revision",
+    "clause",
+    "source_file",
+    "page",
+    "evidence_level",
+    "verification_status",
+    "limitation",
+    "next_action"
+  ],
+  "properties": {
+    "standard_id": { "type": "string", "minLength": 1 },
+    "revision": { "type": "string", "minLength": 1 },
+    "clause": { "type": "string", "minLength": 1 },
+    "source_file": { "type": "string", "minLength": 1 },
+    "page": { "type": "string", "minLength": 1 },
+    "evidence_level": {
+      "type": "string",
+      "enum": ["direct", "summarized", "inferred", "pending"]
+    },
+    "verification_status": {
+      "type": "string",
+      "enum": ["PASS", "HOLD", "FAIL"]
+    },
+    "limitation": { "type": "string", "minLength": 1 },
+    "next_action": { "type": "string", "minLength": 1 }
+  }
+}

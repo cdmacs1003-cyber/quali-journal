@@ -1,0 +1,15 @@
+{
+  "name": "quali-ui-governance-pack",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:hash": "node scripts/check-hash.mjs",
+    "check:tokens": "node scripts/check-token-usage.mjs",
+    "check:contrast": "node scripts/check-contrast.mjs",
+    "check:doc-sync": "node scripts/check-doc-sync.mjs",
+    "check:korean-linebreak": "node scripts/check-korean-linebreak.mjs",
+    "check:evidence-schema": "node scripts/check-evidence-schema.mjs",
+    "test": "npm run check:doc-sync && npm run check:tokens && npm run check:contrast && npm run check:evidence-schema && npm run check:korean-linebreak && npm run check:hash"
+  }
+}

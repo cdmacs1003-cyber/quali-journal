@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quali.local/schemas/tokens.schema.json",
+  "title": "Quali UI Approved Tokens",
+  "type": "object",
+  "required": ["colors", "fonts"],
+  "properties": {
+    "colors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "--q-navy-900",
+        "--q-blue-700",
+        "--q-blue-500",
+        "--q-text-900",
+        "--q-text-700",
+        "--q-text-500",
+        "--q-bg",
+        "--q-panel",
+        "--q-line",
+        "--q-pass",
+        "--q-hold",
+        "--q-fail",
+        "--q-focus"
+      ],
+      "properties": {
+        "--q-navy-900": { "const": "#061F4A" },
+        "--q-blue-700": { "const": "#0B3D91" },
+        "--q-blue-500": { "const": "#105BD8" },
+        "--q-text-900": { "const": "#212121" },
+        "--q-text-700": { "const": "#323A45" },
+        "--q-text-500": { "const": "#64748B" },
+        "--q-bg": { "const": "#F8FAFC" },
+        "--q-panel": { "const": "#FFFFFF" },
+        "--q-line": { "const": "#D9E2EC" },
+        "--q-pass": { "const": "#15803D" },
+        "--q-hold": { "const": "#92400E" },
+        "--q-fail": { "const": "#B91C1C" },
+        "--q-focus": { "const": "#105BD8" }
+      }
+    },
+    "fonts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["--q-font-main", "--q-font-code"],
+      "properties": {
+        "--q-font-main": { "type": "string" },
+        "--q-font-code": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 ## 0. Mandatory source of truth
 
@@ -208,25 +208,25 @@ Artifact state table format:
 Every completed Codex task must create exactly one external Codex Completion Report markdown file.
 
 External completion report root:
-    H:\장기기억\docs\codex
+    H:\?κ린湲곗뼲\docs\codex
 
 Normal task completion reports must be saved under:
-    H:\장기기억\docs\codex\<YYYY>\<MM>\
+    H:\?κ린湲곗뼲\docs\codex\<YYYY>\<MM>\
 
 Required filename format:
     <YYYYMMDD>_<TASK_ID>_Completion_Report.md
 
 Example:
-    H:\장기기억\docs\codex\2026\06\20260613_R9ZKQ_Completion_Report.md
+    H:\?κ린湲곗뼲\docs\codex\2026\06\20260613_R9ZKQ_Completion_Report.md
 
 Required folder roles:
 
 | Folder | Purpose |
 |---|---|
-| H:\장기기억\docs\codex\<YYYY>\<MM>\ | Normal task completion reports |
-| H:\장기기억\docs\codex\active\ | Current active task pointers, latest task summary, current-session basis documents |
-| H:\장기기억\docs\codex\handover\ | Final handover reports |
-| H:\장기기억\docs\codex\proofpack\ | Evidence bundles, hashes, manifests, logs, proofpack indexes |
+| H:\?κ린湲곗뼲\docs\codex\<YYYY>\<MM>\ | Normal task completion reports |
+| H:\?κ린湲곗뼲\docs\codex\active\ | Current active task pointers, latest task summary, current-session basis documents |
+| H:\?κ린湲곗뼲\docs\codex\handover\ | Final handover reports |
+| H:\?κ린湲곗뼲\docs\codex\proofpack\ | Evidence bundles, hashes, manifests, logs, proofpack indexes |
 
 The completion report must include at minimum:
 
@@ -332,3 +332,22 @@ Untracked does not mean disposable.
 Missing in a clean worktree does not mean unnecessary.
 Secrets are not recovery sources.
 ```
+
+## Quali Standard UI Governance
+
+For Quali UI, Quali Warehouse, Quali Library, Bridge, Skill-up, IPC, ECSS, NASA, or standards-based UI work, also read:
+
+1. docs/governance/quali-ui/v0.2.0/00_QUALI_UI_CONSTITUTION.md
+2. docs/governance/quali-ui/v0.2.0/00_QUALI_UI_GUARDRAILS.md
+3. docs/governance/quali-ui/v0.2.0/PROJECT_DEVELOPMENT_GUIDEBOOK.md
+4. docs/governance/quali-ui/v0.2.0/PROJECT_DEVELOPMENT_MEMORY.md
+5. docs/governance/quali-ui/v0.2.0/COMMON_DEVELOPMENT_WORKFLOW.md
+6. docs/governance/quali-ui/v0.2.0/COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md
+
+Use the Quali UI skill when applicable:
+
+- .agents/skills/quali-standard-ui-v0-2-0/SKILL.md
+
+Do not overwrite existing project-level workflow files.
+Quali UI governance is an additive domain-specific layer.
+
