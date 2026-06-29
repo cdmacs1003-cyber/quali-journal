@@ -338,6 +338,48 @@ async def authorize(
 
     raise HTTPException(status_code=401, detail="invalid or missing token")
 
+
+def _is_local_only_non_secret_f13_bridge_answer_override_request(request: Request) -> bool:
+    if os.environ.get("QJ_LOCAL_ONLY_NON_SECRET_AUTH_OVERRIDE") != "1":
+        return False
+    if request.method != "POST":
+        return False
+    if request.url.path != "/api/f13/bridge/skillup/bridge-answer":
+        return False
+    if request.query_params:
+        return False
+    for header_name in ("authorization", "x-admin-token", "x-api-token", "x-api-key", "cookie"):
+        if header_name in request.headers:
+            return False
+
+    client_host = (request.client.host if request.client else "").lower()
+    if client_host not in {"127.0.0.1", "::1", "localhost"}:
+        return False
+
+    host = (request.headers.get("host") or "").lower()
+    allowed_hosts = {
+        "127.0.0.1",
+        "localhost",
+        "[::1]",
+    }
+    if host not in allowed_hosts and not (
+        host.startswith("127.0.0.1:")
+        or host.startswith("localhost:")
+        or host.startswith("[::1]:")
+    ):
+        return False
+
+    return True
+
+
+async def authorize_f13_bridge_with_local_override(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> bool:
+    if _is_local_only_non_secret_f13_bridge_answer_override_request(request):
+        return True
+    return await authorize(request, credentials)
+
 def _auth_header_or_qs_ok(request: Request) -> bool:
     expected = [(os.environ.get("ADMIN_TOKEN") or "").strip(),
                 (os.environ.get("API_TOKEN") or "").strip()]
@@ -463,7 +505,7 @@ def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(authorize)):
     return {"ok": True, "gate_required": cfg["gate_required"]}
 
 app.include_router(ready_router)
-app.include_router(f13_bridge_router, dependencies=[Depends(authorize)])
+app.include_router(f13_bridge_router, dependencies=[Depends(authorize_f13_bridge_with_local_override)])
 # === READY/SSOT PATCH END ===================================================
 # ---------------------------------------------------------------------------
 # Paths / Constants
