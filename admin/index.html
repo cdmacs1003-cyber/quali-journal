@@ -16,6 +16,31 @@
   (function () {
     const _origFetch = window.fetch.bind(window);
 
+    function isBetaMinimalUserView() {
+      try {
+        return !!(
+          document.body &&
+          document.body.dataset &&
+          document.body.dataset.uiMode === "test_minimal"
+        );
+      } catch (_) {
+        return false;
+      }
+    }
+    window.IS_BETA_MINIMAL_USER_VIEW = isBetaMinimalUserView;
+
+    function isBetaMinimalAllowedApi(path) {
+      return path === "/api/f13/bridge/skillup/bridge-answer";
+    }
+
+    function betaSkippedResponse() {
+      return new Response('{"ok":false,"skipped":"beta_minimal_admin_background_call"}', {
+        status: 403,
+        statusText: "Skipped in beta minimal view",
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     function getAdminToken() {
       try {
         const t = (typeof window.getToken === "function")
@@ -37,6 +62,9 @@
       init = init || {};
       const urlObj = makeUrl(input);
       const isApi  = !!(urlObj && urlObj.pathname && urlObj.pathname.startsWith("/api/"));
+      if (isApi && isBetaMinimalUserView() && !isBetaMinimalAllowedApi(urlObj.pathname || "")) {
+        return Promise.resolve(betaSkippedResponse());
+      }
 
       // 기존 헤더 + 새 헤더 병합
       const headers = new Headers(
@@ -219,6 +247,7 @@
     border-radius:8px;
     background:var(--q-bg);
     min-height:68px;
+    white-space:pre-line;
   }
   .q-beta-summary{
     display:grid;
@@ -565,6 +594,7 @@ function saveAdminTokenJJ(){
 if(!window.startAutoRefresh){
   window.__kpiTimer = null;
   window.startAutoRefresh = function(){
+    if (window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW()) return;
     window.stopAutoRefresh();
     refresh().catch(()=>{});
     window.__kpiTimer = setInterval(function(){ refresh().catch(()=>{}); }, 30000);
@@ -582,6 +612,11 @@ if(!window.testToken){
    * 항상 "인증됨"으로 표시되었으므로, 토큰이 없는 경우에는 미인증으로 처리합니다.
    */
   window.testToken = async function(){
+    if (window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW()) {
+      try { updateAuthUI(false); } catch (_) {}
+      stopAutoRefresh();
+      return;
+    }
     try{
       const res = await fetch(API_BASE+'/api/status', { headers: authHeaders() });
       // 토큰이 존재하고 응답이 성공하면 인증된 것으로 간주. 토큰이 없으면 미인증.
@@ -664,6 +699,7 @@ function showLink(p){
 
 /* KPI 새로고침 실제 로직 — 안정/멱등/카운트다운 연동 */
 async function refresh(){
+  if (window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW()) return;
   // -------- 공통 유틸(안전하게 DOM 업데이트) --------
   const setText = (id, v) => { const n = el(id); if (n) n.textContent = (v ?? v === 0) ? v : '-'; };
   const safeNum = (v, d=0) => (typeof v === 'number' && isFinite(v)) ? v : d;
@@ -760,7 +796,11 @@ async function refresh(){
   // 자동 새로고침 시작/정지에 후킹(기존 기능은 그대로)
   if (typeof window.startAutoRefresh === 'function') {
     var _start = window.startAutoRefresh;
-    window.startAutoRefresh = function(){ var r = _start.apply(this, arguments); start(); return r; };
+    window.startAutoRefresh = function(){
+      var r = _start.apply(this, arguments);
+      if (!(window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW())) start();
+      return r;
+    };
   }
   if (typeof window.stopAutoRefresh === 'function') {
     var _stop = window.stopAutoRefresh;
@@ -1272,6 +1312,10 @@ function drawTimeline(st){
 /* 비동기 지원 여부 체크 */
 let HAS_TASKS=false;
 async function checkTasks(){
+  if (window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW()) {
+    HAS_TASKS=false;
+    return;
+  }
   try{ var r=await fetch(API_BASE+'/api/tasks/recent?limit=1',{headers:authHeaders()}); HAS_TASKS=r.ok; }
   catch{ HAS_TASKS=false; }
 }
@@ -1515,6 +1559,7 @@ async function publishItem(id){
 <div id="runtime-badge" data-internal-surface="true" style="position:fixed;bottom:6px;left:12px;z-index:9999;font:12px/1.4 system-ui;color:#aaa;"></div>
 <script>
 (async () => {
+  if (window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW()) return;
   try {
     // 토큰 필요 API에도 헤더 부착
     const r = await fetch('/api/debug/runtime', { headers: authHeaders() });
@@ -1531,6 +1576,7 @@ async function publishItem(id){
 <div id="backup-badge" data-internal-surface="true" style="position:fixed;bottom:6px;right:12px;z-index:9999;font:12px/1.4 system-ui;"></div>
 <script>
 (async()=>{
+  if (window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW()) return;
   try{
     const r = await fetch('/api/backup/status'); const j = await r.json();
     const el = document.getElementById('backup-badge');
@@ -2066,6 +2112,38 @@ window.onerror = function(message, source, lineno, colno, error) {
   var responseClass = document.getElementById("beta-response-class");
   var bodyDisplay = document.getElementById("beta-body-display");
   var feedback = document.getElementById("beta-minimal-feedback");
+  var SAFE_ANSWER_FIELDS = [
+    "safe_short_answer",
+    "short_answer",
+    "answer_summary",
+    "sanitized_answer",
+    "answer_text_sanitized",
+    "display_answer"
+  ];
+  var UNSAFE_DISPLAY_MARKERS = [
+    "raw_text",
+    "raw text",
+    "raw_prompt",
+    "raw prompt",
+    "raw_query",
+    "raw query",
+    "raw_answer",
+    "raw answer",
+    "full_json",
+    "full json",
+    "internal_path",
+    "internal path",
+    "file://",
+    "localhost",
+    "127.0.0.1",
+    "secret",
+    "token",
+    "credential",
+    "cookie",
+    "authorization",
+    "h:\\",
+    "c:\\"
+  ];
 
   function setText(node, value){
     if (node) node.textContent = String(value == null ? "" : value);
@@ -2096,6 +2174,40 @@ window.onerror = function(message, source, lineno, colno, error) {
     var value = data && typeof data.result_status === "string" ? data.result_status : "";
     return ["OK", "HOLD", "ERROR"].indexOf(value) >= 0 ? value : "HOLD";
   }
+  function safeDisplayText(value){
+    if (typeof value !== "string") return "";
+    var text = value.trim();
+    if (!text || text.length > 1200) return "";
+    var lowered = text.toLowerCase();
+    for (var i = 0; i < UNSAFE_DISPLAY_MARKERS.length; i += 1) {
+      if (lowered.indexOf(UNSAFE_DISPLAY_MARKERS[i]) >= 0) return "";
+    }
+    return text;
+  }
+  function safeShortAnswer(data){
+    if (!data || typeof data !== "object" || Array.isArray(data)) return "";
+    for (var i = 0; i < SAFE_ANSWER_FIELDS.length; i += 1) {
+      var field = SAFE_ANSWER_FIELDS[i];
+      if (!Object.prototype.hasOwnProperty.call(data, field)) continue;
+      var text = safeDisplayText(data[field]);
+      if (text) return text;
+    }
+    return "";
+  }
+  function koreanStatusLabel(answerStatus, resultStatus){
+    if (answerStatus === "REDACTED") return "숨김";
+    if (answerStatus === "INVALIDATED" || resultStatus === "ERROR") return "검토 필요";
+    return "보류";
+  }
+  function renderAnswerPanel(data, answerStatus, resultStatus){
+    var shortAnswer = safeShortAnswer(data);
+    if (shortAnswer) return "짧은 답변\n" + shortAnswer;
+    if (answerStatus === "ANSWERED" || resultStatus === "OK") {
+      return "현재 답변 상태: 검토 필요\n안전 표시 기준에 맞는 짧은 답변이 없어 답변 본문은 표시하지 않습니다.";
+    }
+    return "현재 답변 상태: " + koreanStatusLabel(answerStatus, resultStatus) +
+      "\n안전 검토 중입니다. 베타에서는 확정 답변이 아닌 상태 안내가 먼저 표시될 수 있습니다.";
+  }
   function classifyBody(text){
     if (!text) return {kind:"response_empty", data:null};
     try {
@@ -2108,14 +2220,14 @@ window.onerror = function(message, source, lineno, colno, error) {
     var answerStatus = safeAnswerStatus(data);
     var resultStatus = safeResultStatus(data);
     setState(answerStatus);
-    setText(result, "답변 상태: " + answerStatus + " / 결과 상태: " + resultStatus + " / HTTP 분류: " + statusCategory(code));
+    setText(result, renderAnswerPanel(data, answerStatus, resultStatus));
     setText(transport, "transport_ok");
     setText(responseClass, kind);
     setText(bodyDisplay, "숨김 처리됨");
   }
   function fail(category){
     setState("HOLD");
-    setText(result, "보류 / " + category);
+    setText(result, "현재 답변 상태: 보류\n안전 검토 중입니다. 베타에서는 확정 답변이 아닌 상태 안내가 먼저 표시될 수 있습니다.");
     setText(transport, category);
     setText(responseClass, "response_unknown_or_unparsed");
     setText(bodyDisplay, "숨김 처리됨");

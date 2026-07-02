@@ -74,6 +74,11 @@
       "type": "string",
       "maxLength": 4000
     },
+    "safe_short_answer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 800
+    },
     "hold_reason_code": {
       "type": "string",
       "maxLength": 160

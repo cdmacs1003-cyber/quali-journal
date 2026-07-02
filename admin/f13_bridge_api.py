@@ -38,6 +38,37 @@ router = APIRouter(prefix="/api/f13/bridge", tags=["f13-bridge"])
 
 _MAX_RETURN_ITEMS = 10
 _REDACTED_PREFLIGHT_REPLAY_EVIDENCE_FIELD = "redacted_preflight_replay_evidence"
+_SAFE_SHORT_ANSWER_FIELD = "safe_short_answer"
+_SAFE_SHORT_ANSWER_MAX_CHARS = 800
+_BETA_HOLD_SHORT_ANSWER = (
+    "안전 검토 중입니다. 베타에서는 확정 답변이 아닌 상태 안내가 먼저 표시될 수 있습니다."
+)
+_UNSAFE_SHORT_ANSWER_MARKERS = (
+    "raw_text",
+    "raw text",
+    "raw_prompt",
+    "raw prompt",
+    "raw_query",
+    "raw query",
+    "raw_answer",
+    "raw answer",
+    "full_json",
+    "full json",
+    "full_answer",
+    "full answer",
+    "internal_path",
+    "internal path",
+    "file://",
+    "localhost",
+    "127.0.0.1",
+    "secret",
+    "token",
+    "credential",
+    "cookie",
+    "authorization",
+    "h:\\",
+    "c:\\",
+)
 _SCHEMA_REQUIRED_EVIDENCE_FIELDS = (
     "evidence_id",
     "bridge_trace_id",
@@ -494,6 +525,30 @@ def _without_pass_claim_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _safe_short_answer_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = " ".join(str(value).strip().split())
+    if not text or len(text) > _SAFE_SHORT_ANSWER_MAX_CHARS:
+        return None
+    lowered = text.lower()
+    if any(marker in lowered for marker in _UNSAFE_SHORT_ANSWER_MARKERS):
+        return None
+    return text
+
+
+def _with_safe_short_answer(payload: Dict[str, Any]) -> Dict[str, Any]:
+    result_status = str(payload.get("result_status") or "")
+    answer_status = str(payload.get("answer_status") or "")
+    if result_status == RESULT_OK and answer_status == "ANSWERED":
+        safe_answer = _safe_short_answer_text(payload.get("answer"))
+        if safe_answer is not None:
+            payload[_SAFE_SHORT_ANSWER_FIELD] = safe_answer
+    elif result_status == RESULT_HOLD or answer_status == "HOLD":
+        payload[_SAFE_SHORT_ANSWER_FIELD] = _BETA_HOLD_SHORT_ANSWER
+    return payload
+
+
 def _preflight_validation_gate_response(request_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     redacted_evidence = request_payload.get(_REDACTED_PREFLIGHT_REPLAY_EVIDENCE_FIELD)
     if redacted_evidence is None:
@@ -574,11 +629,12 @@ def skillup_bridge_answer(payload: SkillupBridgeAnswerRequest) -> Dict[str, Any]
             pointer_uri = _safe_skillup_pointer_uri(evidence_items[0].get("pointer_uri"))
             if pointer_uri is not None:
                 response["pointer_uri"] = pointer_uri
-        return adapt_skillup_answer_hold_response(
+        adapted = adapt_skillup_answer_hold_response(
             response,
             request_context=request_payload,
             bridge_payload=bridge_payload,
         )
+        return _with_safe_short_answer(adapted)
 
     queue_source = {
         **response,
@@ -586,11 +642,12 @@ def skillup_bridge_answer(payload: SkillupBridgeAnswerRequest) -> Dict[str, Any]
         "origin_event_id": request_payload.get("origin_event_id") or response.get("bridge_trace_id"),
     }
     response["feedback_queue_item"] = skillup_feedback_queue_item_from_hold(queue_source)
-    return adapt_skillup_answer_hold_response(
+    adapted = adapt_skillup_answer_hold_response(
         response,
         request_context=request_payload,
         bridge_payload=bridge_payload,
     )
+    return _with_safe_short_answer(adapted)
 
 
 @router.post("/retrieve-evidence", response_model=BridgeEvidenceResponse)
