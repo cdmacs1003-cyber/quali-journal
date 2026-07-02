@@ -90,6 +90,9 @@ TWO_INDEPENDENT_SOURCES_AGREE_LOOPBACK_ONLY = (
     "two_independent_sources_agree_loopback_only"
 )
 NOT_VERIFIED = "not_verified"
+SOURCE_A_INVOCATION_RESTRICTED_COMPENSATED_BY_B_C_PID_EXACT = (
+    "source_a_invocation_restricted_compensated_by_b_c_pid_exact"
+)
 
 SOURCE_A_CATEGORIES = (
     SOURCE_A_COMMAND_UNAVAILABLE,
@@ -182,6 +185,13 @@ STOP_REQUIRED_CATEGORIES = frozenset(
         SOURCE_C_UNKNOWN_OR_UNPARSED,
         SOURCE_C_CONFLICTING,
         SOURCE_C_RAW_OUTPUT_REQUIRED,
+    }
+)
+
+SOURCE_A_COMPENSABLE_INVOCATION_RESTRICTED_CATEGORIES = frozenset(
+    {
+        SOURCE_A_COMMAND_UNAVAILABLE,
+        SOURCE_A_COMMAND_AVAILABLE_INVOCATION_ERROR,
     }
 )
 
@@ -636,11 +646,19 @@ def aggregate_listener_decision(
         PID_MATCH_EXACT_STARTED_PROCESS,
         PID_MATCH_CHILD_OR_RUNTIME_PROCESS,
     }
+    source_a_compensated = (
+        source_a_category in SOURCE_A_COMPENSABLE_INVOCATION_RESTRICTED_CATEGORIES
+        and source_b_category == SOURCE_B_LOOPBACK_ONLY_WITH_PID_EXACT
+        and source_c_category == SOURCE_C_LOOPBACK_ONLY_WITHOUT_PID
+        and pid_association_category == PID_MATCH_EXACT_STARTED_PROCESS
+        and source_success_count >= 2
+    )
+    effective_stop_required = stop_required and not source_a_compensated
     proceed = (
         source_success_count >= 2
         and source_no_evidence_count <= 1
         and pid_allowed
-        and not stop_required
+        and not effective_stop_required
     )
     non_loopback = "false" if proceed else NOT_VERIFIED
     if any("non_loopback_detected" in category for category in categories):
@@ -649,7 +667,7 @@ def aggregate_listener_decision(
         ALL_SUCCESSFUL_DECISION_ROWS_PARSED
         if proceed
         else PARSER_ISSUE_DETECTED
-        if stop_required
+        if effective_stop_required
         else NOT_VERIFIED
     )
     return {
@@ -668,6 +686,11 @@ def aggregate_listener_decision(
         "non_loopback_detected_boolean": non_loopback,
         "pid_association_category": pid_association_category,
         "parser_result_category": parser_result,
+        "source_a_compensation_category": (
+            SOURCE_A_INVOCATION_RESTRICTED_COMPENSATED_BY_B_C_PID_EXACT
+            if source_a_compensated
+            else NOT_VERIFIED
+        ),
         "raw_output_category": NOT_PRINTED_SANITIZED_CATEGORIES_ONLY,
     }
 
