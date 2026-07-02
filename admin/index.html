@@ -6,6 +6,7 @@
   <meta charset="utf-8"/>
   <title>QualiJournal — Admin (Unified)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="icon" type="image/svg+xml" href="assets/brand/quali-ai/quali-ai-app-icon.svg">
 
   <!-- 기본 UI 스타일 -->
      
@@ -114,12 +115,23 @@
   .q-beta-logo{
     display:grid;
     place-items:center;
+    width:52px;
+    height:52px;
+    border-radius:8px;
+    border:1px solid var(--q-line);
+    background:var(--q-panel);
+    overflow:hidden;
+  }
+  .q-beta-brand-mark{
+    display:block;
     width:44px;
     height:44px;
-    border-radius:8px;
-    background:var(--q-navy-900);
-    color:var(--q-panel);
-    font-weight:800;
+  }
+  .q-beta-signature{
+    display:block;
+    width:min(220px,100%);
+    height:auto;
+    margin:0 0 6px;
   }
   .q-beta-eyebrow{
     margin:0 0 4px;
@@ -233,8 +245,9 @@
 
 <section id="beta-minimal-skillup" class="q-beta-minimal" data-ui-mode="test_minimal" aria-labelledby="beta-minimal-title">
   <div class="q-beta-header">
-    <div class="q-beta-logo" aria-hidden="true">Q</div>
+    <div class="q-beta-logo" aria-hidden="true"><img class="q-beta-brand-mark" src="assets/brand/quali-ai/quali-ai-symbol.svg" alt="" aria-hidden="true" width="44" height="44"></div>
     <div>
+      <img class="q-beta-signature" data-ui-marker="quali_ai_beta_brand" src="assets/brand/quali-ai/quali-ai-signature-ko.svg" alt="QualiAI beta candidate" width="220" height="64">
       <p class="q-beta-eyebrow">UI_MODE=test_minimal</p>
       <h1 id="beta-minimal-title" class="q-beta-title">
         <span class="line">Skill-up Bridge</span>
