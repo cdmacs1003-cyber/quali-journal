@@ -73,8 +73,214 @@
   </script>
 
 <link href="assets/style.c4cc22854a.css" rel="stylesheet">
+<style id="beta-minimal-test-style">
+  .q-beta-minimal{
+    --q-navy-900:#061F4A;
+    --q-blue-700:#0B3D91;
+    --q-blue-500:#105BD8;
+    --q-text-900:#212121;
+    --q-text-700:#323A45;
+    --q-text-500:#64748B;
+    --q-bg:#F8FAFC;
+    --q-panel:#FFFFFF;
+    --q-line:#D9E2EC;
+    --q-pass:#15803D;
+    --q-hold:#92400E;
+    --q-fail:#B91C1C;
+    --q-focus:#105BD8;
+    --q-font-main:"Noto Sans KR", system-ui, sans-serif;
+    --q-font-code:ui-monospace, Menlo, Consolas, monospace;
+    margin:16px;
+    padding:16px;
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    background:var(--q-bg);
+    color:var(--q-text-900);
+    font-family:var(--q-font-main);
+    word-break:keep-all;
+    overflow-wrap:break-word;
+  }
+  .q-beta-minimal *{box-sizing:border-box}
+  .q-beta-header{
+    display:grid;
+    grid-template-columns:auto 1fr;
+    gap:12px;
+    align-items:center;
+    padding:12px;
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    background:var(--q-panel);
+  }
+  .q-beta-logo{
+    display:grid;
+    place-items:center;
+    width:44px;
+    height:44px;
+    border-radius:8px;
+    background:var(--q-navy-900);
+    color:var(--q-panel);
+    font-weight:800;
+  }
+  .q-beta-eyebrow{
+    margin:0 0 4px;
+    color:var(--q-text-500);
+    font:600 12px/1.4 var(--q-font-code);
+  }
+  .q-beta-title{
+    margin:0;
+    color:var(--q-navy-900);
+    font-size:24px;
+    line-height:1.08;
+    letter-spacing:0;
+    word-break:keep-all;
+    text-wrap:balance;
+  }
+  .q-beta-title .line{display:block}
+  .q-beta-copy{margin:10px 0 0;color:var(--q-text-700);line-height:1.7}
+  .q-beta-grid{
+    display:grid;
+    grid-template-columns:minmax(260px,1fr) minmax(260px,1fr);
+    gap:12px;
+    margin-top:12px;
+  }
+  .q-beta-panel{
+    padding:12px;
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    background:var(--q-panel);
+  }
+  .q-beta-evidence{margin-top:12px}
+  .q-beta-panel h2{
+    margin:0 0 10px;
+    color:var(--q-text-900);
+    font-size:18px;
+    line-height:1.2;
+    letter-spacing:0;
+  }
+  .q-beta-panel label{display:block;margin-bottom:6px;font-weight:700;color:var(--q-text-700)}
+  .q-beta-panel textarea{
+    width:100%;
+    min-height:104px;
+    resize:vertical;
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    padding:10px;
+    color:var(--q-text-900);
+    background:var(--q-panel);
+    font:15px/1.5 var(--q-font-main);
+  }
+  .q-beta-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .q-beta-actions button{
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    padding:8px 10px;
+    background:var(--q-panel);
+    color:var(--q-text-900);
+  }
+  .q-beta-actions .q-primary{
+    border-color:var(--q-blue-500);
+    background:var(--q-blue-500);
+    color:var(--q-panel);
+    font-weight:700;
+  }
+  .q-beta-actions button:focus-visible,
+  .q-beta-panel textarea:focus-visible{
+    outline:3px solid var(--q-focus);
+    outline-offset:2px;
+  }
+  .q-beta-status{
+    display:inline-flex;
+    align-items:center;
+    min-height:28px;
+    border-radius:8px;
+    padding:3px 8px;
+    font-weight:800;
+    color:var(--q-panel);
+    background:var(--q-hold);
+  }
+  .q-beta-status[data-state="ANSWERED"]{background:var(--q-pass)}
+  .q-beta-status[data-state="INVALIDATED"]{background:var(--q-fail)}
+  .q-beta-result{
+    margin-top:10px;
+    padding:10px;
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    background:var(--q-bg);
+    min-height:68px;
+  }
+  .q-beta-summary{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:8px;
+    margin:0;
+  }
+  .q-beta-summary div{
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    padding:8px;
+    background:var(--q-bg);
+  }
+  .q-beta-summary dt{color:var(--q-text-500);font-size:12px}
+  .q-beta-summary dd{margin:2px 0 0;font-weight:700;color:var(--q-text-900);overflow-wrap:anywhere}
+  @media (max-width:900px){
+    .q-beta-grid{grid-template-columns:1fr}
+    .q-beta-summary{grid-template-columns:1fr}
+  }
+</style>
 </head>
 <body>
+
+<section id="beta-minimal-skillup" class="q-beta-minimal" data-ui-mode="test_minimal" aria-labelledby="beta-minimal-title">
+  <div class="q-beta-header">
+    <div class="q-beta-logo" aria-hidden="true">Q</div>
+    <div>
+      <p class="q-beta-eyebrow">UI_MODE=test_minimal</p>
+      <h1 id="beta-minimal-title" class="q-beta-title">
+        <span class="line">Skill-up Bridge</span>
+        <span class="line">Beta Minimal</span>
+      </h1>
+      <p class="q-beta-copy">Limited selected local POST evidence is closed with limits. Broad readiness remains NOT_GRANTED.</p>
+    </div>
+  </div>
+
+  <div class="q-beta-grid">
+    <section class="q-beta-panel" aria-labelledby="beta-question-title">
+      <h2 id="beta-question-title">Question</h2>
+      <form id="beta-minimal-form">
+        <label for="beta-minimal-question">One question input</label>
+        <textarea id="beta-minimal-question" name="question" maxlength="800" placeholder="Ask one Skill-up question"></textarea>
+        <div class="q-beta-actions">
+          <button type="submit" class="q-primary">Submit</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="q-beta-panel" aria-labelledby="beta-result-title">
+      <h2 id="beta-result-title">Answer / HOLD</h2>
+      <span id="beta-minimal-status" class="q-beta-status" data-state="HOLD">HOLD</span>
+      <div id="beta-minimal-result" class="q-beta-result" role="status" aria-live="polite">Submit one question to request a sanitized answer status.</div>
+      <div class="q-beta-actions" role="group" aria-label="Feedback">
+        <button type="button" data-beta-feedback="useful">Useful</button>
+        <button type="button" data-beta-feedback="confusing">Confusing</button>
+        <button type="button" data-beta-feedback="wrong">Wrong</button>
+        <button type="button" data-beta-feedback="needs_review">Needs review</button>
+      </div>
+      <p id="beta-minimal-feedback" class="q-beta-copy">Feedback is local until a later approved queue gate.</p>
+    </section>
+  </div>
+
+  <section class="q-beta-panel q-beta-evidence" aria-labelledby="beta-evidence-title">
+    <h2 id="beta-evidence-title">Evidence / status summary</h2>
+    <dl class="q-beta-summary">
+      <div><dt>Mode</dt><dd id="beta-mode">test_minimal</dd></div>
+      <div><dt>Selected evidence</dt><dd id="beta-selected-evidence">200/http_2xx, limited only</dd></div>
+      <div><dt>Transport</dt><dd id="beta-transport">not_executed_in_ui_yet</dd></div>
+      <div><dt>Response class</dt><dd id="beta-response-class">not_verified_in_ui_yet</dd></div>
+      <div><dt>Body display</dt><dd id="beta-body-display">suppressed</dd></div>
+      <div><dt>Broad readiness</dt><dd id="beta-readiness">NOT_GRANTED</dd></div>
+    </dl>
+  </section>
+</section>
 
 <!-- ===== Quick Tools (approve / repair) ===== -->
 <div id="quick-tools" style="margin:12px 0;padding:10px;border:1px dashed #bbb;border-radius:10px;background:#fafafa">
@@ -1720,6 +1926,102 @@ window.onerror = function(message, source, lineno, colno, error) {
 })();
 </script>
 <script src="assets/app.a80cc71a81.js"></script>
+<script id="beta-minimal-test-script">
+(function(){
+  var UI_MODE = "test_minimal";
+  var ENDPOINT = "/api/f13/bridge/skillup/bridge-answer";
+  var form = document.getElementById("beta-minimal-form");
+  if (!form) return;
+  var question = document.getElementById("beta-minimal-question");
+  var status = document.getElementById("beta-minimal-status");
+  var result = document.getElementById("beta-minimal-result");
+  var transport = document.getElementById("beta-transport");
+  var responseClass = document.getElementById("beta-response-class");
+  var bodyDisplay = document.getElementById("beta-body-display");
+  var feedback = document.getElementById("beta-minimal-feedback");
+
+  function setText(node, value){
+    if (node) node.textContent = String(value == null ? "" : value);
+  }
+  function setState(value){
+    var safe = ["ANSWERED", "HOLD", "REDACTED", "INVALIDATED"].indexOf(value) >= 0 ? value : "HOLD";
+    setText(status, safe);
+    if (status) status.setAttribute("data-state", safe);
+  }
+  function statusCategory(code){
+    if (code >= 200 && code < 300) return "http_2xx";
+    if (code >= 300 && code < 400) return "http_3xx";
+    if (code >= 400 && code < 500) return "http_4xx";
+    if (code >= 500 && code < 600) return "http_5xx";
+    return "unknown_or_unparsed";
+  }
+  function safeAnswerStatus(data){
+    var value = data && typeof data.answer_status === "string" ? data.answer_status : "";
+    return ["ANSWERED", "HOLD", "REDACTED", "INVALIDATED"].indexOf(value) >= 0 ? value : "HOLD";
+  }
+  function safeResultStatus(data){
+    var value = data && typeof data.result_status === "string" ? data.result_status : "";
+    return ["OK", "HOLD", "ERROR"].indexOf(value) >= 0 ? value : "HOLD";
+  }
+  function classifyBody(text){
+    if (!text) return {kind:"response_empty", data:null};
+    try {
+      return {kind:"response_json_sanitized", data:JSON.parse(text)};
+    } catch (_) {
+      return {kind:"response_non_json_sanitized", data:null};
+    }
+  }
+  function summarize(data, code, kind){
+    var answerStatus = safeAnswerStatus(data);
+    var resultStatus = safeResultStatus(data);
+    setState(answerStatus);
+    setText(result, "Answer status: " + answerStatus + " / Result status: " + resultStatus + " / HTTP category: " + statusCategory(code));
+    setText(transport, "transport_ok");
+    setText(responseClass, kind);
+    setText(bodyDisplay, "suppressed");
+  }
+  function fail(category){
+    setState("HOLD");
+    setText(result, "HOLD / " + category);
+    setText(transport, category);
+    setText(responseClass, "response_unknown_or_unparsed");
+    setText(bodyDisplay, "suppressed");
+  }
+
+  form.addEventListener("submit", function(event){
+    event.preventDefault();
+    var text = (question && question.value ? question.value : "").trim();
+    if (!text) {
+      fail("question_required");
+      return;
+    }
+    setState("HOLD");
+    setText(result, "Requesting sanitized status...");
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", ENDPOINT, true);
+    xhr.timeout = 15000;
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.onload = function(){
+      var classified = classifyBody(xhr.responseText || "");
+      summarize(classified.data, xhr.status, classified.kind);
+    };
+    xhr.onerror = function(){ fail("transport_error"); };
+    xhr.ontimeout = function(){ fail("timeout_error"); };
+    xhr.send(JSON.stringify({
+      requester_module:"Skillup",
+      ui_mode:UI_MODE,
+      request_payload:{question:text.slice(0, 800)}
+    }));
+  });
+
+  document.querySelectorAll("[data-beta-feedback]").forEach(function(button){
+    button.addEventListener("click", function(){
+      setText(feedback, "Feedback marked: " + button.getAttribute("data-beta-feedback"));
+    });
+  });
+})();
+</script>
 <!-- === 백업 상태: 로컬 404 대응 표시 === -->
 <div id="backup-status-display" style="position:fixed; bottom:28px; right:12px; font:12px system-ui; color:#888;"></div>
 <script>
