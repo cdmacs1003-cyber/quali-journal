@@ -104,10 +104,10 @@
   .q-beta-minimal *{box-sizing:border-box}
   .q-beta-header{
     display:grid;
-    grid-template-columns:auto 1fr;
-    gap:12px;
+    grid-template-columns:1fr;
+    gap:8px;
     align-items:center;
-    padding:12px;
+    padding:10px 12px;
     border:1px solid var(--q-line);
     border-radius:8px;
     background:var(--q-panel);
@@ -129,9 +129,9 @@
   }
   .q-beta-signature{
     display:block;
-    width:min(220px,100%);
+    width:min(200px,100%);
     height:auto;
-    margin:0 0 6px;
+    margin:0 0 4px;
   }
   .q-beta-eyebrow{
     margin:0 0 4px;
@@ -234,7 +234,13 @@
   }
   .q-beta-summary dt{color:var(--q-text-500);font-size:12px}
   .q-beta-summary dd{margin:2px 0 0;font-weight:700;color:var(--q-text-900);overflow-wrap:anywhere}
-  body[data-ui-mode="test_minimal"] [data-admin-surface="true"]{
+  body[data-ui-mode="test_minimal"]{
+    margin:0;
+    background:#F8FAFC;
+    color:#212121;
+  }
+  body[data-ui-mode="test_minimal"] [data-admin-surface="true"],
+  body[data-ui-mode="test_minimal"] [data-internal-surface="true"]{
     display:none !important;
   }
   @media (max-width:900px){
@@ -248,10 +254,10 @@
 
 <section id="beta-minimal-skillup" class="q-beta-minimal" data-ui-mode="test_minimal" aria-labelledby="beta-minimal-title">
   <div class="q-beta-header">
-    <div class="q-beta-logo" aria-hidden="true"><img class="q-beta-brand-mark" src="assets/brand/quali-ai/quali-ai-symbol.svg" alt="" aria-hidden="true" width="44" height="44"></div>
+    <div class="q-beta-logo" data-internal-surface="true" aria-hidden="true"><img class="q-beta-brand-mark" src="assets/brand/quali-ai/quali-ai-symbol.svg" alt="" aria-hidden="true" width="44" height="44"></div>
     <div>
       <img class="q-beta-signature" data-ui-marker="quali_ai_beta_brand" src="assets/brand/quali-ai/quali-ai-signature-ko.svg" alt="QualiAI beta candidate" width="220" height="64">
-      <p class="q-beta-eyebrow">UI_MODE=test_minimal</p>
+      <p class="q-beta-eyebrow" data-internal-surface="true" aria-hidden="true">UI_MODE=test_minimal</p>
       <h1 id="beta-minimal-title" class="q-beta-title">
         <span class="line">스킬업 베타 질문창</span>
       </h1>
@@ -273,7 +279,7 @@
 
     <section class="q-beta-panel" aria-labelledby="beta-result-title">
       <h2 id="beta-result-title">답변 / 보류</h2>
-      <span id="beta-minimal-status" class="q-beta-status" data-state="HOLD">HOLD</span>
+      <span id="beta-minimal-status" class="q-beta-status" data-state="HOLD">보류</span>
       <div id="beta-minimal-result" class="q-beta-result" role="status" aria-live="polite">질문을 보내면 안전하게 정리된 답변 상태를 확인합니다</div>
       <div class="q-beta-actions" role="group" aria-label="피드백">
         <button type="button" data-beta-feedback="useful">도움됨</button>
@@ -1544,7 +1550,7 @@ async function publishItem(id){
 </script>
 
 <!-- === FOOTER RUNTIME BADGE === -->
-<div id="runtime-badge" style="position:fixed;bottom:6px;left:12px;z-index:9999;font:12px/1.4 system-ui;color:#aaa;"></div>
+<div id="runtime-badge" data-internal-surface="true" style="position:fixed;bottom:6px;left:12px;z-index:9999;font:12px/1.4 system-ui;color:#aaa;"></div>
 <script>
 (async () => {
   try {
@@ -1559,7 +1565,7 @@ async function publishItem(id){
 </script>
 
 <!-- BACKUP BADGE -->
-<div id="backup-badge" style="position:fixed;bottom:6px;right:12px;z-index:9999;font:12px/1.4 system-ui;"></div>
+<div id="backup-badge" data-internal-surface="true" style="position:fixed;bottom:6px;right:12px;z-index:9999;font:12px/1.4 system-ui;"></div>
 <script>
 (async()=>{
   try{
@@ -1862,7 +1868,7 @@ window.onerror = function(message, source, lineno, colno, error) {
 })();
 </script>
 <!-- === Approve UI (MVP) : START === -->
-<section id="approve-section" style="margin-top:24px;">
+<section id="approve-section" data-admin-surface="true" style="margin-top:24px;">
   <h2>📝 기사 승인(Approve)</h2>
 
   <div style="margin:8px 0;">
@@ -1963,7 +1969,13 @@ window.onerror = function(message, source, lineno, colno, error) {
   }
   function setState(value){
     var safe = ["ANSWERED", "HOLD", "REDACTED", "INVALIDATED"].indexOf(value) >= 0 ? value : "HOLD";
-    setText(status, safe);
+    var statusLabels = {
+      ANSWERED: "답변됨",
+      HOLD: "보류",
+      REDACTED: "숨김",
+      INVALIDATED: "무효"
+    };
+    setText(status, statusLabels[safe] || "보류");
     if (status) status.setAttribute("data-state", safe);
   }
   function statusCategory(code){
@@ -2014,7 +2026,7 @@ window.onerror = function(message, source, lineno, colno, error) {
       return;
     }
     setState("HOLD");
-    setText(result, "Requesting sanitized status...");
+    setText(result, "질문 상태를 확인하는 중입니다...");
     var xhr = new XMLHttpRequest();
     xhr.open("POST", ENDPOINT, true);
     xhr.timeout = 15000;
@@ -2048,7 +2060,7 @@ window.onerror = function(message, source, lineno, colno, error) {
 })();
 </script>
 <!-- === 백업 상태: 로컬 404 대응 표시 === -->
-<div id="backup-status-display" style="position:fixed; bottom:28px; right:12px; font:12px system-ui; color:#888;"></div>
+<div id="backup-status-display" data-internal-surface="true" style="position:fixed; bottom:28px; right:12px; font:12px system-ui; color:#888;"></div>
 <script>
 (async () => {
   try {
