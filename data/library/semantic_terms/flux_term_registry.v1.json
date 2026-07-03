@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "registry_scope": "flux_domain_minimal",
+  "created_by": "R9ZNW-278",
+  "status": "APPROVED_WITH_LIMITS",
+  "raw_text_excluded": true,
+  "standard_raw_text_not_included": true,
+  "paid_standard_text_not_included": true,
+  "class_specific_criteria_not_included": true,
+  "terms": [
+    {
+      "term": "flux",
+      "normalized_term": "flux",
+      "lang": "en",
+      "concept_id": "concept:flux",
+      "match_type": "exact",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-flux-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    },
+    {
+      "term": "\ud50c\ub7ed\uc2a4",
+      "normalized_term": "\ud50c\ub7ed\uc2a4",
+      "lang": "ko",
+      "concept_id": "concept:flux",
+      "match_type": "exact",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-flux-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    },
+    {
+      "term": "\ub0a9\ub55c \ud50c\ub7ed\uc2a4",
+      "normalized_term": "\ub0a9\ub55c \ud50c\ub7ed\uc2a4",
+      "lang": "ko",
+      "concept_id": "concept:flux",
+      "match_type": "alias",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-flux-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    },
+    {
+      "term": "\uc194\ub354 \ud50c\ub7ed\uc2a4",
+      "normalized_term": "\uc194\ub354 \ud50c\ub7ed\uc2a4",
+      "lang": "ko",
+      "concept_id": "concept:flux",
+      "match_type": "alias",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-flux-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    },
+    {
+      "term": "soldering flux",
+      "normalized_term": "soldering flux",
+      "lang": "en",
+      "concept_id": "concept:flux",
+      "match_type": "alias",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-flux-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    },
+    {
+      "term": "solder flux",
+      "normalized_term": "solder flux",
+      "lang": "en",
+      "concept_id": "concept:flux",
+      "match_type": "alias",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-flux-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    }
+  ]
+}

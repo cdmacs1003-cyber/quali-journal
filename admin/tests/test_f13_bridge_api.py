@@ -21,6 +21,10 @@ WETTING_ONTOLOGY_PATH = REPO_ROOT / "data" / "library" / "ontology" / "wetting_d
 WETTING_TERM_REGISTRY_PATH = (
     REPO_ROOT / "data" / "library" / "semantic_terms" / "wetting_term_registry.v1.json"
 )
+FLUX_EVIDENCE_ID = "ev-flux-safe-summary-v1"
+FLUX_SEED_PATH = REPO_ROOT / "data" / "library" / "evidence_seeds" / "flux" / "ev-flux-safe-summary-v1.json"
+FLUX_ONTOLOGY_PATH = REPO_ROOT / "data" / "library" / "ontology" / "flux_domain_concepts.v1.json"
+FLUX_TERM_REGISTRY_PATH = REPO_ROOT / "data" / "library" / "semantic_terms" / "flux_term_registry.v1.json"
 ALLOWED_STATUSES = {"OK", "HOLD", "DENIED"}
 FORBIDDEN_KEYS = {
     "raw_text_ref",
@@ -49,6 +53,13 @@ WETTING_FORBIDDEN_PUBLIC_STRINGS = (
     "\ubd88\ud569\uaca9",
     "\ud310\uc815 \uae30\uc900",
     "\ud5c8\uc6a9 \uae30\uc900",
+)
+FLUX_FORBIDDEN_PUBLIC_STRINGS = WETTING_FORBIDDEN_PUBLIC_STRINGS + (
+    "cleaning criteria",
+    "residue criteria",
+    "no-clean acceptance",
+    "process window",
+    "threshold",
 )
 
 
@@ -144,7 +155,7 @@ def _walk_values(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _wetting_public_surface(payload: dict[str, Any]) -> str:
+def _domain_public_surface(payload: dict[str, Any]) -> str:
     values: list[str] = []
     for field in ("safe_summary", "created_for_query_domain"):
         value = payload.get(field)
@@ -176,6 +187,14 @@ def _wetting_public_surface(payload: dict[str, Any]) -> str:
                 values.append(str(value))
 
     return "\n".join(values)
+
+
+def _wetting_public_surface(payload: dict[str, Any]) -> str:
+    return _domain_public_surface(payload)
+
+
+def _flux_public_surface(payload: dict[str, Any]) -> str:
+    return _domain_public_surface(payload)
 
 
 def _assert_no_forbidden_echo(body: dict[str, Any]) -> None:
@@ -547,6 +566,162 @@ def test_wetting_artifacts_are_safe_summary_only_and_raw_leak_guarded():
         for payload in (seed, ontology, registry)
     ).casefold()
     for forbidden in WETTING_FORBIDDEN_PUBLIC_STRINGS:
+        assert forbidden.casefold() not in public_surface
+
+
+def test_resolve_terms_exact_flux_query_maps_to_flux_seed(client: TestClient):
+    matches = bridge_api._resolve_query_terms_from_registry("flux")
+    concept_ids, evidence_ids = bridge_api._concept_evidence_ids_for_terms(matches)
+
+    assert "concept:flux" in concept_ids
+    assert FLUX_EVIDENCE_ID in evidence_ids
+
+    response = client.post(
+        ROUTE,
+        json={"query": "flux", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["hold_reason"] is None
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    assert len(body["evidence_items"]) == 1
+    evidence = body["evidence_items"][0]
+    assert evidence["evidence_id"] == FLUX_EVIDENCE_ID
+    assert evidence["bridge_trace_id"] == "btrace:library-seed:flux-safe-summary-v1"
+    assert evidence["raw_text_policy"] == "SUMMARY_ONLY"
+    rendered = "\n".join(_walk_values(body))
+    assert "data/library" not in rendered
+    assert "flux_domain_concepts" not in rendered
+    assert "flux_term_registry" not in rendered
+    for forbidden in FLUX_FORBIDDEN_PUBLIC_STRINGS:
+        assert forbidden.casefold() not in evidence["safe_summary"].casefold()
+
+
+def test_resolve_terms_korean_flux_alias_maps_to_flux_seed(client: TestClient):
+    query = "\uc194\ub354 \ud50c\ub7ed\uc2a4"
+    matches = bridge_api._resolve_query_terms_from_registry(query)
+    concept_ids, evidence_ids = bridge_api._concept_evidence_ids_for_terms(matches)
+
+    assert "concept:flux" in concept_ids
+    assert FLUX_EVIDENCE_ID in evidence_ids
+
+    response = client.post(
+        ROUTE,
+        json={"query": query, "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["evidence_items"][0]["evidence_id"] == FLUX_EVIDENCE_ID
+    assert body["evidence_items"][0]["bridge_trace_id"] == "btrace:library-seed:flux-safe-summary-v1"
+
+
+def test_skillup_route_uses_flux_seed_without_direct_skillup_file_access(client: TestClient):
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "ui_mode": "test_minimal",
+            "request_payload": {"question": "\ud50c\ub7ed\uc2a4"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "OK"
+    assert body["answer_status"] == "ANSWERED"
+    assert body["trace_id"] == "btrace:library-seed:flux-safe-summary-v1"
+    assert body["safe_short_answer"] == body["answer"]
+    assert body["evidence"][0]["evidence_id"] == FLUX_EVIDENCE_ID
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    answer_surface = "\n".join(
+        str(value)
+        for value in (
+            body.get("answer"),
+            body.get("safe_short_answer"),
+            body.get("hold_reason"),
+        )
+        if value is not None
+    ).casefold()
+    for forbidden in ("full_json", "full json", "file://", "h:\\", "c:\\", "secret", "token", "credential"):
+        assert forbidden not in answer_surface
+
+
+def test_unapproved_flux_seed_is_not_projected(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    unsafe_seed = {
+        "evidence_id": "ev-flux-unapproved",
+        "evidence_type": "SAFE_SUMMARY_ONLY",
+        "created_for_query_domain": ["flux"],
+        "safe_summary": "Unsafe flux summary that must not be returned.",
+        "pointer_uri": "qlib://library/evidence_seeds/flux/ev-flux-unapproved",
+        "raw_text_policy": "SAFE_SUMMARY_ONLY",
+        "rights_status": "INTERNAL",
+        "source_doc_kind": "REFERENCE",
+        "review_status": "APPROVED_FOR_LIBRARY_EVIDENCE",
+        "approval_status": "NOT_APPROVED",
+        "bridge_trace_seed": "btrace-seed-flux-unapproved",
+        "raw_text_excluded": True,
+        "standard_raw_text_not_included": True,
+    }
+    monkeypatch.setattr(bridge_api, "_load_library_evidence_seed_records", lambda: [unsafe_seed])
+
+    response = client.post(
+        ROUTE,
+        json={"query": "flux", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert "Unsafe flux summary that must not be returned." not in "\n".join(_walk_values(body))
+
+
+def test_flux_artifacts_are_safe_summary_only_and_raw_leak_guarded():
+    seed = json.loads(FLUX_SEED_PATH.read_text(encoding="utf-8-sig"))
+    ontology = json.loads(FLUX_ONTOLOGY_PATH.read_text(encoding="utf-8-sig"))
+    registry = json.loads(FLUX_TERM_REGISTRY_PATH.read_text(encoding="utf-8-sig"))
+
+    assert seed["evidence_id"] == FLUX_EVIDENCE_ID
+    assert seed["domain"] == "flux"
+    assert seed["raw_text_policy"] == "SAFE_SUMMARY_ONLY"
+    assert seed["raw_text_excluded"] is True
+    assert seed["standard_raw_text_not_included"] is True
+    assert seed["paid_standard_text_not_included"] is True
+    assert seed["class_specific_criteria_not_included"] is True
+    assert seed["local_path_visible"] is False
+    assert seed["secret_visible"] is False
+
+    assert ontology["status"] == "APPROVED_WITH_LIMITS"
+    assert ontology["raw_text_excluded"] is True
+    assert ontology["standard_raw_text_not_included"] is True
+    assert ontology["paid_standard_text_not_included"] is True
+    assert ontology["class_specific_criteria_not_included"] is True
+    assert registry["status"] == "APPROVED_WITH_LIMITS"
+    assert registry["raw_text_excluded"] is True
+    assert registry["standard_raw_text_not_included"] is True
+    assert registry["paid_standard_text_not_included"] is True
+    assert registry["class_specific_criteria_not_included"] is True
+
+    rendered_payloads = "\n".join(
+        json.dumps(payload, ensure_ascii=False)
+        for payload in (seed, ontology, registry)
+    )
+    assert FLUX_EVIDENCE_ID in rendered_payloads
+
+    public_surface = "\n".join(
+        _flux_public_surface(payload)
+        for payload in (seed, ontology, registry)
+    ).casefold()
+    for forbidden in FLUX_FORBIDDEN_PUBLIC_STRINGS:
         assert forbidden.casefold() not in public_surface
 
 

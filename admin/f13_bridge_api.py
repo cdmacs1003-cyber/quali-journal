@@ -121,6 +121,10 @@ _LIBRARY_WETTING_ONTOLOGY_PATH = _LIBRARY_DATA_ROOT / "ontology" / "wetting_doma
 _LIBRARY_WETTING_TERM_REGISTRY_PATH = (
     _LIBRARY_DATA_ROOT / "semantic_terms" / "wetting_term_registry.v1.json"
 )
+_LIBRARY_FLUX_ONTOLOGY_PATH = _LIBRARY_DATA_ROOT / "ontology" / "flux_domain_concepts.v1.json"
+_LIBRARY_FLUX_TERM_REGISTRY_PATH = (
+    _LIBRARY_DATA_ROOT / "semantic_terms" / "flux_term_registry.v1.json"
+)
 _LIBRARY_EVIDENCE_SEED_PATTERN = "*/*.json"
 _LIBRARY_EVIDENCE_SEED_POINTER_PREFIX = "qlib://library/evidence_seeds/"
 _SEED_REQUIRED_TYPE = "SAFE_SUMMARY_ONLY"
@@ -663,12 +667,28 @@ def _load_wetting_term_registry() -> Dict[str, Any]:
     return _load_library_json_payload(_LIBRARY_WETTING_TERM_REGISTRY_PATH)
 
 
+def _load_flux_domain_concepts() -> Dict[str, Any]:
+    return _load_library_json_payload(_LIBRARY_FLUX_ONTOLOGY_PATH)
+
+
+def _load_flux_term_registry() -> Dict[str, Any]:
+    return _load_library_json_payload(_LIBRARY_FLUX_TERM_REGISTRY_PATH)
+
+
 def _load_domain_concept_payloads() -> List[Dict[str, Any]]:
-    return [_load_solder_domain_concepts(), _load_wetting_domain_concepts()]
+    return [
+        _load_solder_domain_concepts(),
+        _load_wetting_domain_concepts(),
+        _load_flux_domain_concepts(),
+    ]
 
 
 def _load_term_registry_payloads() -> List[Dict[str, Any]]:
-    return [_load_solder_term_registry(), _load_wetting_term_registry()]
+    return [
+        _load_solder_term_registry(),
+        _load_wetting_term_registry(),
+        _load_flux_term_registry(),
+    ]
 
 
 def _normalized_seed_query(value: object) -> Optional[str]:

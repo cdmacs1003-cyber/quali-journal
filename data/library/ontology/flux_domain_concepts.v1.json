@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "ontology_scope": "flux_domain_minimal",
+  "created_by": "R9ZNW-278",
+  "status": "APPROVED_WITH_LIMITS",
+  "raw_text_policy": "SAFE_SUMMARY_ONLY",
+  "raw_text_excluded": true,
+  "standard_raw_text_not_included": true,
+  "paid_standard_text_not_included": true,
+  "class_specific_criteria_not_included": true,
+  "concepts": [
+    {
+      "concept_id": "concept:flux",
+      "labels": {
+        "ko": "\ud50c\ub7ed\uc2a4",
+        "en": "flux"
+      },
+      "aliases": [
+        "\ub0a9\ub55c \ud50c\ub7ed\uc2a4",
+        "\uc194\ub354 \ud50c\ub7ed\uc2a4",
+        "soldering flux",
+        "solder flux"
+      ],
+      "concept_type": "SupportMaterial",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-flux-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    }
+  ],
+  "relations": [
+    {
+      "relation_id": "rel:flux-related-to-soldering",
+      "source_concept_id": "concept:flux",
+      "relation_type": "RELATED_TO",
+      "target_concept_id": "concept:soldering",
+      "confidence": "medium",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    },
+    {
+      "relation_id": "rel:flux-related-to-wetting",
+      "source_concept_id": "concept:flux",
+      "relation_type": "RELATED_TO",
+      "target_concept_id": "concept:wetting",
+      "confidence": "medium",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    },
+    {
+      "relation_id": "rel:flux-related-to-solder",
+      "source_concept_id": "concept:flux",
+      "relation_type": "RELATED_TO",
+      "target_concept_id": "concept:solder",
+      "confidence": "medium",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    },
+    {
+      "relation_id": "rel:flux-has-evidence-safe-summary-v1",
+      "source_concept_id": "concept:flux",
+      "relation_type": "HAS_EVIDENCE",
+      "target_evidence_id": "ev-flux-safe-summary-v1",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true,
+      "paid_standard_text_not_included": true,
+      "class_specific_criteria_not_included": true
+    }
+  ]
+}
