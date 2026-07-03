@@ -61,6 +61,33 @@ FLUX_FORBIDDEN_PUBLIC_STRINGS = WETTING_FORBIDDEN_PUBLIC_STRINGS + (
     "process window",
     "threshold",
 )
+BETA_MINIMAL_HTML_PATHS = (
+    REPO_ROOT / "admin" / "index.html",
+    REPO_ROOT / "admin" / "dist" / "index.html",
+)
+BETA_MINIMAL_SYNC_STRINGS = (
+    "승인된 근거가 있는 질문은 짧게 답변하고, 근거가 없으면 보류합니다.",
+    "답변 상태",
+    "질문을 보내면 답변 또는 보류 상태를 확인합니다.",
+    "답변",
+    "현재 화면에 보여줄 수 있는 승인된 짧은 답변이 없습니다.",
+    "이 질문은 아직 승인된 근거가 없어 보류합니다. 근거가 준비되면 답변할 수 있습니다.",
+    "의견을 선택하면 이 화면에만 기록됩니다.",
+    "도움 됨",
+    "어려움",
+    "수정 필요",
+    "근거 확인 필요",
+    "beta-minimal-form",
+    "beta-minimal-question",
+    "beta-minimal-status",
+    "beta-minimal-result",
+)
+BETA_MINIMAL_FEEDBACK_MAPPINGS = (
+    ('data-beta-feedback="useful"', 'useful: "도움 됨"', "도움 됨"),
+    ('data-beta-feedback="confusing"', 'confusing: "어려움"', "어려움"),
+    ('data-beta-feedback="wrong"', 'wrong: "수정 필요"', "수정 필요"),
+    ('data-beta-feedback="needs_review"', 'needs_review: "근거 확인 필요"', "근거 확인 필요"),
+)
 
 
 @pytest.fixture
@@ -971,6 +998,21 @@ def test_skillup_seed_adapter_does_not_add_direct_skillup_file_or_db_access():
         skillup_bridge.skillup_answer_from_request,
     ):
         assert forbidden_code_names.isdisjoint(set(helper.__code__.co_names))
+
+
+def test_skillup_beta_minimal_source_and_dist_sync_guard():
+    html_by_path = {
+        path.relative_to(REPO_ROOT).as_posix(): path.read_text(encoding="utf-8")
+        for path in BETA_MINIMAL_HTML_PATHS
+    }
+
+    for relative_path, html in html_by_path.items():
+        for required in BETA_MINIMAL_SYNC_STRINGS:
+            assert required in html, f"{required!r} missing from {relative_path}"
+        for data_attr, script_mapping, visible_label in BETA_MINIMAL_FEEDBACK_MAPPINGS:
+            assert data_attr in html, f"{data_attr!r} missing from {relative_path}"
+            assert script_mapping in html, f"{script_mapping!r} missing from {relative_path}"
+            assert visible_label in html, f"{visible_label!r} missing from {relative_path}"
 
 
 def test_bridge_semantic_adapter_does_not_expose_raw_json_or_paths(client: TestClient):
