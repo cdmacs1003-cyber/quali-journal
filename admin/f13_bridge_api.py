@@ -1,14 +1,17 @@
 """F13 no-DB Bridge API route.
 
 This router exposes the existing in-memory Bridge guard utility over a
-provided-evidence-only API boundary. It does not query DB, Warehouse, Library,
-Skillup runtime, files, network, or runtime indexes.
+provided-evidence API boundary. It does not query DB, Warehouse, Skillup
+runtime, network, or runtime indexes. The only file-backed retrieval allowed in
+this module is the bounded Bridge-side canonical Library Evidence seed adapter.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter
@@ -107,6 +110,37 @@ _ROLE_POLICY_CONTEXT_FIELDS = (
     "paid_standard",
     "source_doc_kind",
 )
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_LIBRARY_EVIDENCE_SEED_ROOT = _REPO_ROOT / "data" / "library" / "evidence_seeds"
+_LIBRARY_EVIDENCE_SEED_PATTERN = "*/*.json"
+_LIBRARY_EVIDENCE_SEED_POINTER_PREFIX = "qlib://library/evidence_seeds/"
+_SEED_REQUIRED_TYPE = "SAFE_SUMMARY_ONLY"
+_SEED_APPROVED_REVIEW_STATUS = "APPROVED_FOR_LIBRARY_EVIDENCE"
+_SEED_APPROVED_STATUS = "APPROVED_WITH_LIMITS"
+_SEED_ALLOWED_RAW_TEXT_POLICIES = {"SAFE_SUMMARY_ONLY", "SUMMARY_ONLY"}
+_SEED_ALLOWED_RIGHTS_STATUS = {"PUBLIC", "INTERNAL", "LICENSED"}
+_SEED_QUERY_FIELDS = ("query", "question")
+_SEED_SECRET_LIKE_FILENAME_MARKERS = (
+    ".env",
+    ".pem",
+    ".key",
+    "secret",
+    "credential",
+    "token",
+    "key",
+    "service-account",
+)
+_SKILLUP_SEED_CONTEXT_DEFAULTS = {
+    "role": "student",
+    "evidence_depth": "student_safe",
+    "requested_output_type": "safe_summary",
+    "course_id": "course:skillup-beta-minimal",
+    "module_id": "module:skillup-beta-minimal",
+    "binding_id": "binding:skillup-beta-minimal",
+    "tenant_id": "tenant:skillup-beta-minimal",
+    "organization_id": "org:skillup-beta-minimal",
+    "cohort_id": "cohort:skillup-beta-minimal",
+}
 
 
 class BridgeEvidenceRequest(BaseModel):
@@ -537,6 +571,221 @@ def _safe_short_answer_text(value: Any) -> Optional[str]:
     return text
 
 
+def _safe_seed_token(value: object) -> str:
+    return str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def _safe_seed_filename(path: Path) -> bool:
+    lowered = path.name.lower()
+    return not any(marker in lowered for marker in _SEED_SECRET_LIKE_FILENAME_MARKERS)
+
+
+def _library_seed_paths(seed_root: Path = _LIBRARY_EVIDENCE_SEED_ROOT) -> List[Path]:
+    if not seed_root.exists() or not seed_root.is_dir():
+        return []
+
+    root = seed_root.resolve()
+    safe_paths: List[Path] = []
+    for candidate in seed_root.glob(_LIBRARY_EVIDENCE_SEED_PATTERN):
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if resolved.is_file() and _safe_seed_filename(resolved):
+            safe_paths.append(resolved)
+    return sorted(safe_paths)
+
+
+def _load_library_evidence_seed_records() -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+    for seed_path in _library_seed_paths():
+        try:
+            payload = json.loads(seed_path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def _normalized_seed_query(value: object) -> Optional[str]:
+    text = _safe_label(value, max_length=800)
+    if text is None:
+        return None
+    return " ".join(text.split()).casefold()
+
+
+def _query_text_from_sources(*sources: Mapping[str, Any]) -> Optional[str]:
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for field in _SEED_QUERY_FIELDS:
+            text = _safe_label(source.get(field), max_length=800)
+            if text is not None:
+                return text
+    return None
+
+
+def _seed_matches_query(seed: Mapping[str, Any], query_text: object) -> bool:
+    normalized_query = _normalized_seed_query(query_text)
+    if normalized_query is None:
+        return False
+
+    domains = seed.get("created_for_query_domain")
+    if not isinstance(domains, list):
+        return False
+
+    for domain in domains:
+        if _normalized_seed_query(domain) == normalized_query:
+            return True
+    return False
+
+
+def _safe_seed_pointer_uri(value: object) -> Optional[str]:
+    pointer = _safe_label(value, max_length=512)
+    if pointer is None or not pointer.startswith(_LIBRARY_EVIDENCE_SEED_POINTER_PREFIX):
+        return None
+    lowered = pointer.lower()
+    if any(marker in lowered for marker in ("file://", "h:\\", "c:\\", "localhost", "127.0.0.1")):
+        return None
+    return pointer
+
+
+def _bridge_trace_id_from_seed(seed: Mapping[str, Any]) -> Optional[str]:
+    trace_seed = _safe_label(seed.get("bridge_trace_seed"), max_length=120)
+    if trace_seed is None:
+        return None
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-")
+    if any(char not in allowed for char in trace_seed):
+        return None
+    if trace_seed.startswith("btrace:"):
+        return trace_seed
+    if trace_seed.startswith("btrace-seed-"):
+        suffix = trace_seed[len("btrace-seed-") :]
+        trace_id = f"btrace:library-seed:{suffix}"
+        return _safe_label(trace_id, max_length=160)
+    return None
+
+
+def _project_seed_to_bridge_evidence_item(seed: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    if _safe_seed_token(seed.get("evidence_type")) != _SEED_REQUIRED_TYPE:
+        return None
+    if _safe_seed_token(seed.get("review_status")) != _SEED_APPROVED_REVIEW_STATUS:
+        return None
+    if _safe_seed_token(seed.get("approval_status")) != _SEED_APPROVED_STATUS:
+        return None
+    if _safe_seed_token(seed.get("raw_text_policy")) not in _SEED_ALLOWED_RAW_TEXT_POLICIES:
+        return None
+
+    rights_status = normalize_rights_status(seed.get("rights_status"))
+    if rights_status not in _SEED_ALLOWED_RIGHTS_STATUS:
+        return None
+    if seed.get("raw_text_excluded") is not True:
+        return None
+    if seed.get("standard_raw_text_not_included") is not True:
+        return None
+
+    evidence_id = _safe_label(seed.get("evidence_id"), max_length=120)
+    safe_summary = _safe_short_answer_text(seed.get("safe_summary"))
+    pointer_uri = _safe_seed_pointer_uri(seed.get("pointer_uri"))
+    bridge_trace_id = _bridge_trace_id_from_seed(seed)
+    if not all((evidence_id, safe_summary, pointer_uri, bridge_trace_id)):
+        return None
+
+    candidate: Dict[str, Any] = {
+        "evidence_id": evidence_id,
+        "bridge_trace_id": bridge_trace_id,
+        "safe_summary": safe_summary,
+        "pointer_uri": pointer_uri,
+        "raw_text_policy": seed.get("raw_text_policy"),
+        "rights_status": rights_status,
+    }
+
+    source_doc_kind = _safe_label(seed.get("source_doc_kind"), max_length=120)
+    if source_doc_kind is not None:
+        candidate["source_doc_kind"] = source_doc_kind
+
+    validation_shape_ids = seed.get("validation_shape_ids")
+    if isinstance(validation_shape_ids, list):
+        safe_ids = [
+            safe_id
+            for safe_id in (
+                _safe_label(shape_id, max_length=120) for shape_id in validation_shape_ids[:10]
+            )
+            if safe_id is not None
+        ]
+        if safe_ids:
+            candidate["validation_shape_ids"] = safe_ids
+
+    projected = project_bridge_safe_evidence(candidate)
+    if detect_forbidden_fields(projected) or not _has_schema_required_fields(projected):
+        return None
+    return projected
+
+
+def _seed_evidence_items_for_query(query_text: object) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    if _normalized_seed_query(query_text) is None:
+        return [], "query is empty"
+
+    matched_seed = False
+    for seed in _load_library_evidence_seed_records():
+        if not _seed_matches_query(seed, query_text):
+            continue
+        matched_seed = True
+        evidence_item = _project_seed_to_bridge_evidence_item(seed)
+        if evidence_item is not None:
+            return [evidence_item], None
+
+    if matched_seed:
+        return [], "matching Library Evidence seed is not approved for Bridge output"
+    return [], "approved Library Evidence seed was not found for query"
+
+
+def _skillup_seed_context(request_payload: Mapping[str, Any], nested_payload: Mapping[str, Any]) -> Dict[str, Any]:
+    context = _role_policy_context(request_payload, nested_payload)
+    for key, value in _SKILLUP_SEED_CONTEXT_DEFAULTS.items():
+        context.setdefault(key, value)
+    return context
+
+
+def _bridge_seed_payload_for_skillup_request(request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    if detect_forbidden_fields(request_payload):
+        return _response(
+            RESULT_DENIED,
+            [],
+            "forbidden fields or patterns detected",
+            evidence_required_pass=False,
+            raw_leak_pass=False,
+            rights_pass=False,
+        )
+
+    nested_payload = request_payload.get("request_payload")
+    nested = nested_payload if isinstance(nested_payload, Mapping) else {}
+    query_text = _query_text_from_sources(nested, request_payload)
+    evidence_items, hold_reason = _seed_evidence_items_for_query(query_text)
+    if not evidence_items:
+        return _response(
+            RESULT_HOLD,
+            [],
+            hold_reason or "approved Library Evidence seed was not found for query",
+            evidence_required_pass=False,
+            raw_leak_pass=True,
+            rights_pass=True,
+        )
+
+    bridge_payload = _response(
+        RESULT_OK,
+        evidence_items,
+        None,
+        evidence_required_pass=True,
+        raw_leak_pass=True,
+        rights_pass=True,
+    )
+    bridge_payload.update(_skillup_seed_context(request_payload, nested))
+    return bridge_payload
+
+
 def _with_safe_short_answer(payload: Dict[str, Any]) -> Dict[str, Any]:
     result_status = str(payload.get("result_status") or "")
     answer_status = str(payload.get("answer_status") or "")
@@ -615,6 +864,8 @@ def _response(
 def skillup_bridge_answer(payload: SkillupBridgeAnswerRequest) -> Dict[str, Any]:
     request_payload = _model_to_dict(payload)
     bridge_payload = _skillup_bridge_response_payload(request_payload)
+    if not bridge_payload:
+        bridge_payload = _bridge_seed_payload_for_skillup_request(request_payload)
     if bridge_payload:
         helper_result = skillup_answer_from_bridge_response(bridge_payload)
     else:
@@ -678,11 +929,15 @@ def retrieve_bridge_evidence(payload: BridgeEvidenceRequest) -> Dict[str, Any]:
         )
 
     evidence_items = payload.evidence_items or []
+    seed_hold_reason = None
+    if not evidence_items:
+        query_text = _query_text_from_sources(request_payload)
+        evidence_items, seed_hold_reason = _seed_evidence_items_for_query(query_text)
     if not evidence_items:
         return _response(
             RESULT_HOLD,
             [],
-            "evidence_items are required for no-DB Bridge evaluation",
+            seed_hold_reason or "evidence_items are required for Bridge evaluation",
             evidence_required_pass=False,
             raw_leak_pass=True,
             rights_pass=True,

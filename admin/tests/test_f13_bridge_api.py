@@ -10,6 +10,7 @@ import admin.f13_bridge_api as bridge_api
 
 
 ROUTE = "/api/f13/bridge/retrieve-evidence"
+SKILLUP_ROUTE = "/api/f13/bridge/skillup/bridge-answer"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO_ROOT / "schemas" / "f13" / "bridge_evidence_response.schema.json"
 ALLOWED_STATUSES = {"OK", "HOLD", "DENIED"}
@@ -169,6 +170,140 @@ def test_ok_response_with_public_summary_only_safe_evidence(client: TestClient):
     assert body["evidence_items"][0]["rights_status"] == "PUBLIC"
     assert body["evidence_items"][0]["raw_text_policy"] == "SUMMARY_ONLY"
     _assert_no_forbidden_echo(body)
+
+
+def test_ok_response_with_canonical_soldering_seed_for_matching_query(client: TestClient):
+    response = client.post(
+        ROUTE,
+        json={"query": "솔더링이란?", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["hold_reason"] is None
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    assert len(body["evidence_items"]) == 1
+    evidence = body["evidence_items"][0]
+    assert evidence["evidence_id"] == "ev-soldering-safe-summary-v1"
+    assert evidence["bridge_trace_id"] == "btrace:library-seed:soldering-safe-summary-v1"
+    assert "솔더링" in evidence["safe_summary"]
+    assert evidence["raw_text_policy"] == "SUMMARY_ONLY"
+    assert evidence["rights_status"] == "INTERNAL"
+    assert "raw_text_excluded" not in evidence
+    assert "standard_raw_text_not_included" not in evidence
+    assert "data/library" not in "\n".join(_walk_values(body))
+    _assert_no_forbidden_echo(body)
+
+
+def test_hold_response_for_unknown_query_does_not_invent_seed_answer(client: TestClient):
+    response = client.post(
+        ROUTE,
+        json={"query": "무관한질문", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert body["feedback_candidate_required"] is True
+    assert "approved Library Evidence seed was not found" in body["hold_reason"]
+    assert "솔더링" not in "\n".join(_walk_values(body))
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+
+
+def test_hold_response_for_matching_seed_without_approval(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    unsafe_seed = {
+        "evidence_id": "ev-soldering-unapproved",
+        "evidence_type": "SAFE_SUMMARY_ONLY",
+        "created_for_query_domain": ["솔더링이란?"],
+        "safe_summary": "Synthetic safe summary that must not be returned.",
+        "pointer_uri": "qlib://library/evidence_seeds/soldering/ev-soldering-unapproved",
+        "raw_text_policy": "SAFE_SUMMARY_ONLY",
+        "rights_status": "INTERNAL",
+        "source_doc_kind": "REFERENCE",
+        "review_status": "APPROVED_FOR_LIBRARY_EVIDENCE",
+        "approval_status": "NOT_APPROVED",
+        "bridge_trace_seed": "btrace-seed-soldering-unapproved",
+        "raw_text_excluded": True,
+        "standard_raw_text_not_included": True,
+        "validation_shape_ids": ["SH-F13-EVIDENCE-001"],
+    }
+    monkeypatch.setattr(bridge_api, "_load_library_evidence_seed_records", lambda: [unsafe_seed])
+
+    response = client.post(
+        ROUTE,
+        json={"query": "솔더링이란?", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert "not approved" in body["hold_reason"]
+    assert "Synthetic safe summary that must not be returned." not in "\n".join(_walk_values(body))
+
+
+def test_skillup_route_uses_bridge_seed_without_direct_skillup_file_access(client: TestClient):
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "ui_mode": "test_minimal",
+            "request_payload": {"question": "솔더링이란?"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "OK"
+    assert body["answer_status"] == "ANSWERED"
+    assert body["trace_id"] == "btrace:library-seed:soldering-safe-summary-v1"
+    assert body["safe_short_answer"] == body["answer"]
+    assert "솔더링" in body["safe_short_answer"]
+    assert body["evidence"][0]["evidence_id"] == "ev-soldering-safe-summary-v1"
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    answer_surface = "\n".join(
+        str(value)
+        for value in (
+            body.get("answer"),
+            body.get("safe_short_answer"),
+            body.get("hold_reason"),
+        )
+        if value is not None
+    ).lower()
+    for forbidden in ("full_json", "full json", "file://", "h:\\", "c:\\", "secret", "token", "credential"):
+        assert forbidden not in answer_surface
+
+
+def test_skillup_seed_adapter_does_not_add_direct_skillup_file_or_db_access():
+    import admin.f13_skillup_bridge as skillup_bridge
+
+    forbidden_module_attrs = {
+        "Path",
+        "open",
+        "read_text",
+        "glob",
+        "rglob",
+        "connect",
+        "execute",
+        "get_session",
+        "make_engine",
+    }
+    forbidden_code_names = forbidden_module_attrs | {"psycopg", "psycopg2", "sqlalchemy"}
+
+    assert forbidden_module_attrs.isdisjoint(skillup_bridge.__dict__)
+    for helper in (
+        skillup_bridge.skillup_answer_from_bridge_response,
+        skillup_bridge.skillup_answer_from_request,
+    ):
+        assert forbidden_code_names.isdisjoint(set(helper.__code__.co_names))
 
 
 def test_hold_response_when_evidence_items_missing_or_empty(client: TestClient):

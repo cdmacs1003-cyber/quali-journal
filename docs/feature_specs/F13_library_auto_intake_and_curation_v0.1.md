@@ -8,6 +8,9 @@ This specification restores the static F13 Bridge/F13 planning surface for the c
 
 - Bridge/F13 routes must consume caller-provided evidence only.
 - Bridge/F13 routes must not query databases, warehouses, library indexes, files, networks, or runtime services.
+- R9ZNW-265 exception: Bridge may read canonical safe metadata-only Library Evidence seed JSON under
+  `data/library/evidence_seeds/` only through the approved Bridge-side seed adapter. General file-backed
+  retrieval remains forbidden. Skillup direct DB/file access remains forbidden.
 - Bridge functional 200 behavior remains NOT_VERIFIED until a separate runtime gate is approved.
 - Runtime smoke, authenticated smoke, Track A approval, Beta approval, F13 approval, and release approval remain NOT_GRANTED.
 
