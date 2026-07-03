@@ -198,6 +198,61 @@ def test_ok_response_with_canonical_soldering_seed_for_matching_query(client: Te
     _assert_no_forbidden_echo(body)
 
 
+def test_ok_response_with_canonical_solder_seed_for_question_query(client: TestClient):
+    response = client.post(
+        ROUTE,
+        json={"query": "솔더?", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["hold_reason"] is None
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    assert len(body["evidence_items"]) == 1
+    evidence = body["evidence_items"][0]
+    assert evidence["evidence_id"] == "ev-solder-basic-and-types-safe-summary-v1"
+    assert evidence["bridge_trace_id"] == "btrace:library-seed:solder-basic-and-types-v1"
+    assert "솔더는" in evidence["safe_summary"]
+    assert evidence["raw_text_policy"] == "SUMMARY_ONLY"
+    assert evidence["rights_status"] == "INTERNAL"
+    assert "raw_text_excluded" not in evidence
+    assert "standard_raw_text_not_included" not in evidence
+    rendered = "\n".join(_walk_values(body))
+    assert "data/library" not in rendered
+    assert "IPC" not in rendered
+    assert "NASA" not in rendered
+    assert "ESA" not in rendered
+    _assert_no_forbidden_echo(body)
+
+
+def test_ok_response_with_canonical_solder_seed_for_types_query(client: TestClient):
+    response = client.post(
+        ROUTE,
+        json={"query": "솔더의 종류는?", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["hold_reason"] is None
+    assert len(body["evidence_items"]) == 1
+    evidence = body["evidence_items"][0]
+    assert evidence["evidence_id"] == "ev-solder-basic-and-types-safe-summary-v1"
+    assert evidence["bridge_trace_id"] == "btrace:library-seed:solder-basic-and-types-v1"
+    summary = evidence["safe_summary"]
+    for term in ("와이어 솔더", "솔더 페이스트", "바 솔더", "프리폼 솔더"):
+        assert term in summary
+    rendered = "\n".join(_walk_values(body))
+    for forbidden in ("IPC", "NASA", "ESA", "Class 1", "Class 2", "Class 3", "조항", "clause", "shall", "must"):
+        assert forbidden not in rendered
+    assert "data/library" not in rendered
+    _assert_no_forbidden_echo(body)
+
+
 def test_hold_response_for_unknown_query_does_not_invent_seed_answer(client: TestClient):
     response = client.post(
         ROUTE,
@@ -267,6 +322,39 @@ def test_skillup_route_uses_bridge_seed_without_direct_skillup_file_access(clien
     assert body["safe_short_answer"] == body["answer"]
     assert "솔더링" in body["safe_short_answer"]
     assert body["evidence"][0]["evidence_id"] == "ev-soldering-safe-summary-v1"
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    answer_surface = "\n".join(
+        str(value)
+        for value in (
+            body.get("answer"),
+            body.get("safe_short_answer"),
+            body.get("hold_reason"),
+        )
+        if value is not None
+    ).lower()
+    for forbidden in ("full_json", "full json", "file://", "h:\\", "c:\\", "secret", "token", "credential"):
+        assert forbidden not in answer_surface
+
+
+def test_skillup_route_uses_solder_seed_for_question_query(client: TestClient):
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "ui_mode": "test_minimal",
+            "request_payload": {"question": "솔더?"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "OK"
+    assert body["answer_status"] == "ANSWERED"
+    assert body["trace_id"] == "btrace:library-seed:solder-basic-and-types-v1"
+    assert body["safe_short_answer"] == body["answer"]
+    assert "솔더는" in body["safe_short_answer"]
+    assert body["evidence"][0]["evidence_id"] == "ev-solder-basic-and-types-safe-summary-v1"
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
     answer_surface = "\n".join(

@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "ev-solder-basic-and-types-safe-summary-v1",
+  "evidence_type": "SAFE_SUMMARY_ONLY",
+  "created_for_query_domain": [
+    "solder",
+    "solder?",
+    "solder material",
+    "solder types",
+    "솔더",
+    "솔더?",
+    "솔더란?",
+    "솔더의 종류는?",
+    "솔더 종류",
+    "솔더 종류는?"
+  ],
+  "safe_summary": "솔더는 솔더링 공정에서 접합부를 만들기 위해 사용하는 금속 합금 재료입니다. 형태나 사용 공정에 따라 와이어 솔더, 솔더 페이스트, 바 솔더, 프리폼 솔더 등으로 구분할 수 있으며, 실제 사용 가능 재료와 조건은 승인된 재료 목록, 공정 절차, 도면, 고객 요구사항에 따라 확인해야 합니다.",
+  "pointer_uri": "qlib://library/evidence_seeds/solder/ev-solder-basic-and-types-safe-summary-v1",
+  "raw_text_policy": "SAFE_SUMMARY_ONLY",
+  "rights_status": "INTERNAL",
+  "source_doc_kind": "REFERENCE",
+  "provenance_summary": "R9ZNW-270 safe metadata-only educational seed created from first limited reviewer feedback identifying solder basic/types as the next evidence domain. No paid standard raw text or long quotation included.",
+  "review_status": "APPROVED_FOR_LIBRARY_EVIDENCE",
+  "approval_status": "APPROVED_WITH_LIMITS",
+  "approval_record_id": "appr-r9znw-270-solder-basic-and-types-v1",
+  "proofpack_id": "proof:R9ZNW-270:solder-basic-and-types-v1",
+  "bridge_trace_seed": "btrace-seed-solder-basic-and-types-v1",
+  "raw_text_excluded": true,
+  "standard_raw_text_not_included": true,
+  "created_at": "2026-07-03T12:59:19+09:00",
+  "created_by": "R9ZNW-270",
+  "validation_shape_ids": [
+    "SH-F13-EVIDENCE-001",
+    "R9ZNW-262-LIBRARY-EVIDENCE-SEED-SCHEMA"
+  ]
+}
