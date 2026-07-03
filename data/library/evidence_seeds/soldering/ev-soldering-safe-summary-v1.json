@@ -1,0 +1,31 @@
+﻿{
+  "schema_version": "1.0",
+  "evidence_id": "ev-soldering-safe-summary-v1",
+  "evidence_type": "SAFE_SUMMARY_ONLY",
+  "created_for_query_domain": [
+    "soldering",
+    "솔더링",
+    "납땜",
+    "솔더링이란?",
+    "납땜이란?"
+  ],
+  "safe_summary": "솔더링(납땜)은 솔더를 사용해 금속 도체, 단자, 패드 등을 전기적기계적으로 연결하는 접합 공정입니다. 실제 합격/불합격 판정과 공정 요구사항은 적용 표준, 제품 등급, 도면, 고객 요구사항, 승인된 작업 절차에 따라 별도로 확인해야 합니다.",
+  "pointer_uri": "qlib://library/evidence_seeds/soldering/ev-soldering-safe-summary-v1",
+  "raw_text_policy": "SAFE_SUMMARY_ONLY",
+  "rights_status": "INTERNAL",
+  "source_doc_kind": "REFERENCE",
+  "provenance_summary": "R9ZNW-263 safe metadata-only educational seed created under R9ZNW-262 approved Library Evidence seed location and schema. No paid standard raw text or long quotation included.",
+  "review_status": "APPROVED_FOR_LIBRARY_EVIDENCE",
+  "approval_status": "APPROVED_WITH_LIMITS",
+  "approval_record_id": "appr-r9znw-263-soldering-safe-summary-v1",
+  "proofpack_id": "proof:R9ZNW-263:soldering-safe-summary-v1",
+  "bridge_trace_seed": "btrace-seed-soldering-safe-summary-v1",
+  "raw_text_excluded": true,
+  "standard_raw_text_not_included": true,
+  "created_at": "2026-07-03T10:22:14+09:00",
+  "created_by": "R9ZNW-263",
+  "validation_shape_ids": [
+    "SH-F13-EVIDENCE-001",
+    "R9ZNW-262-LIBRARY-EVIDENCE-SEED-SCHEMA"
+  ]
+}
