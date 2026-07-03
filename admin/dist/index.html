@@ -290,7 +290,7 @@
       <h1 id="beta-minimal-title" class="q-beta-title">
         <span class="line">스킬업 베타 질문창</span>
       </h1>
-      <p class="q-beta-copy" data-readiness-marker="NOT_GRANTED">선택된 근거는 제한 범위에서만 확인되었습니다. 전체 준비 상태는 아직 승인 아님입니다.</p>
+      <p class="q-beta-copy" data-readiness-marker="NOT_GRANTED" data-internal-surface="true" aria-hidden="true">선택된 근거는 제한 범위에서만 확인되었습니다. 전체 준비 상태는 아직 승인 아님입니다.</p>
     </div>
   </div>
 
@@ -320,7 +320,7 @@
     </section>
   </div>
 
-  <section class="q-beta-panel q-beta-evidence" aria-labelledby="beta-evidence-title">
+  <section class="q-beta-panel q-beta-evidence" data-internal-surface="true" data-beta-diagnostics="true" aria-hidden="true" aria-labelledby="beta-evidence-title">
     <h2 id="beta-evidence-title">근거 / 상태 요약</h2>
     <dl class="q-beta-summary">
       <div><dt>화면 모드</dt><dd id="beta-mode">베타 테스트용 화면</dd></div>
@@ -2009,6 +2009,7 @@ window.onerror = function(message, source, lineno, colno, error) {
   var responseClass = document.getElementById("beta-response-class");
   var bodyDisplay = document.getElementById("beta-body-display");
   var feedback = document.getElementById("beta-minimal-feedback");
+  var diagnosticsVisible = !(window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW());
   var SAFE_ANSWER_FIELDS = [
     "safe_short_answer",
     "short_answer",
@@ -2044,6 +2045,10 @@ window.onerror = function(message, source, lineno, colno, error) {
 
   function setText(node, value){
     if (node) node.textContent = String(value == null ? "" : value);
+  }
+  function setDiagnosticText(node, value){
+    if (!diagnosticsVisible) return;
+    setText(node, value);
   }
   function setState(value){
     var safe = ["ANSWERED", "HOLD", "REDACTED", "INVALIDATED"].indexOf(value) >= 0 ? value : "HOLD";
@@ -2100,10 +2105,9 @@ window.onerror = function(message, source, lineno, colno, error) {
     var shortAnswer = safeShortAnswer(data);
     if (shortAnswer) return "짧은 답변\n" + shortAnswer;
     if (answerStatus === "ANSWERED" || resultStatus === "OK") {
-      return "현재 답변 상태: 검토 필요\n안전 표시 기준에 맞는 짧은 답변이 없어 답변 본문은 표시하지 않습니다.";
+      return "검토 필요\n안전 표시 기준에 맞는 짧은 답변이 없어 답변 본문은 표시하지 않습니다.";
     }
-    return "현재 답변 상태: " + koreanStatusLabel(answerStatus, resultStatus) +
-      "\n안전 검토 중입니다. 베타에서는 확정 답변이 아닌 상태 안내가 먼저 표시될 수 있습니다.";
+    return "안전 검토 중입니다. 베타에서는 확정 답변이 아닌 상태 안내가 먼저 표시될 수 있습니다.";
   }
   function classifyBody(text){
     if (!text) return {kind:"response_empty", data:null};
@@ -2118,16 +2122,16 @@ window.onerror = function(message, source, lineno, colno, error) {
     var resultStatus = safeResultStatus(data);
     setState(answerStatus);
     setText(result, renderAnswerPanel(data, answerStatus, resultStatus));
-    setText(transport, "transport_ok");
-    setText(responseClass, kind);
-    setText(bodyDisplay, "숨김 처리됨");
+    setDiagnosticText(transport, "transport_ok");
+    setDiagnosticText(responseClass, kind);
+    setDiagnosticText(bodyDisplay, "숨김 처리됨");
   }
   function fail(category){
     setState("HOLD");
-    setText(result, "현재 답변 상태: 보류\n안전 검토 중입니다. 베타에서는 확정 답변이 아닌 상태 안내가 먼저 표시될 수 있습니다.");
-    setText(transport, category);
-    setText(responseClass, "response_unknown_or_unparsed");
-    setText(bodyDisplay, "숨김 처리됨");
+    setText(result, "안전 검토 중입니다. 베타에서는 확정 답변이 아닌 상태 안내가 먼저 표시될 수 있습니다.");
+    setDiagnosticText(transport, category);
+    setDiagnosticText(responseClass, "response_unknown_or_unparsed");
+    setDiagnosticText(bodyDisplay, "숨김 처리됨");
   }
 
   form.addEventListener("submit", function(event){
