@@ -117,6 +117,10 @@ _LIBRARY_SOLDER_ONTOLOGY_PATH = _LIBRARY_DATA_ROOT / "ontology" / "solder_domain
 _LIBRARY_SOLDER_TERM_REGISTRY_PATH = (
     _LIBRARY_DATA_ROOT / "semantic_terms" / "solder_term_registry.v1.json"
 )
+_LIBRARY_WETTING_ONTOLOGY_PATH = _LIBRARY_DATA_ROOT / "ontology" / "wetting_domain_concepts.v1.json"
+_LIBRARY_WETTING_TERM_REGISTRY_PATH = (
+    _LIBRARY_DATA_ROOT / "semantic_terms" / "wetting_term_registry.v1.json"
+)
 _LIBRARY_EVIDENCE_SEED_PATTERN = "*/*.json"
 _LIBRARY_EVIDENCE_SEED_POINTER_PREFIX = "qlib://library/evidence_seeds/"
 _SEED_REQUIRED_TYPE = "SAFE_SUMMARY_ONLY"
@@ -651,6 +655,22 @@ def _load_solder_term_registry() -> Dict[str, Any]:
     return _load_library_json_payload(_LIBRARY_SOLDER_TERM_REGISTRY_PATH)
 
 
+def _load_wetting_domain_concepts() -> Dict[str, Any]:
+    return _load_library_json_payload(_LIBRARY_WETTING_ONTOLOGY_PATH)
+
+
+def _load_wetting_term_registry() -> Dict[str, Any]:
+    return _load_library_json_payload(_LIBRARY_WETTING_TERM_REGISTRY_PATH)
+
+
+def _load_domain_concept_payloads() -> List[Dict[str, Any]]:
+    return [_load_solder_domain_concepts(), _load_wetting_domain_concepts()]
+
+
+def _load_term_registry_payloads() -> List[Dict[str, Any]]:
+    return [_load_solder_term_registry(), _load_wetting_term_registry()]
+
+
 def _normalized_seed_query(value: object) -> Optional[str]:
     text = _safe_label(value, max_length=800)
     if text is None:
@@ -709,34 +729,34 @@ def _resolve_query_terms_from_registry(query_text: object) -> List[Dict[str, Any
     if normalized_query is None:
         return []
 
-    registry = _load_solder_term_registry()
-    if _safe_seed_token(registry.get("status")) != _TERM_REGISTRY_APPROVED_STATUS:
-        return []
-    terms = registry.get("terms")
-    if not isinstance(terms, list):
-        return []
-
     matches: List[Dict[str, Any]] = []
-    for term in terms:
-        if not isinstance(term, Mapping) or not _approved_term_record(term):
+    for registry in _load_term_registry_payloads():
+        if _safe_seed_token(registry.get("status")) != _TERM_REGISTRY_APPROVED_STATUS:
             continue
-        normalized_term = _normalized_seed_query(term.get("normalized_term") or term.get("term"))
-        if normalized_term != normalized_query:
+        terms = registry.get("terms")
+        if not isinstance(terms, list):
             continue
-        concept_id = _safe_concept_id(term.get("concept_id"))
-        if concept_id is None:
-            continue
-        match = {
-            "concept_id": concept_id,
-            "evidence_ids": _safe_evidence_id_list(term.get("evidence_ids")),
-        }
-        safe_term = _safe_label(term.get("term"), max_length=120)
-        if safe_term is not None:
-            match["term"] = safe_term
-        safe_match_type = _safe_label(term.get("match_type"), max_length=20)
-        if safe_match_type is not None:
-            match["match_type"] = safe_match_type
-        matches.append(match)
+
+        for term in terms:
+            if not isinstance(term, Mapping) or not _approved_term_record(term):
+                continue
+            normalized_term = _normalized_seed_query(term.get("normalized_term") or term.get("term"))
+            if normalized_term != normalized_query:
+                continue
+            concept_id = _safe_concept_id(term.get("concept_id"))
+            if concept_id is None:
+                continue
+            match = {
+                "concept_id": concept_id,
+                "evidence_ids": _safe_evidence_id_list(term.get("evidence_ids")),
+            }
+            safe_term = _safe_label(term.get("term"), max_length=120)
+            if safe_term is not None:
+                match["term"] = safe_term
+            safe_match_type = _safe_label(term.get("match_type"), max_length=20)
+            if safe_match_type is not None:
+                match["match_type"] = safe_match_type
+            matches.append(match)
     return matches
 
 
@@ -779,19 +799,29 @@ def _concept_evidence_ids_for_terms(term_matches: List[Dict[str, Any]]) -> tuple
     if not term_matches:
         return [], []
 
-    ontology = _load_solder_domain_concepts()
-    if not _approved_ontology_payload(ontology):
-        return [], []
-
     concept_index: Dict[str, Mapping[str, Any]] = {}
-    concepts = ontology.get("concepts")
-    if isinstance(concepts, list):
-        for concept in concepts:
-            if not isinstance(concept, Mapping) or not _approved_concept_record(concept):
-                continue
-            concept_id = _safe_concept_id(concept.get("concept_id"))
-            if concept_id is not None:
-                concept_index[concept_id] = concept
+    relation_records: List[Mapping[str, Any]] = []
+    for ontology in _load_domain_concept_payloads():
+        if not _approved_ontology_payload(ontology):
+            continue
+
+        concepts = ontology.get("concepts")
+        if isinstance(concepts, list):
+            for concept in concepts:
+                if not isinstance(concept, Mapping) or not _approved_concept_record(concept):
+                    continue
+                concept_id = _safe_concept_id(concept.get("concept_id"))
+                if concept_id is not None and concept_id not in concept_index:
+                    concept_index[concept_id] = concept
+
+        relations = ontology.get("relations")
+        if isinstance(relations, list):
+            for relation in relations:
+                if isinstance(relation, Mapping):
+                    relation_records.append(relation)
+
+    if not concept_index:
+        return [], []
 
     concept_ids: List[str] = []
     evidence_ids: List[str] = []
@@ -808,19 +838,17 @@ def _concept_evidence_ids_for_terms(term_matches: List[Dict[str, Any]]) -> tuple
             if evidence_id not in evidence_ids:
                 evidence_ids.append(evidence_id)
 
-    relations = ontology.get("relations")
-    if isinstance(relations, list):
-        for relation in relations:
-            if not isinstance(relation, Mapping) or not _approved_relation_record(relation):
-                continue
-            source_concept_id = _safe_concept_id(relation.get("source_concept_id"))
-            if source_concept_id not in concept_ids:
-                continue
-            if _safe_seed_token(relation.get("relation_type")) != _ONTOLOGY_HAS_EVIDENCE_RELATION:
-                continue
-            evidence_id = _safe_label(relation.get("target_evidence_id"), max_length=120)
-            if evidence_id is not None and evidence_id not in evidence_ids:
-                evidence_ids.append(evidence_id)
+    for relation in relation_records:
+        if not _approved_relation_record(relation):
+            continue
+        source_concept_id = _safe_concept_id(relation.get("source_concept_id"))
+        if source_concept_id not in concept_ids:
+            continue
+        if _safe_seed_token(relation.get("relation_type")) != _ONTOLOGY_HAS_EVIDENCE_RELATION:
+            continue
+        evidence_id = _safe_label(relation.get("target_evidence_id"), max_length=120)
+        if evidence_id is not None and evidence_id not in evidence_ids:
+            evidence_ids.append(evidence_id)
 
     return concept_ids, evidence_ids
 

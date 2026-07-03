@@ -1,0 +1,92 @@
+{
+  "schema_version": "1.0",
+  "registry_scope": "wetting_domain_minimal",
+  "created_by": "R9ZNW-274",
+  "status": "APPROVED_WITH_LIMITS",
+  "terms": [
+    {
+      "term": "wetting",
+      "normalized_term": "wetting",
+      "lang": "en",
+      "concept_id": "concept:wetting",
+      "match_type": "exact",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-wetting-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "term": "\uc816\uc74c",
+      "normalized_term": "\uc816\uc74c",
+      "lang": "ko",
+      "concept_id": "concept:wetting",
+      "match_type": "exact",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-wetting-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "term": "\uc816\uc74c\uc131",
+      "normalized_term": "\uc816\uc74c\uc131",
+      "lang": "ko",
+      "concept_id": "concept:wetting",
+      "match_type": "alias",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-wetting-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "term": "\uc194\ub354 \uc816\uc74c",
+      "normalized_term": "\uc194\ub354 \uc816\uc74c",
+      "lang": "ko",
+      "concept_id": "concept:wetting",
+      "match_type": "alias",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-wetting-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "term": "\ub0a9\ub55c \uc816\uc74c",
+      "normalized_term": "\ub0a9\ub55c \uc816\uc74c",
+      "lang": "ko",
+      "concept_id": "concept:wetting",
+      "match_type": "alias",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-wetting-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "term": "solder wetting",
+      "normalized_term": "solder wetting",
+      "lang": "en",
+      "concept_id": "concept:wetting",
+      "match_type": "alias",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "evidence_ids": [
+        "ev-wetting-safe-summary-v1"
+      ],
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    }
+  ]
+}

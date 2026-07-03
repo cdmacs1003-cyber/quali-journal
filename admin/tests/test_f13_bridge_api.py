@@ -13,6 +13,14 @@ ROUTE = "/api/f13/bridge/retrieve-evidence"
 SKILLUP_ROUTE = "/api/f13/bridge/skillup/bridge-answer"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO_ROOT / "schemas" / "f13" / "bridge_evidence_response.schema.json"
+WETTING_EVIDENCE_ID = "ev-wetting-safe-summary-v1"
+WETTING_SEED_PATH = (
+    REPO_ROOT / "data" / "library" / "evidence_seeds" / "wetting" / "ev-wetting-safe-summary-v1.json"
+)
+WETTING_ONTOLOGY_PATH = REPO_ROOT / "data" / "library" / "ontology" / "wetting_domain_concepts.v1.json"
+WETTING_TERM_REGISTRY_PATH = (
+    REPO_ROOT / "data" / "library" / "semantic_terms" / "wetting_term_registry.v1.json"
+)
 ALLOWED_STATUSES = {"OK", "HOLD", "DENIED"}
 FORBIDDEN_KEYS = {
     "raw_text_ref",
@@ -24,6 +32,24 @@ FORBIDDEN_KEYS = {
     "warehouse_internal_object",
     "library_internal_object",
 }
+WETTING_FORBIDDEN_PUBLIC_STRINGS = (
+    "Class 1",
+    "Class 2",
+    "Class 3",
+    "clause",
+    "shall",
+    "must",
+    "acceptance",
+    "reject",
+    "criteria",
+    "wetting angle",
+    "degree",
+    "\uc870\ud56d",
+    "\ud569\uaca9",
+    "\ubd88\ud569\uaca9",
+    "\ud310\uc815 \uae30\uc900",
+    "\ud5c8\uc6a9 \uae30\uc900",
+)
 
 
 @pytest.fixture
@@ -116,6 +142,40 @@ def _walk_values(value: Any) -> list[str]:
             out.extend(_walk_values(child))
         return out
     return [str(value)]
+
+
+def _wetting_public_surface(payload: dict[str, Any]) -> str:
+    values: list[str] = []
+    for field in ("safe_summary", "created_for_query_domain"):
+        value = payload.get(field)
+        if isinstance(value, list):
+            values.extend(str(item) for item in value)
+        elif value is not None:
+            values.append(str(value))
+
+    for concept in payload.get("concepts", []):
+        if not isinstance(concept, dict):
+            continue
+        labels = concept.get("labels")
+        if isinstance(labels, dict):
+            values.extend(str(label) for label in labels.values())
+        aliases = concept.get("aliases")
+        if isinstance(aliases, list):
+            values.extend(str(alias) for alias in aliases)
+        for field in ("concept_type",):
+            value = concept.get(field)
+            if value is not None:
+                values.append(str(value))
+
+    for term in payload.get("terms", []):
+        if not isinstance(term, dict):
+            continue
+        for field in ("term", "normalized_term"):
+            value = term.get(field)
+            if value is not None:
+                values.append(str(value))
+
+    return "\n".join(values)
 
 
 def _assert_no_forbidden_echo(body: dict[str, Any]) -> None:
@@ -321,6 +381,173 @@ def test_material_form_alias_uses_solder_paste_concept(client: TestClient):
     assert "data/library/ontology" not in rendered
     assert "solder_domain_concepts" not in rendered
     assert "solder_term_registry" not in rendered
+
+
+def test_resolve_terms_exact_wetting_query_maps_to_wetting_seed(client: TestClient):
+    matches = bridge_api._resolve_query_terms_from_registry("wetting")
+    concept_ids, evidence_ids = bridge_api._concept_evidence_ids_for_terms(matches)
+
+    assert "concept:wetting" in concept_ids
+    assert WETTING_EVIDENCE_ID in evidence_ids
+
+    response = client.post(
+        ROUTE,
+        json={"query": "wetting", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["hold_reason"] is None
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    assert len(body["evidence_items"]) == 1
+    evidence = body["evidence_items"][0]
+    assert evidence["evidence_id"] == WETTING_EVIDENCE_ID
+    assert evidence["bridge_trace_id"] == "btrace:library-seed:wetting-safe-summary-v1"
+    assert evidence["raw_text_policy"] == "SUMMARY_ONLY"
+    rendered = "\n".join(_walk_values(body))
+    assert "data/library" not in rendered
+    assert "wetting_domain_concepts" not in rendered
+    assert "wetting_term_registry" not in rendered
+    for forbidden in WETTING_FORBIDDEN_PUBLIC_STRINGS:
+        assert forbidden.casefold() not in evidence["safe_summary"].casefold()
+
+
+def test_resolve_terms_korean_wetting_alias_maps_to_wetting_seed(client: TestClient):
+    query = "\uc194\ub354 \uc816\uc74c"
+    matches = bridge_api._resolve_query_terms_from_registry(query)
+    concept_ids, evidence_ids = bridge_api._concept_evidence_ids_for_terms(matches)
+
+    assert "concept:wetting" in concept_ids
+    assert WETTING_EVIDENCE_ID in evidence_ids
+
+    response = client.post(
+        ROUTE,
+        json={"query": query, "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["evidence_items"][0]["evidence_id"] == WETTING_EVIDENCE_ID
+    assert body["evidence_items"][0]["bridge_trace_id"] == "btrace:library-seed:wetting-safe-summary-v1"
+
+
+def test_skillup_route_uses_wetting_seed_without_direct_skillup_file_access(client: TestClient):
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "ui_mode": "test_minimal",
+            "request_payload": {"question": "\uc816\uc74c"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "OK"
+    assert body["answer_status"] == "ANSWERED"
+    assert body["trace_id"] == "btrace:library-seed:wetting-safe-summary-v1"
+    assert body["safe_short_answer"] == body["answer"]
+    assert body["evidence"][0]["evidence_id"] == WETTING_EVIDENCE_ID
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    answer_surface = "\n".join(
+        str(value)
+        for value in (
+            body.get("answer"),
+            body.get("safe_short_answer"),
+            body.get("hold_reason"),
+        )
+        if value is not None
+    ).casefold()
+    for forbidden in ("full_json", "full json", "file://", "h:\\", "c:\\", "secret", "token", "credential"):
+        assert forbidden not in answer_surface
+
+
+def test_unknown_query_remains_hold_after_wetting_extension(client: TestClient):
+    response = client.post(
+        ROUTE,
+        json={"query": "unrelated-wetting-solder-no-match", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert WETTING_EVIDENCE_ID not in "\n".join(_walk_values(body))
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+
+
+def test_unapproved_wetting_seed_is_not_projected(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    unsafe_seed = {
+        "evidence_id": "ev-wetting-unapproved",
+        "evidence_type": "SAFE_SUMMARY_ONLY",
+        "created_for_query_domain": ["wetting"],
+        "safe_summary": "Unsafe wetting summary that must not be returned.",
+        "pointer_uri": "qlib://library/evidence_seeds/wetting/ev-wetting-unapproved",
+        "raw_text_policy": "SAFE_SUMMARY_ONLY",
+        "rights_status": "INTERNAL",
+        "source_doc_kind": "REFERENCE",
+        "review_status": "APPROVED_FOR_LIBRARY_EVIDENCE",
+        "approval_status": "NOT_APPROVED",
+        "bridge_trace_seed": "btrace-seed-wetting-unapproved",
+        "raw_text_excluded": True,
+        "standard_raw_text_not_included": True,
+    }
+    monkeypatch.setattr(bridge_api, "_load_library_evidence_seed_records", lambda: [unsafe_seed])
+
+    response = client.post(
+        ROUTE,
+        json={"query": "wetting", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert "Unsafe wetting summary that must not be returned." not in "\n".join(_walk_values(body))
+
+
+def test_wetting_artifacts_are_safe_summary_only_and_raw_leak_guarded():
+    seed = json.loads(WETTING_SEED_PATH.read_text(encoding="utf-8-sig"))
+    ontology = json.loads(WETTING_ONTOLOGY_PATH.read_text(encoding="utf-8-sig"))
+    registry = json.loads(WETTING_TERM_REGISTRY_PATH.read_text(encoding="utf-8-sig"))
+
+    assert seed["evidence_id"] == WETTING_EVIDENCE_ID
+    assert seed["domain"] == "wetting"
+    assert seed["raw_text_policy"] == "SAFE_SUMMARY_ONLY"
+    assert seed["raw_text_excluded"] is True
+    assert seed["standard_raw_text_not_included"] is True
+    assert seed["paid_standard_text_not_included"] is True
+    assert seed["class_specific_criteria_not_included"] is True
+    assert seed["local_path_visible"] is False
+    assert seed["secret_visible"] is False
+
+    assert ontology["status"] == "APPROVED_WITH_LIMITS"
+    assert ontology["raw_text_excluded"] is True
+    assert ontology["standard_raw_text_not_included"] is True
+    assert registry["status"] == "APPROVED_WITH_LIMITS"
+
+    rendered_payloads = "\n".join(
+        json.dumps(payload, ensure_ascii=False)
+        for payload in (seed, ontology, registry)
+    )
+    assert WETTING_EVIDENCE_ID in rendered_payloads
+    assert "solderability" not in rendered_payloads.casefold()
+
+    public_surface = "\n".join(
+        _wetting_public_surface(payload)
+        for payload in (seed, ontology, registry)
+    ).casefold()
+    for forbidden in WETTING_FORBIDDEN_PUBLIC_STRINGS:
+        assert forbidden.casefold() not in public_surface
 
 
 def test_hold_response_for_unknown_query_does_not_invent_seed_answer(client: TestClient):
