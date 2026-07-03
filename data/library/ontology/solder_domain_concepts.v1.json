@@ -1,0 +1,185 @@
+{
+  "schema_version": "1.0",
+  "ontology_scope": "solder_domain_minimal",
+  "created_by": "R9ZNW-271",
+  "status": "APPROVED_WITH_LIMITS",
+  "raw_text_policy": "SAFE_SUMMARY_ONLY",
+  "raw_text_excluded": true,
+  "standard_raw_text_not_included": true,
+  "concepts": [
+    {
+      "concept_id": "concept:solder",
+      "labels": {
+        "ko": "\uc194\ub354",
+        "en": "solder"
+      },
+      "aliases": [
+        "\uc194\ub354?",
+        "\uc194\ub354\ub780?",
+        "solder?"
+      ],
+      "concept_type": "Material",
+      "evidence_ids": [
+        "ev-solder-basic-and-types-safe-summary-v1"
+      ]
+    },
+    {
+      "concept_id": "concept:soldering",
+      "labels": {
+        "ko": "\uc194\ub354\ub9c1",
+        "ko_alt": "\ub0a9\ub55c",
+        "en": "soldering"
+      },
+      "aliases": [
+        "\uc194\ub354\ub9c1\uc774\ub780?",
+        "\ub0a9\ub55c\uc774\ub780?"
+      ],
+      "concept_type": "Process",
+      "evidence_ids": [
+        "ev-soldering-safe-summary-v1"
+      ]
+    },
+    {
+      "concept_id": "concept:solder_type",
+      "labels": {
+        "ko": "\uc194\ub354 \uc885\ub958",
+        "en": "solder types"
+      },
+      "aliases": [
+        "\uc194\ub354\uc758 \uc885\ub958\ub294?",
+        "\uc194\ub354 \uc885\ub958\ub294?",
+        "\uc194\ub354 \uc885\ub958"
+      ],
+      "concept_type": "Classification",
+      "evidence_ids": [
+        "ev-solder-basic-and-types-safe-summary-v1"
+      ]
+    },
+    {
+      "concept_id": "concept:solder_paste",
+      "labels": {
+        "ko": "\uc194\ub354 \ud398\uc774\uc2a4\ud2b8",
+        "en": "solder paste"
+      },
+      "concept_type": "MaterialForm",
+      "evidence_ids": [
+        "ev-solder-basic-and-types-safe-summary-v1"
+      ]
+    },
+    {
+      "concept_id": "concept:wire_solder",
+      "labels": {
+        "ko": "\uc640\uc774\uc5b4 \uc194\ub354",
+        "en": "wire solder"
+      },
+      "concept_type": "MaterialForm",
+      "evidence_ids": [
+        "ev-solder-basic-and-types-safe-summary-v1"
+      ]
+    },
+    {
+      "concept_id": "concept:bar_solder",
+      "labels": {
+        "ko": "\ubc14 \uc194\ub354",
+        "en": "bar solder"
+      },
+      "concept_type": "MaterialForm",
+      "evidence_ids": [
+        "ev-solder-basic-and-types-safe-summary-v1"
+      ]
+    },
+    {
+      "concept_id": "concept:preform_solder",
+      "labels": {
+        "ko": "\ud504\ub9ac\ud3fc \uc194\ub354",
+        "en": "preform solder"
+      },
+      "concept_type": "MaterialForm",
+      "evidence_ids": [
+        "ev-solder-basic-and-types-safe-summary-v1"
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "relation_id": "rel:solder-has-process-soldering",
+      "source_concept_id": "concept:solder",
+      "relation_type": "HAS_PROCESS",
+      "target_concept_id": "concept:soldering",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "relation_id": "rel:solder-type-classifies-solder",
+      "source_concept_id": "concept:solder_type",
+      "relation_type": "CLASSIFIES",
+      "target_concept_id": "concept:solder",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "relation_id": "rel:solder-paste-is-type-of-solder",
+      "source_concept_id": "concept:solder_paste",
+      "relation_type": "IS_TYPE_OF",
+      "target_concept_id": "concept:solder",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "relation_id": "rel:wire-solder-is-type-of-solder",
+      "source_concept_id": "concept:wire_solder",
+      "relation_type": "IS_TYPE_OF",
+      "target_concept_id": "concept:solder",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "relation_id": "rel:bar-solder-is-type-of-solder",
+      "source_concept_id": "concept:bar_solder",
+      "relation_type": "IS_TYPE_OF",
+      "target_concept_id": "concept:solder",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "relation_id": "rel:preform-solder-is-type-of-solder",
+      "source_concept_id": "concept:preform_solder",
+      "relation_type": "IS_TYPE_OF",
+      "target_concept_id": "concept:solder",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "relation_id": "rel:solder-has-evidence-basic-types-v1",
+      "source_concept_id": "concept:solder",
+      "relation_type": "HAS_EVIDENCE",
+      "target_evidence_id": "ev-solder-basic-and-types-safe-summary-v1",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    },
+    {
+      "relation_id": "rel:soldering-has-evidence-safe-summary-v1",
+      "source_concept_id": "concept:soldering",
+      "relation_type": "HAS_EVIDENCE",
+      "target_evidence_id": "ev-soldering-safe-summary-v1",
+      "confidence": "high",
+      "approval_status": "APPROVED_WITH_LIMITS",
+      "raw_text_excluded": true,
+      "standard_raw_text_not_included": true
+    }
+  ]
+}

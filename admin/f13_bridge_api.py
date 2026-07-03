@@ -112,6 +112,11 @@ _ROLE_POLICY_CONTEXT_FIELDS = (
 )
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIBRARY_EVIDENCE_SEED_ROOT = _REPO_ROOT / "data" / "library" / "evidence_seeds"
+_LIBRARY_DATA_ROOT = _REPO_ROOT / "data" / "library"
+_LIBRARY_SOLDER_ONTOLOGY_PATH = _LIBRARY_DATA_ROOT / "ontology" / "solder_domain_concepts.v1.json"
+_LIBRARY_SOLDER_TERM_REGISTRY_PATH = (
+    _LIBRARY_DATA_ROOT / "semantic_terms" / "solder_term_registry.v1.json"
+)
 _LIBRARY_EVIDENCE_SEED_PATTERN = "*/*.json"
 _LIBRARY_EVIDENCE_SEED_POINTER_PREFIX = "qlib://library/evidence_seeds/"
 _SEED_REQUIRED_TYPE = "SAFE_SUMMARY_ONLY"
@@ -120,6 +125,11 @@ _SEED_APPROVED_STATUS = "APPROVED_WITH_LIMITS"
 _SEED_ALLOWED_RAW_TEXT_POLICIES = {"SAFE_SUMMARY_ONLY", "SUMMARY_ONLY"}
 _SEED_ALLOWED_RIGHTS_STATUS = {"PUBLIC", "INTERNAL", "LICENSED"}
 _SEED_QUERY_FIELDS = ("query", "question")
+_TERM_REGISTRY_APPROVED_STATUS = "APPROVED_WITH_LIMITS"
+_TERM_REGISTRY_ALLOWED_MATCH_TYPES = {"EXACT", "ALIAS"}
+_ONTOLOGY_APPROVED_STATUS = "APPROVED_WITH_LIMITS"
+_ONTOLOGY_ALLOWED_CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
+_ONTOLOGY_HAS_EVIDENCE_RELATION = "HAS_EVIDENCE"
 _SEED_SECRET_LIKE_FILENAME_MARKERS = (
     ".env",
     ".pem",
@@ -580,6 +590,30 @@ def _safe_seed_filename(path: Path) -> bool:
     return not any(marker in lowered for marker in _SEED_SECRET_LIKE_FILENAME_MARKERS)
 
 
+def _safe_library_json_path(path: Path, data_root: Path = _LIBRARY_DATA_ROOT) -> Optional[Path]:
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(data_root.resolve())
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_file() or resolved.suffix.lower() != ".json":
+        return None
+    if not _safe_seed_filename(resolved):
+        return None
+    return resolved
+
+
+def _load_library_json_payload(path: Path) -> Dict[str, Any]:
+    resolved = _safe_library_json_path(path)
+    if resolved is None:
+        return {}
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _library_seed_paths(seed_root: Path = _LIBRARY_EVIDENCE_SEED_ROOT) -> List[Path]:
     if not seed_root.exists() or not seed_root.is_dir():
         return []
@@ -609,6 +643,14 @@ def _load_library_evidence_seed_records() -> List[Dict[str, Any]]:
     return records
 
 
+def _load_solder_domain_concepts() -> Dict[str, Any]:
+    return _load_library_json_payload(_LIBRARY_SOLDER_ONTOLOGY_PATH)
+
+
+def _load_solder_term_registry() -> Dict[str, Any]:
+    return _load_library_json_payload(_LIBRARY_SOLDER_TERM_REGISTRY_PATH)
+
+
 def _normalized_seed_query(value: object) -> Optional[str]:
     text = _safe_label(value, max_length=800)
     if text is None:
@@ -627,6 +669,162 @@ def _query_text_from_sources(*sources: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
+def _safe_concept_id(value: object) -> Optional[str]:
+    concept_id = _safe_label(value, max_length=120)
+    if concept_id is None or not concept_id.startswith("concept:"):
+        return None
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-")
+    if any(char not in allowed for char in concept_id):
+        return None
+    return concept_id
+
+
+def _safe_evidence_id_list(values: object) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    safe_ids: List[str] = []
+    for value in values:
+        evidence_id = _safe_label(value, max_length=120)
+        if evidence_id is not None and evidence_id not in safe_ids:
+            safe_ids.append(evidence_id)
+    return safe_ids
+
+
+def _approved_term_record(term: Mapping[str, Any]) -> bool:
+    if _safe_seed_token(term.get("approval_status")) != _TERM_REGISTRY_APPROVED_STATUS:
+        return False
+    if _safe_seed_token(term.get("match_type")) not in _TERM_REGISTRY_ALLOWED_MATCH_TYPES:
+        return False
+    if _safe_seed_token(term.get("confidence")) != "HIGH":
+        return False
+    if term.get("raw_text_excluded") is not True:
+        return False
+    if term.get("standard_raw_text_not_included") is not True:
+        return False
+    return True
+
+
+def _resolve_query_terms_from_registry(query_text: object) -> List[Dict[str, Any]]:
+    normalized_query = _normalized_seed_query(query_text)
+    if normalized_query is None:
+        return []
+
+    registry = _load_solder_term_registry()
+    if _safe_seed_token(registry.get("status")) != _TERM_REGISTRY_APPROVED_STATUS:
+        return []
+    terms = registry.get("terms")
+    if not isinstance(terms, list):
+        return []
+
+    matches: List[Dict[str, Any]] = []
+    for term in terms:
+        if not isinstance(term, Mapping) or not _approved_term_record(term):
+            continue
+        normalized_term = _normalized_seed_query(term.get("normalized_term") or term.get("term"))
+        if normalized_term != normalized_query:
+            continue
+        concept_id = _safe_concept_id(term.get("concept_id"))
+        if concept_id is None:
+            continue
+        match = {
+            "concept_id": concept_id,
+            "evidence_ids": _safe_evidence_id_list(term.get("evidence_ids")),
+        }
+        safe_term = _safe_label(term.get("term"), max_length=120)
+        if safe_term is not None:
+            match["term"] = safe_term
+        safe_match_type = _safe_label(term.get("match_type"), max_length=20)
+        if safe_match_type is not None:
+            match["match_type"] = safe_match_type
+        matches.append(match)
+    return matches
+
+
+def _approved_ontology_payload(ontology: Mapping[str, Any]) -> bool:
+    if _safe_seed_token(ontology.get("status")) != _ONTOLOGY_APPROVED_STATUS:
+        return False
+    if _safe_seed_token(ontology.get("raw_text_policy")) != "SAFE_SUMMARY_ONLY":
+        return False
+    if ontology.get("raw_text_excluded") is not True:
+        return False
+    if ontology.get("standard_raw_text_not_included") is not True:
+        return False
+    return True
+
+
+def _approved_concept_record(concept: Mapping[str, Any]) -> bool:
+    concept_status = concept.get("approval_status")
+    if concept_status is not None and _safe_seed_token(concept_status) != _ONTOLOGY_APPROVED_STATUS:
+        return False
+    if concept.get("raw_text_excluded") is False:
+        return False
+    if concept.get("standard_raw_text_not_included") is False:
+        return False
+    return _safe_concept_id(concept.get("concept_id")) is not None
+
+
+def _approved_relation_record(relation: Mapping[str, Any]) -> bool:
+    if _safe_seed_token(relation.get("approval_status")) != _ONTOLOGY_APPROVED_STATUS:
+        return False
+    if _safe_seed_token(relation.get("confidence")) not in _ONTOLOGY_ALLOWED_CONFIDENCE:
+        return False
+    if relation.get("raw_text_excluded") is not True:
+        return False
+    if relation.get("standard_raw_text_not_included") is not True:
+        return False
+    return _safe_concept_id(relation.get("source_concept_id")) is not None
+
+
+def _concept_evidence_ids_for_terms(term_matches: List[Dict[str, Any]]) -> tuple[List[str], List[str]]:
+    if not term_matches:
+        return [], []
+
+    ontology = _load_solder_domain_concepts()
+    if not _approved_ontology_payload(ontology):
+        return [], []
+
+    concept_index: Dict[str, Mapping[str, Any]] = {}
+    concepts = ontology.get("concepts")
+    if isinstance(concepts, list):
+        for concept in concepts:
+            if not isinstance(concept, Mapping) or not _approved_concept_record(concept):
+                continue
+            concept_id = _safe_concept_id(concept.get("concept_id"))
+            if concept_id is not None:
+                concept_index[concept_id] = concept
+
+    concept_ids: List[str] = []
+    evidence_ids: List[str] = []
+    for match in term_matches:
+        concept_id = _safe_concept_id(match.get("concept_id"))
+        if concept_id is None or concept_id not in concept_index:
+            continue
+        if concept_id not in concept_ids:
+            concept_ids.append(concept_id)
+        for evidence_id in _safe_evidence_id_list(match.get("evidence_ids")):
+            if evidence_id not in evidence_ids:
+                evidence_ids.append(evidence_id)
+        for evidence_id in _safe_evidence_id_list(concept_index[concept_id].get("evidence_ids")):
+            if evidence_id not in evidence_ids:
+                evidence_ids.append(evidence_id)
+
+    relations = ontology.get("relations")
+    if isinstance(relations, list):
+        for relation in relations:
+            if not isinstance(relation, Mapping) or not _approved_relation_record(relation):
+                continue
+            source_concept_id = _safe_concept_id(relation.get("source_concept_id"))
+            if source_concept_id not in concept_ids:
+                continue
+            if _safe_seed_token(relation.get("relation_type")) != _ONTOLOGY_HAS_EVIDENCE_RELATION:
+                continue
+            evidence_id = _safe_label(relation.get("target_evidence_id"), max_length=120)
+            if evidence_id is not None and evidence_id not in evidence_ids:
+                evidence_ids.append(evidence_id)
+
+    return concept_ids, evidence_ids
+
+
 def _seed_matches_query(seed: Mapping[str, Any], query_text: object) -> bool:
     normalized_query = _normalized_seed_query(query_text)
     if normalized_query is None:
@@ -640,6 +838,26 @@ def _seed_matches_query(seed: Mapping[str, Any], query_text: object) -> bool:
         if _normalized_seed_query(domain) == normalized_query:
             return True
     return False
+
+
+def _seed_evidence_items_for_concepts(evidence_ids: List[str]) -> List[Dict[str, Any]]:
+    if not evidence_ids:
+        return []
+    seeds_by_id: Dict[str, Mapping[str, Any]] = {}
+    for seed in _load_library_evidence_seed_records():
+        evidence_id = _safe_label(seed.get("evidence_id"), max_length=120)
+        if evidence_id is not None and evidence_id not in seeds_by_id:
+            seeds_by_id[evidence_id] = seed
+
+    evidence_items: List[Dict[str, Any]] = []
+    for evidence_id in evidence_ids:
+        seed = seeds_by_id.get(evidence_id)
+        if seed is None:
+            continue
+        evidence_item = _project_seed_to_bridge_evidence_item(seed)
+        if evidence_item is not None:
+            evidence_items.append(evidence_item)
+    return evidence_items
 
 
 def _safe_seed_pointer_uri(value: object) -> Optional[str]:
@@ -724,10 +942,9 @@ def _project_seed_to_bridge_evidence_item(seed: Mapping[str, Any]) -> Optional[D
     return projected
 
 
-def _seed_evidence_items_for_query(query_text: object) -> tuple[List[Dict[str, Any]], Optional[str]]:
-    if _normalized_seed_query(query_text) is None:
-        return [], "query is empty"
-
+def _seed_evidence_items_for_exact_query(
+    query_text: object,
+) -> tuple[List[Dict[str, Any]], Optional[str], bool]:
     matched_seed = False
     for seed in _load_library_evidence_seed_records():
         if not _seed_matches_query(seed, query_text):
@@ -735,11 +952,32 @@ def _seed_evidence_items_for_query(query_text: object) -> tuple[List[Dict[str, A
         matched_seed = True
         evidence_item = _project_seed_to_bridge_evidence_item(seed)
         if evidence_item is not None:
-            return [evidence_item], None
+            return [evidence_item], None, True
 
     if matched_seed:
-        return [], "matching Library Evidence seed is not approved for Bridge output"
-    return [], "approved Library Evidence seed was not found for query"
+        return [], "matching Library Evidence seed is not approved for Bridge output", True
+    return [], "approved Library Evidence seed was not found for query", False
+
+
+def _seed_evidence_items_for_query(query_text: object) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    if _normalized_seed_query(query_text) is None:
+        return [], "query is empty"
+
+    term_matches = _resolve_query_terms_from_registry(query_text)
+    concept_ids, evidence_ids = _concept_evidence_ids_for_terms(term_matches)
+    if evidence_ids:
+        evidence_items = _seed_evidence_items_for_concepts(evidence_ids)
+        if evidence_items:
+            return [evidence_items[0]], None
+        fallback_items, fallback_reason, fallback_matched = _seed_evidence_items_for_exact_query(query_text)
+        if fallback_items or fallback_matched:
+            return fallback_items, fallback_reason
+        return [], "resolved Library Evidence concept has no approved Bridge-safe evidence"
+    if term_matches and not concept_ids:
+        return [], "matching Library Evidence concept is not approved for Bridge output"
+
+    fallback_items, fallback_reason, _fallback_matched = _seed_evidence_items_for_exact_query(query_text)
+    return fallback_items, fallback_reason
 
 
 def _skillup_seed_context(request_payload: Mapping[str, Any], nested_payload: Mapping[str, Any]) -> Dict[str, Any]:

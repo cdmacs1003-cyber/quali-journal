@@ -11,6 +11,10 @@ This specification restores the static F13 Bridge/F13 planning surface for the c
 - R9ZNW-265 exception: Bridge may read canonical safe metadata-only Library Evidence seed JSON under
   `data/library/evidence_seeds/` only through the approved Bridge-side seed adapter. General file-backed
   retrieval remains forbidden. Skillup direct DB/file access remains forbidden.
+- R9ZNW-271 exception: Bridge may read the canonical safe metadata-only solder-domain JSON concept map under
+  `data/library/ontology/` and semantic term registry under `data/library/semantic_terms/` only to implement
+  bounded Bridge.resolve_terms before seed retrieval. This is not GraphRAG, RDF, OWL, a triple store, embedding
+  retrieval, or LLM extraction. Skillup direct DB/file access remains forbidden.
 - Bridge functional 200 behavior remains NOT_VERIFIED until a separate runtime gate is approved.
 - Runtime smoke, authenticated smoke, Track A approval, Beta approval, F13 approval, and release approval remain NOT_GRANTED.
 

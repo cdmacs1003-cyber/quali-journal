@@ -198,6 +198,14 @@ def test_ok_response_with_canonical_soldering_seed_for_matching_query(client: Te
     _assert_no_forbidden_echo(body)
 
 
+def test_resolve_terms_exact_solder_query_maps_to_solder_concept():
+    matches = bridge_api._resolve_query_terms_from_registry("솔더?")
+    concept_ids, evidence_ids = bridge_api._concept_evidence_ids_for_terms(matches)
+
+    assert "concept:solder" in concept_ids
+    assert "ev-solder-basic-and-types-safe-summary-v1" in evidence_ids
+
+
 def test_ok_response_with_canonical_solder_seed_for_question_query(client: TestClient):
     response = client.post(
         ROUTE,
@@ -228,6 +236,26 @@ def test_ok_response_with_canonical_solder_seed_for_question_query(client: TestC
     _assert_no_forbidden_echo(body)
 
 
+def test_resolve_terms_soldering_alias_maps_to_soldering_seed(client: TestClient):
+    matches = bridge_api._resolve_query_terms_from_registry("납땜이란?")
+    concept_ids, evidence_ids = bridge_api._concept_evidence_ids_for_terms(matches)
+
+    assert "concept:soldering" in concept_ids
+    assert "ev-soldering-safe-summary-v1" in evidence_ids
+
+    response = client.post(
+        ROUTE,
+        json={"query": "납땜이란?", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["evidence_items"][0]["evidence_id"] == "ev-soldering-safe-summary-v1"
+    assert body["evidence_items"][0]["bridge_trace_id"] == "btrace:library-seed:soldering-safe-summary-v1"
+
+
 def test_ok_response_with_canonical_solder_seed_for_types_query(client: TestClient):
     response = client.post(
         ROUTE,
@@ -253,6 +281,48 @@ def test_ok_response_with_canonical_solder_seed_for_types_query(client: TestClie
     _assert_no_forbidden_echo(body)
 
 
+def test_retrieve_evidence_uses_solder_type_concept_relation(client: TestClient):
+    matches = bridge_api._resolve_query_terms_from_registry("솔더의 종류는?")
+    concept_ids, evidence_ids = bridge_api._concept_evidence_ids_for_terms(matches)
+
+    assert "concept:solder_type" in concept_ids
+    assert "ev-solder-basic-and-types-safe-summary-v1" in evidence_ids
+
+    response = client.post(
+        ROUTE,
+        json={"query": "솔더의 종류는?", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["evidence_items"][0]["evidence_id"] == "ev-solder-basic-and-types-safe-summary-v1"
+
+
+def test_material_form_alias_uses_solder_paste_concept(client: TestClient):
+    matches = bridge_api._resolve_query_terms_from_registry("솔더 페이스트")
+    concept_ids, evidence_ids = bridge_api._concept_evidence_ids_for_terms(matches)
+
+    assert "concept:solder_paste" in concept_ids
+    assert "ev-solder-basic-and-types-safe-summary-v1" in evidence_ids
+
+    response = client.post(
+        ROUTE,
+        json={"query": "솔더 페이스트", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "OK"
+    assert body["evidence_items"][0]["evidence_id"] == "ev-solder-basic-and-types-safe-summary-v1"
+    rendered = "\n".join(_walk_values(body))
+    assert "data/library/ontology" not in rendered
+    assert "solder_domain_concepts" not in rendered
+    assert "solder_term_registry" not in rendered
+
+
 def test_hold_response_for_unknown_query_does_not_invent_seed_answer(client: TestClient):
     response = client.post(
         ROUTE,
@@ -267,6 +337,23 @@ def test_hold_response_for_unknown_query_does_not_invent_seed_answer(client: Tes
     assert body["feedback_candidate_required"] is True
     assert "approved Library Evidence seed was not found" in body["hold_reason"]
     assert "솔더링" not in "\n".join(_walk_values(body))
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+
+
+def test_hold_response_for_semantic_unknown_query_does_not_invent_answer(client: TestClient):
+    response = client.post(
+        ROUTE,
+        json={"query": "완전히무관한질문", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert "approved Library Evidence seed was not found" in body["hold_reason"]
+    assert "솔더는" not in "\n".join(_walk_values(body))
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
 
@@ -302,6 +389,96 @@ def test_hold_response_for_matching_seed_without_approval(monkeypatch: pytest.Mo
     assert body["evidence_items"] == []
     assert "not approved" in body["hold_reason"]
     assert "Synthetic safe summary that must not be returned." not in "\n".join(_walk_values(body))
+
+
+def test_unsafe_semantic_term_record_is_ignored(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    registry = {
+        "schema_version": "1.0",
+        "registry_scope": "solder_domain_minimal",
+        "created_by": "test",
+        "status": "APPROVED_WITH_LIMITS",
+        "terms": [
+            {
+                "term": "안전하지않은용어",
+                "normalized_term": "안전하지않은용어",
+                "lang": "ko",
+                "concept_id": "concept:solder",
+                "match_type": "exact",
+                "confidence": "high",
+                "approval_status": "NOT_APPROVED",
+                "evidence_ids": ["ev-solder-basic-and-types-safe-summary-v1"],
+                "raw_text_excluded": True,
+                "standard_raw_text_not_included": True,
+            }
+        ],
+    }
+    monkeypatch.setattr(bridge_api, "_load_solder_term_registry", lambda: registry)
+
+    response = client.post(
+        ROUTE,
+        json={"query": "안전하지않은용어", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert "솔더는" not in "\n".join(_walk_values(body))
+
+
+def test_unsafe_semantic_concept_record_is_ignored(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    registry = {
+        "schema_version": "1.0",
+        "registry_scope": "solder_domain_minimal",
+        "created_by": "test",
+        "status": "APPROVED_WITH_LIMITS",
+        "terms": [
+            {
+                "term": "검토필요개념",
+                "normalized_term": "검토필요개념",
+                "lang": "ko",
+                "concept_id": "concept:solder",
+                "match_type": "exact",
+                "confidence": "high",
+                "approval_status": "APPROVED_WITH_LIMITS",
+                "evidence_ids": ["ev-solder-basic-and-types-safe-summary-v1"],
+                "raw_text_excluded": True,
+                "standard_raw_text_not_included": True,
+            }
+        ],
+    }
+    ontology = {
+        "schema_version": "1.0",
+        "ontology_scope": "solder_domain_minimal",
+        "created_by": "test",
+        "status": "APPROVED_WITH_LIMITS",
+        "raw_text_policy": "SAFE_SUMMARY_ONLY",
+        "raw_text_excluded": True,
+        "standard_raw_text_not_included": True,
+        "concepts": [
+            {
+                "concept_id": "concept:solder",
+                "approval_status": "NOT_APPROVED",
+                "evidence_ids": ["ev-solder-basic-and-types-safe-summary-v1"],
+            }
+        ],
+        "relations": [],
+    }
+    monkeypatch.setattr(bridge_api, "_load_solder_term_registry", lambda: registry)
+    monkeypatch.setattr(bridge_api, "_load_solder_domain_concepts", lambda: ontology)
+
+    response = client.post(
+        ROUTE,
+        json={"query": "검토필요개념", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert "솔더는" not in "\n".join(_walk_values(body))
 
 
 def test_skillup_route_uses_bridge_seed_without_direct_skillup_file_access(client: TestClient):
@@ -392,6 +569,28 @@ def test_skillup_seed_adapter_does_not_add_direct_skillup_file_or_db_access():
         skillup_bridge.skillup_answer_from_request,
     ):
         assert forbidden_code_names.isdisjoint(set(helper.__code__.co_names))
+
+
+def test_bridge_semantic_adapter_does_not_expose_raw_json_or_paths(client: TestClient):
+    response = client.post(
+        ROUTE,
+        json={"query": "솔더 페이스트", "purpose": "answer", "requester_module": "Skillup"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "OK"
+    rendered = "\n".join(_walk_values(body))
+    for forbidden in (
+        "data/library",
+        "solder_domain_concepts.v1.json",
+        "solder_term_registry.v1.json",
+        "raw_text_excluded",
+        "standard_raw_text_not_included",
+        "created_for_query_domain",
+        "bridge_trace_seed",
+    ):
+        assert forbidden not in rendered
 
 
 def test_hold_response_when_evidence_items_missing_or_empty(client: TestClient):
