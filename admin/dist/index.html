@@ -534,6 +534,9 @@
 <script>
 /* ===== 공통 헬퍼 ===== */
 function showToast(msg, type){
+  if (window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW()) {
+    return;
+  }
   var t=document.getElementById('toast'); if(!t) return;
   t.className = (type==='err') ? 'err' : 'ok';
   t.textContent = String(msg||'');
