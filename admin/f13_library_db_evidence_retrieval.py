@@ -42,6 +42,28 @@ _COLUMN_ALIASES = {
     "raw_text_policy": ("raw_text_policy",),
     "rights_status": ("rights_status",),
     "source_doc_kind": ("source_doc_kind",),
+    "summary_source": ("summary_source",),
+    "semantic_summary_verified": ("semantic_summary_verified",),
+    "raw_text_exposed": ("raw_text_exposed",),
+    "production_path_exposed": ("production_path_exposed",),
+}
+
+_REQUIRED_SAFE_INDEX_POLICY_FIELDS = (
+    "summary_source",
+    "semantic_summary_verified",
+    "raw_text_exposed",
+    "production_path_exposed",
+)
+
+_METADATA_DERIVED_NOT_SEMANTIC = "METADATA_DERIVED_NOT_SEMANTIC"
+
+_APPROVED_SAFE_SUMMARY_SOURCES = {
+    "APPROVED_SAFE_SUMMARY",
+    "APPROVED_SAFE_SHORT_ANSWER",
+    "CURATED_SAFE_SUMMARY",
+    "SAFE_SIDECAR_APPROVED_SUMMARY",
+    "SYNTHETIC_SAFE_SUMMARY",
+    "VERIFIED_SEMANTIC_SUMMARY",
 }
 
 _SAFE_MAPPING_COLUMNS = {
@@ -58,6 +80,10 @@ _SAFE_MAPPING_COLUMNS = {
     "raw_text_policy",
     "rights_status",
     "source_doc_kind",
+    "summary_source",
+    "semantic_summary_verified",
+    "raw_text_exposed",
+    "production_path_exposed",
 }
 
 _FORBIDDEN_EXACT_COLUMNS = {
@@ -87,7 +113,7 @@ _FORBIDDEN_COLUMN_TOKENS = (
     "path",
 )
 
-_SAFE_RAW_COLUMNS = {"raw_text_policy", "raw_text_exposed"}
+_SAFE_AUDIT_COLUMNS = {"raw_text_policy", "raw_text_exposed", "production_path_exposed"}
 
 
 def _created_at() -> str:
@@ -127,7 +153,7 @@ def _bounded_limit(value: int | None) -> int:
 
 def _is_forbidden_column_name(name: object, declared_type: object = "") -> bool:
     lowered = str(name or "").strip().lower()
-    if lowered in _SAFE_RAW_COLUMNS:
+    if lowered in _SAFE_AUDIT_COLUMNS:
         return False
     if str(declared_type or "").strip().upper() == "BLOB":
         return True
@@ -280,6 +306,11 @@ def _table_mapping(table: Mapping[str, Any]) -> tuple[dict[str, str], str | None
         column = _find_column(table, _COLUMN_ALIASES[bridge_field])
         if column is not None:
             mapping[bridge_field] = column
+    for bridge_field in _REQUIRED_SAFE_INDEX_POLICY_FIELDS:
+        column = _find_column(table, _COLUMN_ALIASES[bridge_field])
+        if column is None:
+            return mapping, f"safe metadata table has no {bridge_field} column"
+        mapping[bridge_field] = column
     return mapping, None
 
 
@@ -329,6 +360,61 @@ def _string_or_none(value: object, max_length: int = 512) -> str | None:
     if "h:\\" in lowered or "c:\\" in lowered or "file://" in lowered:
         return None
     return text
+
+
+def _safe_token(value: object, max_length: int = 120) -> str | None:
+    text = _string_or_none(value, max_length)
+    if text is None:
+        return None
+    return text.strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def _bool_or_none(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value in {0, 1}:
+            return bool(value)
+        return None
+    token = _safe_token(value, 40)
+    if token in {"TRUE", "YES", "Y", "1"}:
+        return True
+    if token in {"FALSE", "NO", "N", "0"}:
+        return False
+    return None
+
+
+def _safe_summary_source_allows_answer(summary_source: object, semantic_verified: bool) -> bool:
+    source = _safe_token(summary_source, 120)
+    if source is None:
+        return False
+    if source in _APPROVED_SAFE_SUMMARY_SOURCES:
+        return True
+    if semantic_verified and source != _METADATA_DERIVED_NOT_SEMANTIC:
+        return True
+    return False
+
+
+def _safe_index_contract_decision(
+    row: Mapping[str, Any],
+    mapping: Mapping[str, str],
+) -> tuple[str, str | None]:
+    summary_source = _row_value(row, mapping.get("summary_source"))
+    semantic_verified = _bool_or_none(_row_value(row, mapping.get("semantic_summary_verified")))
+    raw_text_exposed = _bool_or_none(_row_value(row, mapping.get("raw_text_exposed")))
+    production_path_exposed = _bool_or_none(_row_value(row, mapping.get("production_path_exposed")))
+
+    if _safe_token(summary_source, 120) is None:
+        return RESULT_HOLD, "safe metadata row is missing summary_source"
+    if semantic_verified is None:
+        return RESULT_HOLD, "safe metadata row is missing semantic_summary_verified"
+    if raw_text_exposed is None or production_path_exposed is None:
+        return RESULT_HOLD, "safe metadata exposure audit flags must be explicit false"
+    if raw_text_exposed or production_path_exposed:
+        return RESULT_DENIED, "safe metadata exposure audit flags are not false"
+    if not _safe_summary_source_allows_answer(summary_source, semantic_verified):
+        return RESULT_HOLD, "safe_summary source is not approved for user-visible answer"
+    return RESULT_OK, None
 
 
 def _row_value(row: Mapping[str, Any], source_column: str | None) -> Any:
@@ -431,6 +517,14 @@ def retrieve_bridge_evidence_from_sqlite(
         )
 
     for row in rows:
+        contract_status, contract_reason = _safe_index_contract_decision(row, mapping)
+        if contract_status == RESULT_DENIED:
+            denied_reasons.append(contract_reason or "safe metadata sidecar contract denied")
+            continue
+        if contract_status != RESULT_OK:
+            hold_reasons.append(contract_reason or "safe metadata sidecar contract requires review")
+            continue
+
         evidence = _project_row_to_evidence(row, mapping, str(selected_table["name"]))
         decision = decide_bridge_result(
             evidence,
