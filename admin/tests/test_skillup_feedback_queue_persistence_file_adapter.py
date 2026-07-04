@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from admin.f13_skillup_bridge import (
     skillup_answer_from_bridge_response,
@@ -20,6 +21,59 @@ from admin.f13_skillup_feedback_queue_persistence_file import (
     LocalFileFeedbackQueueRepository,
     LocalFileFeedbackQueueRepositoryError,
 )
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_FEEDBACK_QUEUE_ITEM_SCHEMA_PATH = _REPO_ROOT / "schemas" / "skillup_feedback_queue_item.schema.json"
+_UNSAFE_STORED_FIELD_NAMES = {
+    "answer",
+    "evidence",
+    "evidence_items",
+    "raw_text",
+    "raw_prompt",
+    "raw_query",
+    "raw_answer",
+    "raw_source",
+    "source_text",
+    "source_uri_or_path",
+    "full_answer",
+    "full_source",
+    "internal_path",
+    "file_uri",
+    "hostname",
+    "secret",
+    "token",
+    "credential",
+    "dsn",
+    "api_key",
+    "private_key",
+    "secret_key",
+    "access_key",
+    "client_key",
+    "service_account",
+    "service-account",
+    "bridge_payload",
+    "bridge_response",
+    "source_payload",
+    "standard_text",
+    "database_url",
+    "db_path",
+    "sqlite_path",
+}
+
+
+def _feedback_queue_item_schema_errors(payload):
+    schema = json.loads(_FEEDBACK_QUEUE_ITEM_SCHEMA_PATH.read_text(encoding="utf-8"))
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    validator = Draft202012Validator(schema)
+    return sorted(
+        validator.iter_errors(json.loads(json.dumps(payload))),
+        key=lambda error: tuple(error.path),
+    )
+
+
+def _assert_no_unsafe_stored_surfaces(payload):
+    assert _UNSAFE_STORED_FIELD_NAMES.isdisjoint(payload)
 
 
 def _safe_helper_feedback_queue_item():
@@ -77,6 +131,23 @@ def test_local_file_repository_writes_minimized_record_and_reports_local_boundar
     assert stored == item
     assert len(rows) == 1
     _assert_minimized_record(rows[0])
+
+
+def test_local_file_repository_stored_row_matches_feedback_queue_item_schema(tmp_path):
+    repo = LocalFileFeedbackQueueRepository(tmp_path)
+    item = _safe_durable_item()
+
+    result = repo.enqueue(item)
+    rows = _read_jsonl(repo.path)
+    assert len(rows) == 1
+    row = rows[0]
+
+    assert [_error.message for _error in _feedback_queue_item_schema_errors(row)] == []
+    assert row["persistence_mechanism"] == DB_BACKED_QUEUE_DEFERRED
+    assert result.persistence_mechanism == LOCAL_FILE_PERSISTENCE_MECHANISM
+    assert result.db_access_executed is False
+    _assert_minimized_record(row)
+    _assert_no_unsafe_stored_surfaces(row)
 
 
 def test_local_file_repository_reads_back_by_feedback_id_and_dedup_key(tmp_path):
