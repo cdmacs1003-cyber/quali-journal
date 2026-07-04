@@ -36,6 +36,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Str
 from pydantic import BaseModel, Field
 from starlette.staticfiles import StaticFiles
 from admin.f13_bridge_api import router as f13_bridge_router
+from admin.warehouse_core import router as warehouse_router
 
 # === DB KPI helpers (optional; safe fallback) ================================
 try:
@@ -506,6 +507,7 @@ def ready_gate_patch(p: ReadyGatePatch, authorized: bool = Depends(authorize)):
 
 app.include_router(ready_router)
 app.include_router(f13_bridge_router, dependencies=[Depends(authorize_f13_bridge_with_local_override)])
+app.include_router(warehouse_router, dependencies=[Depends(authorize)])
 # === READY/SSOT PATCH END ===================================================
 # ---------------------------------------------------------------------------
 # Paths / Constants
