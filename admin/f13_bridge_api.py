@@ -22,6 +22,8 @@ from admin.f13_runtime_guard import (
     RESULT_DENIED,
     RESULT_HOLD,
     RESULT_OK,
+    RIGHTS_NOT_VERIFIED,
+    RIGHTS_UNKNOWN,
     detect_forbidden_fields,
     decide_bridge_result,
     decide_role_access_policy,
@@ -159,6 +161,19 @@ _SKILLUP_SEED_CONTEXT_DEFAULTS = {
     "organization_id": "org:skillup-beta-minimal",
     "cohort_id": "cohort:skillup-beta-minimal",
 }
+_TRACE_ONLY_METADATA_SOURCE_MARKERS = {
+    "PRODUCTION_LIBRARY_METADATA_FIXTURE",
+    "PRODUCTION_LIBRARY_METADATA_BRIDGE_INTEGRATION_DRAFT",
+}
+_TRACE_ONLY_METADATA_SUMMARY_SOURCE = "METADATA_DERIVED_NOT_SEMANTIC"
+_TRACE_ONLY_METADATA_HOLD_DECISION = "HOLD_RIGHTS_NOT_VERIFIED"
+_TRACE_ONLY_METADATA_ALLOWED_AUDIT_VIOLATIONS = {
+    "raw_text_exposed",
+    "production_path_exposed",
+}
+_TRACE_ONLY_METADATA_BLOCK_REASON = (
+    "trace-only production Library metadata projection violates HOLD policy"
+)
 
 
 class BridgeEvidenceRequest(BaseModel):
@@ -294,6 +309,119 @@ def _model_to_dict(model: BaseModel) -> Dict[str, Any]:
     if hasattr(model, "model_dump"):
         return model.model_dump()  # type: ignore[attr-defined]
     return model.dict()
+
+
+def _trace_only_token(value: Any) -> str:
+    return str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def _trace_only_positive(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return _trace_only_token(value) in {"TRUE", "YES", "Y", "1"}
+
+
+def _is_production_library_metadata_projection(evidence: Mapping[str, Any]) -> bool:
+    source_tokens = {
+        _trace_only_token(evidence.get(field))
+        for field in ("adapter_source", "integration_source")
+        if not _is_missing(evidence.get(field))
+    }
+    if source_tokens.intersection(_TRACE_ONLY_METADATA_SOURCE_MARKERS):
+        return True
+    return (
+        _trace_only_token(evidence.get("summary_source")) == _TRACE_ONLY_METADATA_SUMMARY_SOURCE
+        or _trace_only_token(evidence.get("rights_status_decision")) == _TRACE_ONLY_METADATA_HOLD_DECISION
+    )
+
+
+def _production_library_metadata_trace_only_context(
+    evidence_items: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    statuses: List[str] = []
+    blocked_reasons: List[str] = []
+    projection_count = 0
+
+    for evidence in evidence_items:
+        if not isinstance(evidence, Mapping) or not _is_production_library_metadata_projection(evidence):
+            continue
+
+        projection_count += 1
+        rights_status = normalize_rights_status(evidence.get("rights_status"))
+        if rights_status not in statuses:
+            statuses.append(rights_status)
+        if rights_status not in {RIGHTS_NOT_VERIFIED, RIGHTS_UNKNOWN}:
+            blocked_reasons.append("RIGHTS_STATUS_NOT_TRACE_ONLY_HOLD")
+
+        rights_decision = _trace_only_token(evidence.get("rights_status_decision"))
+        if rights_decision and rights_decision != _TRACE_ONLY_METADATA_HOLD_DECISION:
+            blocked_reasons.append("RIGHTS_STATUS_DECISION_NOT_HOLD")
+
+        summary_source = _trace_only_token(evidence.get("summary_source"))
+        if summary_source and summary_source != _TRACE_ONLY_METADATA_SUMMARY_SOURCE:
+            blocked_reasons.append("SUMMARY_SOURCE_NOT_METADATA_DERIVED")
+        if _trace_only_positive(evidence.get("semantic_summary_verified")):
+            blocked_reasons.append("SEMANTIC_SUMMARY_VERIFIED_TRUE")
+        if _trace_only_positive(evidence.get("raw_text_exposed")):
+            blocked_reasons.append("RAW_TEXT_EXPOSED_TRUE")
+        if _trace_only_positive(evidence.get("production_path_exposed")):
+            blocked_reasons.append("PRODUCTION_PATH_EXPOSED_TRUE")
+
+        unexpected_violations = [
+            violation
+            for violation in detect_forbidden_fields(evidence)
+            if violation not in _TRACE_ONLY_METADATA_ALLOWED_AUDIT_VIOLATIONS
+        ]
+        if unexpected_violations:
+            blocked_reasons.append("FORBIDDEN_FIELD_OR_VALUE_PRESENT")
+
+        bridge_projected_item = evidence.get("bridge_projected_item")
+        if isinstance(bridge_projected_item, Mapping):
+            nested_rights = normalize_rights_status(bridge_projected_item.get("rights_status"))
+            if nested_rights not in {RIGHTS_NOT_VERIFIED, RIGHTS_UNKNOWN}:
+                blocked_reasons.append("BRIDGE_PROJECTED_ITEM_RIGHTS_NOT_HELD")
+
+    return {
+        "trace_only_projection_present": projection_count > 0,
+        "trace_only_projection_count": projection_count,
+        "rights_statuses": statuses,
+        "hold_required": projection_count > 0,
+        "hold_policy": _TRACE_ONLY_METADATA_HOLD_DECISION,
+        "public_content_allowed": False,
+        "safe_summary_user_visible": False,
+        "semantic_summary_user_visible": False,
+        "pointer_uri_user_visible": False,
+        "raw_text_exposed": False,
+        "production_path_exposed": False,
+        "blocked_reasons": sorted(set(blocked_reasons)),
+    }
+
+
+def _trace_only_guard_evidence_item(evidence: Dict[str, Any]) -> Dict[str, Any]:
+    if _is_production_library_metadata_projection(evidence):
+        bridge_projected_item = evidence.get("bridge_projected_item")
+        if isinstance(bridge_projected_item, Mapping):
+            return dict(bridge_projected_item)
+    return evidence
+
+
+def _trace_only_guard_evidence_items(
+    evidence_items: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    return [
+        _trace_only_guard_evidence_item(evidence)
+        if isinstance(evidence, dict)
+        else evidence
+        for evidence in evidence_items
+    ]
+
+
+def _trace_only_guard_scan_payload(request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    scan_payload = dict(request_payload)
+    evidence_items = scan_payload.get("evidence_items")
+    if isinstance(evidence_items, list):
+        scan_payload["evidence_items"] = _trace_only_guard_evidence_items(evidence_items)
+    return scan_payload
 
 
 
@@ -1190,7 +1318,20 @@ def skillup_bridge_answer(payload: SkillupBridgeAnswerRequest) -> Dict[str, Any]
 @router.post("/retrieve-evidence", response_model=BridgeEvidenceResponse)
 def retrieve_bridge_evidence(payload: BridgeEvidenceRequest) -> Dict[str, Any]:
     request_payload = _model_to_dict(payload)
-    if detect_forbidden_fields(request_payload):
+    requested_evidence_items = payload.evidence_items or []
+    trace_only_context = _production_library_metadata_trace_only_context(requested_evidence_items)
+    if trace_only_context["blocked_reasons"]:
+        return _response(
+            RESULT_DENIED,
+            [],
+            _TRACE_ONLY_METADATA_BLOCK_REASON,
+            evidence_required_pass=False,
+            raw_leak_pass=False,
+            rights_pass=False,
+            sensitivity_pass=False,
+        )
+
+    if detect_forbidden_fields(_trace_only_guard_scan_payload(request_payload)):
         return _response(
             RESULT_DENIED,
             [],
@@ -1214,7 +1355,7 @@ def retrieve_bridge_evidence(payload: BridgeEvidenceRequest) -> Dict[str, Any]:
             rights_pass=True,
         )
 
-    evidence_items = payload.evidence_items or []
+    evidence_items = _trace_only_guard_evidence_items(requested_evidence_items)
     seed_hold_reason = None
     if not evidence_items:
         query_text = _query_text_from_sources(request_payload)
@@ -1296,7 +1437,7 @@ def retrieve_bridge_evidence(payload: BridgeEvidenceRequest) -> Dict[str, Any]:
         hold_reasons[0] if hold_reasons else "no Bridge-safe evidence item was accepted",
         evidence_required_pass=False,
         raw_leak_pass=True,
-        rights_pass=True,
+        rights_pass=not any("rights_status" in reason for reason in hold_reasons),
     )
 
 

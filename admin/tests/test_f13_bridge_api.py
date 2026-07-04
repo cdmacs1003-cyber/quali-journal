@@ -7,6 +7,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import admin.f13_bridge_api as bridge_api
+from admin.f13_production_library_metadata_bridge_integration import (
+    integrate_adapter_records_to_bridge_evidence,
+)
 
 
 ROUTE = "/api/f13/bridge/retrieve-evidence"
@@ -118,6 +121,42 @@ def _safe_evidence(**overrides: Any) -> dict[str, Any]:
     }
     evidence.update(overrides)
     return evidence
+
+
+def _production_library_metadata_fixture_record(**overrides: Any) -> dict[str, Any]:
+    record = {
+        "body_text_exposure": "NONE_POINTER_ONLY",
+        "bridge_trace_id": "btrace:prodlib:trace-only.synthetic",
+        "candidate_role": "PRIMARY_CANDIDATE",
+        "doc_id": "SYNTH-TRACE-001",
+        "evidence_id": "prodlib.evd.trace-only.synthetic",
+        "fixture_status": "HOLD_FOR_RIGHTS_AND_SUMMARY_REVIEW",
+        "pointer_uri": "qlib://production-library/metadata/SYNTH-TRACE-001",
+        "raw_text_policy": "POINTER_ONLY",
+        "rights_status": "NOT_VERIFIED",
+        "rights_status_decision": "HOLD_RIGHTS_NOT_VERIFIED",
+        "safe_summary": "Metadata-only synthetic summary that must stay internal.",
+        "semantic_summary_verified": False,
+        "source_doc_kind": "REFERENCE_CARD_POINTER",
+        "source_label": "Synthetic Trace Reference Card",
+        "standard_family": "SYNTH_TRACE",
+        "summary_source": "METADATA_DERIVED_NOT_SEMANTIC",
+        "tags": ["SYNTH_TRACE", "REFERENCE_CARD_POINTER"],
+        "validation_shape_ids": ["R9ZNW-336_TRACE_ONLY_SYNTHETIC"],
+    }
+    record.update(overrides)
+    return record
+
+
+def _production_library_trace_projection(**overrides: Any) -> dict[str, Any]:
+    result = integrate_adapter_records_to_bridge_evidence(
+        [_production_library_metadata_fixture_record()]
+    )
+    assert result["result_status"] == "HOLD"
+    assert result["projected_count"] == 1
+    projection = dict(result["evidence_items"][0])
+    projection.update(overrides)
+    return projection
 
 
 def _redacted_preflight_evidence(**overrides: Any) -> dict[str, Any]:
@@ -1065,6 +1104,104 @@ def test_hold_response_when_evidence_id_is_missing(client: TestClient):
     assert body["evidence_items"] == []
     assert "missing evidence_id" in body["hold_reason"]
     assert body["feedback_candidate_required"] is True
+
+
+def test_trace_only_production_library_projection_returns_hold_without_public_content(
+    client: TestClient,
+):
+    projection = _production_library_trace_projection()
+    context = bridge_api._production_library_metadata_trace_only_context([projection])
+
+    response = client.post(ROUTE, json=_payload([projection]))
+
+    assert context["trace_only_projection_present"] is True
+    assert context["trace_only_projection_count"] == 1
+    assert context["rights_statuses"] == ["NOT_VERIFIED"]
+    assert context["hold_required"] is True
+    assert context["public_content_allowed"] is False
+    assert context["blocked_reasons"] == []
+    assert projection["safe_summary"] not in repr(context)
+    assert projection["pointer_uri"] not in repr(context)
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "HOLD"
+    assert body["evidence_items"] == []
+    assert body["hold_reason"] == "rights_status is not verified"
+    assert body["policy_result"]["rights_pass"] is False
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+
+    rendered = "\n".join(_walk_values(body))
+    for forbidden in (
+        projection["safe_summary"],
+        projection["pointer_uri"],
+        projection["source_label"],
+        projection["doc_id"],
+    ):
+        assert forbidden not in rendered
+
+
+def test_skillup_answer_for_trace_only_projection_stays_generic_hold(client: TestClient):
+    projection = _production_library_trace_projection()
+    bridge_response = client.post(ROUTE, json=_payload([projection])).json()
+
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={"requester_module": "Skillup", "bridge_response": bridge_response},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "HOLD"
+    assert body["answer_status"] == "HOLD"
+    assert body["evidence_required"] is True
+    assert body["evidence"] == []
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    assert body["safe_short_answer"] == bridge_api._BETA_HOLD_SHORT_ANSWER
+    assert "answer" not in body
+
+    rendered = "\n".join(_walk_values(body))
+    for forbidden in (
+        projection["safe_summary"],
+        projection["pointer_uri"],
+        projection["source_label"],
+        projection["doc_id"],
+    ):
+        assert forbidden not in rendered
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda projection: projection.update({"semantic_summary_verified": True}),
+        lambda projection: projection.update({"raw_text_exposed": True}),
+        lambda projection: projection.update({"production_path_exposed": True}),
+    ],
+)
+def test_trace_only_projection_denies_if_hold_safety_flags_are_promoted(
+    client: TestClient,
+    mutation: Any,
+):
+    projection = _production_library_trace_projection()
+    mutation(projection)
+
+    response = client.post(ROUTE, json=_payload([projection]))
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_bridge_shape(body)
+    assert body["result_status"] == "DENIED"
+    assert body["evidence_items"] == []
+    assert body["hold_reason"] == "trace-only production Library metadata projection violates HOLD policy"
+    assert body["policy_result"]["raw_leak_pass"] is False
+    assert body["policy_result"]["rights_pass"] is False
+
+    rendered = "\n".join(_walk_values(body))
+    assert projection["safe_summary"] not in rendered
+    assert projection["pointer_uri"] not in rendered
 
 
 @pytest.mark.parametrize(
