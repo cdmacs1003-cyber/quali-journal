@@ -321,8 +321,6 @@ def _policy_flags(
         "raw_leak_pass": True,
         "rights_pass": bridge_decision.get("result_status") != RESULT_DENIED,
         "sensitivity_pass": sensitivity not in {"PRIVATE", "RESTRICTED", "SECRET"},
-        "pointer_only_policy": True,
-        "metadata_only": True,
     }
 
 
