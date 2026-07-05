@@ -33,6 +33,7 @@ _SCHEMA_ALLOWED_TOP_LEVEL_FIELDS = _SCHEMA_REQUIRED_TOP_LEVEL_FIELDS | {
     "module_id",
     "binding_id",
     "answer",
+    "safe_short_answer",
     "hold_reason_code",
     "hold_reason",
     "warnings",
@@ -344,9 +345,9 @@ def test_skillup_bridge_full_app_route_direct_db_attempt_denied_without_db_with_
     _assert_no_forbidden_reason_label_tokens(body["hold_reason_code"], body["hold_reason"])
     assert "SOURCE_DENIED_NORMALIZED_TO_ERROR" in body.get("warnings", [])
     assert body["policy"] == {
-        "raw_leak_check_passed": True,
+        "raw_leak_check_passed": False,
         "rights_check_passed": False,
-        "sensitivity_check_passed": False,
+        "sensitivity_check_passed": True,
         "evidence_check_passed": False,
     }
     assert body["raw_text_included"] is False
@@ -458,14 +459,14 @@ def test_skillup_bridge_route_direct_db_attempt_denied_without_db(client: TestCl
     assert body["evidence_required"] is True
     assert body["review_required"] is True
     assert body["evidence"] == []
-    assert body["hold_reason_code"] == "NO_DB_BOUNDARY"
-    assert "no-DB safety boundary" in body["hold_reason"]
+    assert body["hold_reason_code"] == "DENIED_POLICY_BOUNDARY"
+    assert body["hold_reason"] == "forbidden fields or patterns detected"
     _assert_no_forbidden_reason_label_tokens(body["hold_reason_code"], body["hold_reason"])
     assert "SOURCE_DENIED_NORMALIZED_TO_ERROR" in body.get("warnings", [])
     assert body["policy"] == {
-        "raw_leak_check_passed": True,
+        "raw_leak_check_passed": False,
         "rights_check_passed": False,
-        "sensitivity_check_passed": False,
+        "sensitivity_check_passed": True,
         "evidence_check_passed": False,
     }
     assert body["raw_text_included"] is False
