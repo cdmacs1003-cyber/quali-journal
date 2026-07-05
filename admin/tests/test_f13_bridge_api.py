@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import admin.f13_bridge_api as bridge_api
+from admin.f13_library_safe_metadata_sidecar_registry import (
+    create_safe_sidecar_manifest,
+    write_safe_sidecar_manifest,
+)
 from admin.f13_production_library_metadata_bridge_integration import (
     integrate_adapter_records_to_bridge_evidence,
 )
@@ -121,6 +126,70 @@ def _safe_evidence(**overrides: Any) -> dict[str, Any]:
     }
     evidence.update(overrides)
     return evidence
+
+
+def _create_task_scoped_runtime_sidecar(tmp_path: Path) -> Path:
+    db_path = tmp_path / "materialized_safe_metadata_sidecar.sqlite"
+    json_path = tmp_path / "materialized_safe_metadata_sidecar.json"
+    json_path.write_text('{"records":[]}\n', encoding="utf-8")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE bridge_evidence (
+                evidence_id TEXT NOT NULL,
+                bridge_trace_id TEXT NOT NULL,
+                safe_summary TEXT NOT NULL,
+                pointer_uri TEXT NOT NULL,
+                raw_text_policy TEXT NOT NULL,
+                rights_status TEXT NOT NULL,
+                summary_source TEXT NOT NULL,
+                semantic_summary_verified INTEGER NOT NULL,
+                raw_text_exposed INTEGER NOT NULL,
+                production_path_exposed INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO bridge_evidence (
+                evidence_id,
+                bridge_trace_id,
+                safe_summary,
+                pointer_uri,
+                raw_text_policy,
+                rights_status,
+                summary_source,
+                semantic_summary_verified,
+                raw_text_exposed,
+                production_path_exposed
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ev-soldering-safe-summary-v1",
+                "btrace:sidecar-runtime:soldering-safe-summary-v1",
+                "Sidecar runtime soldering safe summary.",
+                "qlib://runtime-sidecar/safe/ev-soldering-safe-summary-v1",
+                "SUMMARY_ONLY",
+                "INTERNAL",
+                "SAFE_SIDECAR_APPROVED_SUMMARY",
+                1,
+                0,
+                0,
+            ),
+        )
+    manifest = create_safe_sidecar_manifest(
+        sidecar_id="sidecar:r348-runtime-test",
+        created_by_task="R9ZNW-348-test",
+        source_task_id="R9ZNW-348-test",
+        source_proofpack_refs=["task-owned-test"],
+        sidecar_sqlite_path=db_path,
+        sidecar_json_path=json_path,
+        record_count=1,
+        accepted_record_count=1,
+        hold_only_record_count=0,
+        rejected_record_count=0,
+    )
+    return write_safe_sidecar_manifest(manifest, tmp_path / "sidecar_manifest.json")
 
 
 def _production_library_metadata_fixture_record(**overrides: Any) -> dict[str, Any]:
@@ -980,6 +1049,72 @@ def test_skillup_route_uses_bridge_seed_without_direct_skillup_file_access(clien
     ).lower()
     for forbidden in ("full_json", "full json", "file://", "h:\\", "c:\\", "secret", "token", "credential"):
         assert forbidden not in answer_surface
+
+
+def test_skillup_route_uses_task_scoped_sidecar_manifest_without_public_path_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    client: TestClient,
+):
+    manifest_path = _create_task_scoped_runtime_sidecar(tmp_path)
+    monkeypatch.setenv("F13_SAFE_METADATA_SIDECAR_MANIFEST", str(manifest_path))
+
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "ui_mode": "test_minimal",
+            "request_payload": {"question": "soldering"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "OK"
+    assert body["answer_status"] == "ANSWERED"
+    assert body["safe_short_answer"] == "Sidecar runtime soldering safe summary."
+    assert body["evidence"][0]["evidence_id"] == "ev-soldering-safe-summary-v1"
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    rendered = "\n".join(_walk_values(body)).lower()
+    for forbidden in (
+        "qlib://",
+        "sidecar_manifest",
+        "materialized_safe_metadata_sidecar",
+        "file://",
+        "h:\\",
+        "c:\\",
+        "secret",
+        "token",
+        "credential",
+    ):
+        assert forbidden not in rendered
+
+
+def test_task_scoped_sidecar_manifest_unknown_query_remains_hold(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    client: TestClient,
+):
+    manifest_path = _create_task_scoped_runtime_sidecar(tmp_path)
+    monkeypatch.setenv("F13_SAFE_METADATA_SIDECAR_MANIFEST", str(manifest_path))
+
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "ui_mode": "test_minimal",
+            "request_payload": {"question": "unmapped training smoke query"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "HOLD"
+    assert body["answer_status"] == "HOLD"
+    assert "Sidecar runtime soldering safe summary." not in "\n".join(_walk_values(body))
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
 
 
 def test_skillup_route_uses_solder_seed_for_question_query(client: TestClient):

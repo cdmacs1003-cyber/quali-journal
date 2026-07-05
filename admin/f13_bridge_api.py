@@ -1,14 +1,17 @@
 """F13 no-DB Bridge API route.
 
 This router exposes the existing in-memory Bridge guard utility over a
-provided-evidence API boundary. It does not query DB, Warehouse, Skillup
-runtime, network, or runtime indexes. The only file-backed retrieval allowed in
-this module is the bounded Bridge-side canonical Library Evidence seed adapter.
+provided-evidence API boundary. It does not query Warehouse, Skillup runtime,
+network, or runtime indexes. The only file-backed retrieval allowed in this
+module is the bounded Bridge-side canonical Library Evidence seed adapter, plus
+an explicit task-scoped safe metadata sidecar manifest when configured for local
+smoke validation.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +20,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
+from admin.f13_library_db_evidence_retrieval import retrieve_bridge_evidence_from_sqlite
+from admin.f13_library_safe_metadata_sidecar_registry import resolve_safe_sidecar_manifest
 from admin.f13_skillup_answer_hold_adapter import adapt_skillup_answer_hold_response
 from admin.f13_runtime_guard import (
     RESULT_DENIED,
@@ -129,6 +134,7 @@ _LIBRARY_FLUX_TERM_REGISTRY_PATH = (
 )
 _LIBRARY_EVIDENCE_SEED_PATTERN = "*/*.json"
 _LIBRARY_EVIDENCE_SEED_POINTER_PREFIX = "qlib://library/evidence_seeds/"
+_TASK_SCOPED_SIDECAR_MANIFEST_ENV = "F13_SAFE_METADATA_SIDECAR_MANIFEST"
 _SEED_REQUIRED_TYPE = "SAFE_SUMMARY_ONLY"
 _SEED_APPROVED_REVIEW_STATUS = "APPROVED_FOR_LIBRARY_EVIDENCE"
 _SEED_APPROVED_STATUS = "APPROVED_WITH_LIMITS"
@@ -1163,6 +1169,111 @@ def _skillup_seed_context(request_payload: Mapping[str, Any], nested_payload: Ma
     return context
 
 
+def _task_scoped_safe_sidecar_manifest_path() -> Optional[Path]:
+    value = (os.environ.get(_TASK_SCOPED_SIDECAR_MANIFEST_ENV) or "").strip()
+    if not value:
+        return None
+    return Path(value)
+
+
+def _evidence_ids_for_query(query_text: object) -> tuple[List[str], Optional[str]]:
+    term_matches = _resolve_query_terms_from_registry(query_text)
+    concept_ids, evidence_ids = _concept_evidence_ids_for_terms(term_matches)
+    if evidence_ids:
+        return evidence_ids, None
+
+    if term_matches and not concept_ids:
+        return [], "matching Library Evidence concept is not approved for Bridge output"
+
+    fallback_items, fallback_reason, fallback_matched = _seed_evidence_items_for_exact_query(query_text)
+    if fallback_items:
+        evidence_id = _safe_label(fallback_items[0].get("evidence_id"), max_length=120)
+        return ([evidence_id] if evidence_id else []), None
+    if fallback_matched:
+        return [], fallback_reason or "matching Library Evidence seed is not approved for Bridge output"
+    return [], "approved safe sidecar evidence was not found for query"
+
+
+def _sidecar_evidence_items_for_query(
+    query_text: object,
+    manifest_path: Path,
+) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    if _normalized_seed_query(query_text) is None:
+        return [], "query is empty"
+
+    evidence_ids, hold_reason = _evidence_ids_for_query(query_text)
+    if not evidence_ids:
+        return [], hold_reason
+
+    resolved = resolve_safe_sidecar_manifest(manifest_path)
+    if resolved.get("result_status") != RESULT_OK or resolved.get("ok") is not True:
+        return [], "safe metadata sidecar manifest requires review"
+
+    bridge_payload = retrieve_bridge_evidence_from_sqlite(
+        resolved.get("sidecar_sqlite_path"),
+        table_name=resolved.get("table_name"),
+        limit=_MAX_RETURN_ITEMS,
+    )
+    if bridge_payload.get("result_status") != RESULT_OK:
+        return [], str(bridge_payload.get("hold_reason") or "safe metadata sidecar evidence requires review")
+
+    available: Dict[str, Dict[str, Any]] = {}
+    for item in bridge_payload.get("evidence_items") or []:
+        if not isinstance(item, dict):
+            continue
+        evidence_id = _safe_label(item.get("evidence_id"), max_length=120)
+        if evidence_id is not None and evidence_id not in available:
+            available[evidence_id] = item
+
+    selected = [available[evidence_id] for evidence_id in evidence_ids if evidence_id in available]
+    if selected:
+        return selected[:1], None
+    return [], "approved safe sidecar evidence was not found for query"
+
+
+def _bridge_sidecar_payload_for_skillup_request(request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    manifest_path = _task_scoped_safe_sidecar_manifest_path()
+    if manifest_path is None:
+        return {}
+
+    if detect_forbidden_fields(request_payload):
+        return _response(
+            RESULT_DENIED,
+            [],
+            "forbidden fields or patterns detected",
+            evidence_required_pass=False,
+            raw_leak_pass=False,
+            rights_pass=False,
+        )
+
+    nested_payload = request_payload.get("request_payload")
+    nested = nested_payload if isinstance(nested_payload, Mapping) else {}
+    query_text = _query_text_from_sources(nested, request_payload)
+    evidence_items, hold_reason = _sidecar_evidence_items_for_query(query_text, manifest_path)
+    if not evidence_items:
+        bridge_payload = _response(
+            RESULT_HOLD,
+            [],
+            hold_reason or "approved safe sidecar evidence was not found for query",
+            evidence_required_pass=False,
+            raw_leak_pass=True,
+            rights_pass=True,
+        )
+        bridge_payload.update(_skillup_seed_context(request_payload, nested))
+        return bridge_payload
+
+    bridge_payload = _response(
+        RESULT_OK,
+        evidence_items,
+        None,
+        evidence_required_pass=True,
+        raw_leak_pass=True,
+        rights_pass=True,
+    )
+    bridge_payload.update(_skillup_seed_context(request_payload, nested))
+    return bridge_payload
+
+
 def _bridge_seed_payload_for_skillup_request(request_payload: Dict[str, Any]) -> Dict[str, Any]:
     if detect_forbidden_fields(request_payload):
         return _response(
@@ -1278,6 +1389,8 @@ def _response(
 def skillup_bridge_answer(payload: SkillupBridgeAnswerRequest) -> Dict[str, Any]:
     request_payload = _model_to_dict(payload)
     bridge_payload = _skillup_bridge_response_payload(request_payload)
+    if not bridge_payload:
+        bridge_payload = _bridge_sidecar_payload_for_skillup_request(request_payload)
     if not bridge_payload:
         bridge_payload = _bridge_seed_payload_for_skillup_request(request_payload)
     if bridge_payload:
