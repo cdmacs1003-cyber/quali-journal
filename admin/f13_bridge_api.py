@@ -832,6 +832,35 @@ def _normalized_seed_query(value: object) -> Optional[str]:
     return " ".join(text.split()).casefold()
 
 
+def _normalized_seed_query_candidates(value: object) -> List[str]:
+    normalized = _normalized_seed_query(value)
+    if normalized is None:
+        return []
+
+    candidates: List[str] = []
+
+    def add(candidate: str) -> None:
+        safe = " ".join(candidate.strip().split()).casefold()
+        if safe and safe not in candidates:
+            candidates.append(safe)
+
+    add(normalized)
+    stripped = normalized.strip(" \t\r\n?.!？！。")
+    add(stripped)
+
+    question_like = stripped != normalized or stripped.endswith(("이란", "란", "인가", "인가요"))
+    if not question_like:
+        return candidates
+
+    for suffix in ("인가요", "인가", "이란", "란"):
+        if stripped.endswith(suffix) and len(stripped) > len(suffix):
+            stem = stripped[: -len(suffix)]
+            add(stem)
+            if stem.endswith("성") and len(stem) > 1:
+                add(stem[:-1])
+    return candidates
+
+
 def _query_text_from_sources(*sources: Mapping[str, Any]) -> Optional[str]:
     for source in sources:
         if not isinstance(source, Mapping):
@@ -879,8 +908,8 @@ def _approved_term_record(term: Mapping[str, Any]) -> bool:
 
 
 def _resolve_query_terms_from_registry(query_text: object) -> List[Dict[str, Any]]:
-    normalized_query = _normalized_seed_query(query_text)
-    if normalized_query is None:
+    normalized_queries = set(_normalized_seed_query_candidates(query_text))
+    if not normalized_queries:
         return []
 
     matches: List[Dict[str, Any]] = []
@@ -895,7 +924,7 @@ def _resolve_query_terms_from_registry(query_text: object) -> List[Dict[str, Any
             if not isinstance(term, Mapping) or not _approved_term_record(term):
                 continue
             normalized_term = _normalized_seed_query(term.get("normalized_term") or term.get("term"))
-            if normalized_term != normalized_query:
+            if normalized_term not in normalized_queries:
                 continue
             concept_id = _safe_concept_id(term.get("concept_id"))
             if concept_id is None:
@@ -1008,8 +1037,8 @@ def _concept_evidence_ids_for_terms(term_matches: List[Dict[str, Any]]) -> tuple
 
 
 def _seed_matches_query(seed: Mapping[str, Any], query_text: object) -> bool:
-    normalized_query = _normalized_seed_query(query_text)
-    if normalized_query is None:
+    normalized_queries = set(_normalized_seed_query_candidates(query_text))
+    if not normalized_queries:
         return False
 
     domains = seed.get("created_for_query_domain")
@@ -1017,7 +1046,7 @@ def _seed_matches_query(seed: Mapping[str, Any], query_text: object) -> bool:
         return False
 
     for domain in domains:
-        if _normalized_seed_query(domain) == normalized_query:
+        if _normalized_seed_query(domain) in normalized_queries:
             return True
     return False
 

@@ -149,7 +149,27 @@ def _create_task_scoped_runtime_sidecar(tmp_path: Path) -> Path:
             )
             """
         )
-        connection.execute(
+        rows = (
+            (
+                "ev-soldering-safe-summary-v1",
+                "btrace:sidecar-runtime:soldering-safe-summary-v1",
+                "Sidecar runtime soldering safe summary.",
+                "qlib://runtime-sidecar/safe/ev-soldering-safe-summary-v1",
+            ),
+            (
+                WETTING_EVIDENCE_ID,
+                "btrace:sidecar-runtime:wetting-safe-summary-v1",
+                "Sidecar runtime wetting safe summary.",
+                "qlib://runtime-sidecar/safe/ev-wetting-safe-summary-v1",
+            ),
+            (
+                FLUX_EVIDENCE_ID,
+                "btrace:sidecar-runtime:flux-safe-summary-v1",
+                "Sidecar runtime flux safe summary.",
+                "qlib://runtime-sidecar/safe/ev-flux-safe-summary-v1",
+            ),
+        )
+        connection.executemany(
             """
             INSERT INTO bridge_evidence (
                 evidence_id,
@@ -164,18 +184,21 @@ def _create_task_scoped_runtime_sidecar(tmp_path: Path) -> Path:
                 production_path_exposed
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                "ev-soldering-safe-summary-v1",
-                "btrace:sidecar-runtime:soldering-safe-summary-v1",
-                "Sidecar runtime soldering safe summary.",
-                "qlib://runtime-sidecar/safe/ev-soldering-safe-summary-v1",
-                "SUMMARY_ONLY",
-                "INTERNAL",
-                "SAFE_SIDECAR_APPROVED_SUMMARY",
-                1,
-                0,
-                0,
-            ),
+            [
+                (
+                    evidence_id,
+                    bridge_trace_id,
+                    safe_summary,
+                    pointer_uri,
+                    "SUMMARY_ONLY",
+                    "INTERNAL",
+                    "SAFE_SIDECAR_APPROVED_SUMMARY",
+                    1,
+                    0,
+                    0,
+                )
+                for evidence_id, bridge_trace_id, safe_summary, pointer_uri in rows
+            ],
         )
     manifest = create_safe_sidecar_manifest(
         sidecar_id="sidecar:r348-runtime-test",
@@ -184,8 +207,8 @@ def _create_task_scoped_runtime_sidecar(tmp_path: Path) -> Path:
         source_proofpack_refs=["task-owned-test"],
         sidecar_sqlite_path=db_path,
         sidecar_json_path=json_path,
-        record_count=1,
-        accepted_record_count=1,
+        record_count=len(rows),
+        accepted_record_count=len(rows),
         hold_only_record_count=0,
         rejected_record_count=0,
     )
@@ -1115,6 +1138,56 @@ def test_task_scoped_sidecar_manifest_unknown_query_remains_hold(
     assert "Sidecar runtime soldering safe summary." not in "\n".join(_walk_values(body))
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
+
+
+@pytest.mark.parametrize(
+    ("question", "evidence_id", "safe_answer"),
+    (
+        ("플럭스란?", FLUX_EVIDENCE_ID, "Sidecar runtime flux safe summary."),
+        ("젖음성이란?", WETTING_EVIDENCE_ID, "Sidecar runtime wetting safe summary."),
+    ),
+)
+def test_task_scoped_sidecar_manifest_korean_question_forms_use_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    client: TestClient,
+    question: str,
+    evidence_id: str,
+    safe_answer: str,
+):
+    manifest_path = _create_task_scoped_runtime_sidecar(tmp_path)
+    monkeypatch.setenv("F13_SAFE_METADATA_SIDECAR_MANIFEST", str(manifest_path))
+
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "ui_mode": "test_minimal",
+            "request_payload": {"question": question},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_status"] == "OK"
+    assert body["answer_status"] == "ANSWERED"
+    assert body["safe_short_answer"] == safe_answer
+    assert body["evidence"][0]["evidence_id"] == evidence_id
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
+    rendered = "\n".join(_walk_values(body)).lower()
+    for forbidden in (
+        "qlib://",
+        "sidecar_manifest",
+        "materialized_safe_metadata_sidecar",
+        "file://",
+        "h:\\",
+        "c:\\",
+        "secret",
+        "token",
+        "credential",
+    ):
+        assert forbidden not in rendered
 
 
 def test_skillup_route_uses_solder_seed_for_question_query(client: TestClient):
