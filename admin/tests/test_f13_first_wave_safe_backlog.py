@@ -3,9 +3,11 @@ from admin.f13_first_wave_safe_backlog import (
     EXPECTED_FIRST_WAVE_ALIAS_COUNT,
     RESULT_HOLD,
     RESULT_READY,
+    SECOND_WAVE_SELECTED_IMPROVEMENT_BACKLOG_IDS,
     SELECTED_BACKLOG_IDS,
     build_first_wave_safe_backlog_packet,
     excluded_candidate_preservation,
+    second_wave_selected_improvement_guidance,
     selected_candidate_mapping,
 )
 
@@ -115,3 +117,36 @@ def test_bl_004_preflight_clarification_does_not_block_selected_implementation()
     assert packet["preflight_clarification"]["status"] == (
         "CARRY_FORWARD_CLARIFICATION_REQUIRED_BEFORE_SCOPE_EXPANSION"
     )
+
+
+def test_second_wave_guidance_makes_evidence_scope_and_hold_wording_explicit():
+    guidance = second_wave_selected_improvement_guidance()
+    packet = build_first_wave_safe_backlog_packet()
+
+    assert tuple(guidance["selected_backlog_ids"]) == SECOND_WAVE_SELECTED_IMPROVEMENT_BACKLOG_IDS
+    assert packet["second_wave_safe_improvements"] == guidance
+    assert guidance["evidence_scope_guidance"]["backlog_id"] == "R421-SW-BL-001"
+    assert guidance["evidence_scope_guidance"]["source_policy"] == "SAFE_SUMMARY_AND_PROOFPACK_ONLY"
+    assert "safe summary evidence" in guidance["evidence_scope_guidance"]["evidence_scope"].lower()
+    assert RESULT_HOLD in guidance["evidence_scope_guidance"]["hold_wording"]
+    assert "boundary assertion is not explicitly false" in guidance["evidence_scope_guidance"]["hold_wording"]
+    assert guidance["implementation_does_not_cover"] == ("R421-SW-BL-003", "R421-SW-BL-004")
+
+
+def test_second_wave_boundary_reminders_are_visible_and_non_authorizing():
+    guidance = second_wave_selected_improvement_guidance()
+    reminders = guidance["boundary_reminders"]["reminders"]
+
+    assert guidance["boundary_reminders"]["backlog_id"] == "R421-SW-BL-002"
+    assert "alias-only local/internal/nonprod scope" in reminders
+    assert "no deploy" in reminders
+    assert "no production DB/root" in reminders
+    assert "no Production Library root" in reminders
+    assert "no raw prompt/body" in reminders
+    assert "no raw paid standard text" in reminders
+    assert "no secret-like content inspection" in reminders
+    assert "no backend/storage creation" in reminders
+    assert "no durable feedback write" in reminders
+    assert "no public URL" in reminders
+    assert "no real participant contact/onboarding" in reminders
+    assert guidance["implementation_limit"] == "LOCAL_NONPROD_IN_MEMORY_GUIDANCE_ONLY"

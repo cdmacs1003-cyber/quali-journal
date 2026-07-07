@@ -12,8 +12,37 @@ EXPECTED_FIRST_WAVE_ALIAS_COUNT = 8
 SELECTED_BACKLOG_IDS = ("R414-BL-001", "R414-BL-002", "R414-BL-003")
 PREFLIGHT_CLARIFICATION_BACKLOG_ID = "R414-BL-004"
 EXCLUDED_BACKLOG_IDS = ("R414-BL-005", "R414-BL-006", "R414-BL-007", "R414-BL-008")
+SECOND_WAVE_SELECTED_IMPROVEMENT_BACKLOG_IDS = ("R421-SW-BL-001", "R421-SW-BL-002")
 
 _DEFAULT_SAFE_SUMMARY = "Safe-summary feedback capture only."
+_SECOND_WAVE_EVIDENCE_SCOPE_GUIDANCE = {
+    "backlog_id": "R421-SW-BL-001",
+    "source_policy": "SAFE_SUMMARY_AND_PROOFPACK_ONLY",
+    "evidence_scope": "Use only safe summary evidence and proofpack pointers.",
+    "hold_wording": (
+        "Return HOLD_FOR_BOUNDARY_REVIEW when evidence scope is incomplete or "
+        "a boundary assertion is not explicitly false."
+    ),
+    "forbidden_fields": (
+        "raw_prompt_body",
+        "raw_paid_standard_text",
+        "secret_like_content",
+        "real_participant_contact",
+    ),
+}
+_SECOND_WAVE_BOUNDARY_REMINDERS = (
+    "alias-only local/internal/nonprod scope",
+    "no deploy",
+    "no production DB/root",
+    "no Production Library root",
+    "no raw prompt/body",
+    "no raw paid standard text",
+    "no secret-like content inspection",
+    "no backend/storage creation",
+    "no durable feedback write",
+    "no public URL",
+    "no real participant contact/onboarding",
+)
 _SELECTED_CANDIDATES = (
     {
         "backlog_id": "R414-BL-001",
@@ -135,6 +164,23 @@ def excluded_candidate_preservation() -> list[dict[str, str]]:
     return [dict(candidate) for candidate in _EXCLUDED_CANDIDATES]
 
 
+def second_wave_selected_improvement_guidance() -> dict[str, Any]:
+    return {
+        "selected_backlog_ids": list(SECOND_WAVE_SELECTED_IMPROVEMENT_BACKLOG_IDS),
+        "evidence_scope_guidance": dict(_SECOND_WAVE_EVIDENCE_SCOPE_GUIDANCE),
+        "boundary_reminders": {
+            "backlog_id": "R421-SW-BL-002",
+            "visibility": "SHOW_BEFORE_FUTURE_ALIAS_OR_FIELD_USE_DECISION",
+            "reminders": list(_SECOND_WAVE_BOUNDARY_REMINDERS),
+        },
+        "implementation_limit": "LOCAL_NONPROD_IN_MEMORY_GUIDANCE_ONLY",
+        "implementation_does_not_cover": (
+            "R421-SW-BL-003",
+            "R421-SW-BL-004",
+        ),
+    }
+
+
 def build_first_wave_safe_backlog_packet(
     safe_feedback_summary: Any = _DEFAULT_SAFE_SUMMARY,
     *,
@@ -200,6 +246,7 @@ def build_first_wave_safe_backlog_packet(
             "backlog_id": "R414-BL-003",
             "checks": boundary_checklist,
         },
+        "second_wave_safe_improvements": second_wave_selected_improvement_guidance(),
         "preflight_clarification": {
             "backlog_id": PREFLIGHT_CLARIFICATION_BACKLOG_ID,
             "status": clarification_status,
@@ -237,7 +284,9 @@ __all__ = [
     "RESULT_HOLD",
     "RESULT_READY",
     "SELECTED_BACKLOG_IDS",
+    "SECOND_WAVE_SELECTED_IMPROVEMENT_BACKLOG_IDS",
     "build_first_wave_safe_backlog_packet",
     "excluded_candidate_preservation",
+    "second_wave_selected_improvement_guidance",
     "selected_candidate_mapping",
 ]
