@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.local/schemas/f13_analytics_consent_record.schema.json",
+  "title": "F13 Analytics Consent Record Contract",
+  "description": "Pure consent-record validation contract. It does not define or prove consent persistence, UI, retention execution, marketing use, or production consent operations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "consent_id",
+    "user_id_hash",
+    "consent_scope",
+    "consent_version",
+    "granted_at",
+    "revoked_at",
+    "retention_policy_id"
+  ],
+  "properties": {
+    "consent_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 160,
+      "pattern": "^CST-[A-Za-z0-9][A-Za-z0-9._-]{0,155}$"
+    },
+    "user_id_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "consent_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["learning_analytics", "marketing_aggregate", "personalized_feedback"],
+      "properties": {
+        "learning_analytics": {"type": "boolean"},
+        "marketing_aggregate": {"type": "boolean"},
+        "personalized_feedback": {"type": "boolean"}
+      }
+    },
+    "consent_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "granted_at": {"type": "string", "format": "date-time"},
+    "revoked_at": {"type": ["string", "null"], "format": "date-time"},
+    "retention_policy_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    }
+  }
+}
