@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.local/schemas/f13_analytics_event.schema.json",
+  "title": "F13 Analytics Event Contract",
+  "description": "Pure in-memory Analytics event contract. It does not define or prove persistence, transport, consent storage, or an Analytics mart.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "event_id",
+    "tenant_id",
+    "organization_id",
+    "cohort_id",
+    "user_id_hash",
+    "event_type",
+    "request_id",
+    "trace_id",
+    "query_hash",
+    "query_summary",
+    "raw_query_stored",
+    "risk_flags",
+    "occurred_at"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "contract_version": {"type": "string", "const": "1.0.0"},
+    "event_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9:._-]+$"},
+    "tenant_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9:._-]+$"},
+    "organization_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9:._-]+$"},
+    "cohort_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9:._-]+$"},
+    "user_id_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "event_type": {
+      "type": "string",
+      "enum": ["question_asked", "answer_rendered", "hold_created", "evidence_viewed", "assessment_viewed"]
+    },
+    "request_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9:._-]+$"},
+    "trace_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9:._-]+$"
+    },
+    "query_hash": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "query_summary": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^\\r\\n\\u0000-\\u001F\\u007F]{1,64}$",
+      "allOf": [
+        {"not": {"pattern": "[Hh][Tt][Tt][Pp][Ss]?://|[Ww][Ww][Ww]\\."}},
+        {"not": {"pattern": "[A-Za-z]:[\\\\/]"}},
+        {"not": {"pattern": "(^|\\s)/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+"}}
+      ],
+      "x-qlib-disallowed-markers": [
+        "api_key",
+        "access_token",
+        "authorization",
+        "credential",
+        "evidence_text",
+        "paid_standard",
+        "password",
+        "raw_evidence",
+        "raw_text",
+        "secret",
+        "standard_text"
+      ]
+    },
+    "raw_query_stored": {"type": "boolean", "const": false},
+    "risk_flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "enum": ["consent_excluded", "evidence_missing", "paid_standard_raw_request", "policy_hold"]}
+    },
+    "occurred_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"event_type": {"enum": ["answer_rendered", "hold_created", "evidence_viewed"]}}, "required": ["event_type"]},
+      "then": {"properties": {"trace_id": {"type": "string", "minLength": 1}}}
+    }
+  ]
+}
