@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.internal/schemas/f13_analytics_improvement_candidate.schema.json",
+  "title": "F13 Analytics Improvement Intake Candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "contract_version", "candidate_id", "candidate_type",
+    "tenant_context", "source_event_id", "source_event_type", "source_request_id",
+    "source_trace_id", "query_hash", "improvement_trigger", "summary_code",
+    "risk_flags", "provenance", "classification", "status", "review_required",
+    "auto_promote", "approved_for_library", "raw_query_stored", "raw_body_stored",
+    "raw_answer_stored", "raw_evidence_text_stored", "idempotency_key", "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "contract_version": {"const": "1.0.0"},
+    "candidate_id": {"type": "string", "pattern": "^candidate:analytics:[0-9a-f]{32}$"},
+    "candidate_type": {"const": "analytics_improvement_candidate"},
+    "tenant_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "organization_id", "cohort_id"],
+      "properties": {
+        "tenant_id": {"$ref": "#/$defs/identifier"},
+        "organization_id": {"$ref": "#/$defs/identifier"},
+        "cohort_id": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "source_event_id": {"$ref": "#/$defs/identifier"},
+    "source_event_type": {"enum": ["answer_rendered", "hold_created"]},
+    "source_request_id": {"$ref": "#/$defs/identifier"},
+    "source_trace_id": {"$ref": "#/$defs/identifier"},
+    "query_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "improvement_trigger": {"enum": ["evidence_hold", "review_needed", "content_gap"]},
+    "summary_code": {
+      "type": "string",
+      "maxLength": 64,
+      "enum": ["analytics_evidence_hold", "analytics_review_needed", "analytics_content_gap"]
+    },
+    "risk_flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["consent_excluded", "evidence_missing", "paid_standard_raw_request", "policy_hold"]}
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_type", "provider_ref", "collection_reason", "rights_status"],
+      "properties": {
+        "provider_type": {"const": "analytics"},
+        "provider_ref": {"$ref": "#/$defs/identifier"},
+        "collection_reason": {"enum": ["evidence_hold", "review_needed", "content_gap"]},
+        "rights_status": {"const": "owned"}
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sensitivity", "visibility", "domain"],
+      "properties": {
+        "sensitivity": {"const": "internal"},
+        "visibility": {"const": "internal_only"},
+        "domain": {"const": "quality"}
+      }
+    },
+    "status": {"const": "captured"},
+    "review_required": {"const": true},
+    "auto_promote": {"const": false},
+    "approved_for_library": {"const": false},
+    "raw_query_stored": {"const": false},
+    "raw_body_stored": {"const": false},
+    "raw_answer_stored": {"const": false},
+    "raw_evidence_text_stored": {"const": false},
+    "idempotency_key": {"type": "string", "pattern": "^idem:analytics:[0-9a-f]{64}$"},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9:._-]+$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"source_event_type": {"const": "answer_rendered"}}},
+      "then": {
+        "properties": {
+          "improvement_trigger": {"const": "review_needed"},
+          "summary_code": {"const": "analytics_review_needed"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"source_event_type": {"const": "hold_created"}}},
+      "then": {"properties": {"improvement_trigger": {"enum": ["evidence_hold", "content_gap"]}}}
+    },
+    {
+      "if": {"properties": {"improvement_trigger": {"const": "evidence_hold"}}},
+      "then": {"properties": {"summary_code": {"const": "analytics_evidence_hold"}}}
+    },
+    {
+      "if": {"properties": {"improvement_trigger": {"const": "content_gap"}}},
+      "then": {"properties": {"summary_code": {"const": "analytics_content_gap"}}}
+    }
+  ]
+}
