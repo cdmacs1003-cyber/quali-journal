@@ -510,19 +510,19 @@
 </div>
 
 <!-- ===== 상단 고정 토큰 바 ===== -->
-<div id="adminTokenBar" data-admin-surface="true" style="position:fixed; right:12px; top:12px; z-index:9999; background:#111; color:#ddd; border:1px solid #444; border-radius:10px; padding:8px 10px; display:flex; gap:8px; align-items:center; font-size:12px;">
-  <span>ADMIN_TOKEN</span>
-  <input id="adminToken" type="password"
-         placeholder="your-admin-token-12345"
-         autocomplete="new-password" autocapitalize="off" spellcheck="false"
+<div id="adminAccessCodeBar" data-admin-surface="true" style="position:fixed; right:12px; top:12px; z-index:9999; background:#111; color:#ddd; border:1px solid #444; border-radius:10px; padding:8px 10px; display:flex; gap:8px; align-items:center; font-size:12px;">
+  <span>ADMIN_ACCESS_CODE</span>
+  <input id="adminAccessCode" type="password"
+         placeholder="your-admin-access code-12345"
+         autocomplete="off" autocapitalize="off" spellcheck="false"
          style="width:220px; padding:6px; border-radius:8px; border:1px solid #555; background:#222; color:#eee;">
-  <button id="btn-token-set"   data-action="token:set"   onclick="saveAdminTokenJJ()" style="padding:6px 10px;">입력</button>
-  <button id="btn-token-clear" data-action="token:clear" onclick="clearAdminTokenJJ()" style="padding:6px 10px;">해제</button>
-  <div id="tokenStatusChip" style="display:flex;align-items:center;gap:6px; padding:6px 10px;border-radius:999px;border:1px solid #333;background:#2b0a0a;">
-    <span id="tokenStatusDot" style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
-    <strong id="tokenStatusText" style="letter-spacing:0.5px;">미인증</strong>
+  <button id="btn-accessCode-set"   data-action="accessCode:set"   onclick="saveAdminTokenJJ()" style="padding:6px 10px;">입력</button>
+  <button id="btn-accessCode-clear" data-action="accessCode:clear" onclick="clearAdminTokenJJ()" style="padding:6px 10px;">해제</button>
+  <div id="accessCodeStatusChip" style="display:flex;align-items:center;gap:6px; padding:6px 10px;border-radius:999px;border:1px solid #333;background:#2b0a0a;">
+    <span id="accessCodeStatusDot" style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
+    <strong id="accessCodeStatusText" style="letter-spacing:0.5px;">미인증</strong>
     <span style="opacity:.6;">|</span>
-    <span style="opacity:.8;">마지막 확인: <span id="tokenStatusLast">-</span></span>
+    <span style="opacity:.8;">마지막 확인: <span id="accessCodeStatusLast">-</span></span>
   </div>
 </div>
 
@@ -666,7 +666,7 @@ function clearAdminTokenJJ(){
   try{
     // 1) 토큰 제거 + 입력창 비우기
     localStorage.removeItem('ADMIN_TOKEN');
-    var ip = document.getElementById('adminToken');
+    var ip = document.getElementById('adminAccessCode');
     if (ip) ip.value = '';
 
     // 2) 배지/버튼 상태 즉시 반영
