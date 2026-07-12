@@ -465,6 +465,39 @@ class LocalNonprodWarehouseReviewLifecycle:
             return {"found": False, "reason_code": "RECORD_NOT_FOUND_OR_NOT_VISIBLE", "item": None}
         return {"found": True, "reason_code": "RECORD_FOUND", "item": self._verified_item(row)}
 
+    def read_review_event_by_approval(
+        self,
+        warehouse_item_id: Any,
+        approval_event_id: Any,
+        *,
+        tenant_id: Any,
+        organization_id: Any,
+    ) -> dict[str, Any]:
+        """Return one scoped Warehouse approval event without exposing storage internals."""
+
+        item_id = _safe_identifier(warehouse_item_id, "INVALID_WAREHOUSE_ITEM_ID")
+        approval_id = _safe_identifier(approval_event_id, "APPROVAL_EVENT_REQUIRED")
+        tenant, organization = _safe_scope(tenant_id, organization_id)
+        row = self.connection.execute(
+            "SELECT payload_json, payload_hash FROM warehouse_review_events "
+            "WHERE warehouse_item_id=? AND approval_event_id=? AND tenant_id=? AND organization_id=? "
+            "AND decision='APPROVE_WAREHOUSE'",
+            (item_id, approval_id, tenant, organization),
+        ).fetchone()
+        if row is None:
+            return {
+                "found": False,
+                "reason_code": "RECORD_NOT_FOUND_OR_NOT_VISIBLE",
+                "review_event": None,
+            }
+        event = json.loads(row["payload_json"])
+        serialized, digest = canonical_payload(event)
+        if serialized != row["payload_json"] or digest != row["payload_hash"]:
+            raise WarehouseLifecycleError("WAREHOUSE_REVIEW_EVENT_INTEGRITY_FAILED")
+        if not validate_review_event(event)["valid"]:
+            raise WarehouseLifecycleError("WAREHOUSE_REVIEW_EVENT_INVALID")
+        return {"found": True, "reason_code": "RECORD_FOUND", "review_event": event}
+
     def list_items(self, *, tenant_id: Any, organization_id: Any) -> dict[str, Any]:
         tenant, organization = _safe_scope(tenant_id, organization_id)
         rows = self.connection.execute(

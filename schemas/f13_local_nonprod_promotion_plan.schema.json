@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.internal/schemas/f13_local_nonprod_promotion_plan.schema.json",
+  "title": "F13 local-nonproduction pointer-only promotion dry-run plan",
+  "type": "object",
+  "required": [
+    "schema_version", "contract_version", "promotion_plan_id", "warehouse_item_id",
+    "warehouse_item_revision", "approval_event_id", "tenant_id", "organization_id", "cohort_id",
+    "source_candidate_id", "source_event_id", "source_request_id", "source_trace_id", "query_hash",
+    "target_library_node_id", "target_doc_kind", "target_canonical_lang", "evidence_pointer",
+    "provenance", "rights_status", "raw_text_policy", "materialization_manifest", "plan_hash",
+    "idempotency_key", "status", "human_approval_required", "actual_promotion_performed",
+    "library_write_performed", "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "contract_version": {"const": "promotion.local_nonproduction.pointer_only.v1"},
+    "promotion_plan_id": {"$ref": "#/$defs/identifier"},
+    "warehouse_item_id": {"$ref": "#/$defs/identifier"},
+    "warehouse_item_revision": {"type": "integer", "minimum": 1},
+    "approval_event_id": {"$ref": "#/$defs/identifier"},
+    "tenant_id": {"$ref": "#/$defs/identifier"},
+    "organization_id": {"$ref": "#/$defs/identifier"},
+    "cohort_id": {"$ref": "#/$defs/identifier"},
+    "source_candidate_id": {"$ref": "#/$defs/identifier"},
+    "source_event_id": {"$ref": "#/$defs/identifier"},
+    "source_request_id": {"$ref": "#/$defs/identifier"},
+    "source_trace_id": {"$ref": "#/$defs/identifier"},
+    "query_hash": {"$ref": "#/$defs/hash"},
+    "target_library_node_id": {"type": "string", "pattern": "^QLIB:ANALYTICS_REF:[0-9a-f]{24}@v1$"},
+    "target_doc_kind": {"const": "REFERENCE"},
+    "target_canonical_lang": {"const": "EN"},
+    "evidence_pointer": {"$ref": "#/$defs/evidence_pointer"},
+    "provenance": {
+      "type": "object",
+      "required": ["provider_type", "provider_ref", "source_event_id", "source_trace_id", "collection_reason"],
+      "properties": {
+        "provider_type": {"const": "analytics"},
+        "provider_ref": {"$ref": "#/$defs/identifier"},
+        "source_event_id": {"$ref": "#/$defs/identifier"},
+        "source_trace_id": {"$ref": "#/$defs/identifier"},
+        "collection_reason": {"$ref": "#/$defs/identifier"}
+      },
+      "additionalProperties": false
+    },
+    "rights_status": {"enum": ["owned", "licensed", "permission_granted", "public_reference", "internal_only"]},
+    "raw_text_policy": {"const": "POINTER_ONLY"},
+    "materialization_manifest": {
+      "type": "object",
+      "required": ["files", "atomic_finalization"],
+      "properties": {
+        "files": {
+          "const": ["promotion_plan.json", "evidence_pointer.json", "provenance.json", "materialization_manifest.json", "README_POINTER_ONLY.md"]
+        },
+        "atomic_finalization": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "plan_hash": {"$ref": "#/$defs/hash"},
+    "idempotency_key": {"type": "string", "pattern": "^idem:promotion:[0-9a-f]{64}$"},
+    "status": {"const": "dry_run_ready"},
+    "human_approval_required": {"const": true},
+    "actual_promotion_performed": {"const": false},
+    "library_write_performed": {"const": false},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9:._@-]{0,199}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "evidence_pointer": {
+      "type": "object",
+      "required": [
+        "evidence_id", "source_doc_id", "source_doc_kind", "source_hash", "source_span_id",
+        "pointer_uri", "rights_status", "raw_text_policy", "evidence_summary_code", "created_at",
+        "created_by", "validation_shape_ids"
+      ],
+      "properties": {
+        "evidence_id": {"$ref": "#/$defs/identifier"},
+        "source_doc_id": {"$ref": "#/$defs/identifier"},
+        "source_doc_kind": {"const": "WAREHOUSE_ITEM"},
+        "source_hash": {"$ref": "#/$defs/hash"},
+        "source_span_id": {"$ref": "#/$defs/identifier"},
+        "pointer_uri": {"type": "string", "pattern": "^pointer://warehouse/[A-Za-z0-9:._@-]+#candidate=[A-Za-z0-9:._@-]+$"},
+        "rights_status": {"enum": ["owned", "licensed", "permission_granted", "public_reference", "internal_only"]},
+        "raw_text_policy": {"const": "POINTER_ONLY"},
+        "evidence_summary_code": {"$ref": "#/$defs/identifier"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "created_by": {"$ref": "#/$defs/identifier"},
+        "validation_shape_ids": {"const": ["SH-F13-EVIDENCE-001"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}
