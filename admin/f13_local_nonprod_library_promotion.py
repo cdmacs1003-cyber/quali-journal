@@ -576,6 +576,24 @@ class LocalNonprodLibraryPromotion:
             return {"found": False, "reason_code": "RECORD_NOT_FOUND_OR_NOT_VISIBLE", "promotion_trace": None}
         return {"found": True, "reason_code": "RECORD_FOUND", "promotion_trace": self._row_payload(row, "PROMOTION_TRACE_INTEGRITY_FAILED")}
 
+    def read_evidence_pointer(self, evidence_id: Any, *, tenant_id: Any, organization_id: Any) -> dict[str, Any]:
+        """Return one active pointer through the same tenant/org fail-closed boundary."""
+
+        pointer_id = _identifier(evidence_id, "EVIDENCE_ID_REQUIRED")
+        tenant, organization = _scope(tenant_id, organization_id)
+        row = self.connection.execute(
+            "SELECT payload_json,payload_hash FROM evidence_pointers "
+            "WHERE evidence_id=? AND tenant_id=? AND organization_id=? AND active=1",
+            (pointer_id, tenant, organization),
+        ).fetchone()
+        if row is None:
+            return {"found": False, "reason_code": "RECORD_NOT_FOUND_OR_NOT_VISIBLE", "evidence_pointer": None}
+        return {
+            "found": True,
+            "reason_code": "RECORD_FOUND",
+            "evidence_pointer": self._row_payload(row, "EVIDENCE_POINTER_INTEGRITY_FAILED"),
+        }
+
     def object_counts(self) -> dict[str, int]:
         tables = ("library_records", "evidence_pointers", "promotion_traces", "approval_records", "rollback_audits")
         return {table: int(self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for table in tables}

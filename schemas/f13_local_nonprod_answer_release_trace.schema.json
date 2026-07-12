@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qlib:f13:local-nonproduction-answer-release-trace:v1",
+  "title": "Pointer-only local answer release trace",
+  "type": "object",
+  "required": [
+    "schema_version", "contract_version", "answer_release_id", "tenant_id", "organization_id",
+    "cohort_id", "request_id", "library_record_id", "node_id", "evidence_id", "promotion_trace_id",
+    "bridge_trace_id", "answer_hash", "answer_length", "status", "invalidation_reason",
+    "created_at", "invalidated_at", "revision", "idempotency_key"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "contract_version": {"const": "answer.release.local_nonproduction.pointer_only.v1"},
+    "answer_release_id": {"type": "string", "pattern": "^answer:release:[0-9a-f]{32}$"},
+    "tenant_id": {"$ref": "#/$defs/id"},
+    "organization_id": {"$ref": "#/$defs/id"},
+    "cohort_id": {"$ref": "#/$defs/id"},
+    "request_id": {"$ref": "#/$defs/id"},
+    "library_record_id": {"$ref": "#/$defs/id"},
+    "node_id": {"$ref": "#/$defs/id"},
+    "evidence_id": {"$ref": "#/$defs/id"},
+    "promotion_trace_id": {"$ref": "#/$defs/id"},
+    "bridge_trace_id": {"$ref": "#/$defs/id"},
+    "answer_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "answer_length": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["ACTIVE", "INVALIDATED"]},
+    "invalidation_reason": {"type": ["string", "null"], "enum": [null, "SOURCE_PROMOTION_ROLLED_BACK"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "invalidated_at": {"type": ["string", "null"], "format": "date-time"},
+    "revision": {"type": "integer", "minimum": 1},
+    "idempotency_key": {"$ref": "#/$defs/id"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "ACTIVE"}}},
+      "then": {"properties": {"invalidation_reason": {"const": null}, "invalidated_at": {"const": null}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "INVALIDATED"}}},
+      "then": {"properties": {"invalidation_reason": {"const": "SOURCE_PROMOTION_ROLLED_BACK"}, "invalidated_at": {"type": "string", "format": "date-time"}}}
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9:._@-]{0,199}$"}
+  }
+}
