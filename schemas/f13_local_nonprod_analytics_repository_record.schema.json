@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.internal/schemas/f13_local_nonprod_analytics_repository_record.schema.json",
+  "title": "F13 Local Nonproduction Analytics Repository Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "repository_schema_version", "record_id", "record_type", "tenant_id",
+    "organization_id", "cohort_id", "subject_hash", "source_event_id",
+    "domain_object_id", "idempotency_key", "payload_hash", "payload_json",
+    "retention_policy_id", "retention_until", "created_at", "updated_at",
+    "deleted_at", "deletion_reason", "revision"
+  ],
+  "properties": {
+    "repository_schema_version": {"const": 1},
+    "record_id": {"$ref": "#/$defs/identifier"},
+    "record_type": {"enum": ["ANALYTICS_EVENT", "IMPROVEMENT_CANDIDATE"]},
+    "tenant_id": {"$ref": "#/$defs/identifier"},
+    "organization_id": {"$ref": "#/$defs/identifier"},
+    "cohort_id": {"$ref": "#/$defs/identifier"},
+    "subject_hash": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/hash"}]},
+    "source_event_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/identifier"}]},
+    "domain_object_id": {"$ref": "#/$defs/identifier"},
+    "idempotency_key": {
+      "type": "string",
+      "pattern": "^idem:(analytics|candidate):[0-9a-f]{64}$"
+    },
+    "payload_hash": {"$ref": "#/$defs/hash"},
+    "payload_json": {"type": "string", "minLength": 2},
+    "retention_policy_id": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[A-Za-z0-9:._-]+$"},
+    "retention_until": {"type": "string", "format": "date-time"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "deleted_at": {"type": "null"},
+    "deletion_reason": {"type": "null"},
+    "revision": {"type": "integer", "minimum": 1}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 220, "pattern": "^[A-Za-z0-9:._-]+$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"record_type": {"const": "ANALYTICS_EVENT"}}, "required": ["record_type"]},
+      "then": {
+        "properties": {
+          "subject_hash": {"$ref": "#/$defs/hash"},
+          "source_event_id": {"type": "null"},
+          "idempotency_key": {"pattern": "^idem:analytics:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"record_type": {"const": "IMPROVEMENT_CANDIDATE"}}, "required": ["record_type"]},
+      "then": {
+        "properties": {
+          "subject_hash": {"type": "null"},
+          "source_event_id": {"$ref": "#/$defs/identifier"},
+          "idempotency_key": {"pattern": "^idem:candidate:[0-9a-f]{64}$"}
+        }
+      }
+    }
+  ]
+}
