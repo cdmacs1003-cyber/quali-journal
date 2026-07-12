@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qlib:f13:local-nonproduction-library-promotion-record:v1",
+  "title": "Local nonproduction pointer-only Library Reference record",
+  "type": "object",
+  "required": [
+    "schema_version", "contract_version", "library_record_id", "node_id", "doc_kind",
+    "canonical_lang", "source_lang", "tenant_id", "organization_id", "cohort_id",
+    "title_code", "purpose_code", "scope_code", "source_candidate_id", "source_event_id",
+    "source_request_id", "source_trace_id", "query_hash", "warehouse_item_id",
+    "warehouse_item_revision", "promotion_plan_id", "promotion_plan_hash", "approval_record_id",
+    "evidence_id", "promotion_trace_id", "rights_status", "raw_text_policy", "provenance",
+    "status", "revision", "created_at", "updated_at"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "contract_version": {"const": "library.promotion.local_nonproduction.pointer_only.v1"},
+    "library_record_id": {"type": "string", "pattern": "^library:record:[0-9a-f]{32}$"},
+    "node_id": {"type": "string", "pattern": "^QLIB:ANALYTICS_REF:[0-9a-f]{24}@v1$"},
+    "doc_kind": {"const": "REFERENCE"},
+    "canonical_lang": {"const": "EN"},
+    "source_lang": {"const": "EN"},
+    "tenant_id": {"$ref": "#/$defs/id"},
+    "organization_id": {"$ref": "#/$defs/id"},
+    "cohort_id": {"$ref": "#/$defs/id"},
+    "title_code": {"const": "ANALYTICS_IMPROVEMENT_REFERENCE"},
+    "purpose_code": {"const": "CURATED_IMPROVEMENT_POINTER"},
+    "scope_code": {"const": "LOCAL_NONPRODUCTION"},
+    "source_candidate_id": {"$ref": "#/$defs/id"},
+    "source_event_id": {"$ref": "#/$defs/id"},
+    "source_request_id": {"$ref": "#/$defs/id"},
+    "source_trace_id": {"$ref": "#/$defs/id"},
+    "query_hash": {"$ref": "#/$defs/hash"},
+    "warehouse_item_id": {"$ref": "#/$defs/id"},
+    "warehouse_item_revision": {"type": "integer", "minimum": 1},
+    "promotion_plan_id": {"$ref": "#/$defs/id"},
+    "promotion_plan_hash": {"$ref": "#/$defs/hash"},
+    "approval_record_id": {"$ref": "#/$defs/id"},
+    "evidence_id": {"$ref": "#/$defs/id"},
+    "promotion_trace_id": {"$ref": "#/$defs/id"},
+    "rights_status": {"enum": ["owned", "licensed", "permission_granted", "public_reference", "internal_only"]},
+    "raw_text_policy": {"const": "POINTER_ONLY"},
+    "provenance": {
+      "type": "object",
+      "required": ["provider_type", "provider_ref", "source_event_id", "source_trace_id", "collection_reason"],
+      "properties": {
+        "provider_type": {"const": "analytics"},
+        "provider_ref": {"$ref": "#/$defs/id"},
+        "source_event_id": {"$ref": "#/$defs/id"},
+        "source_trace_id": {"$ref": "#/$defs/id"},
+        "collection_reason": {"$ref": "#/$defs/id"}
+      },
+      "additionalProperties": false
+    },
+    "status": {"enum": ["ACTIVE", "ROLLED_BACK"]},
+    "revision": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9:._@-]{0,199}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
