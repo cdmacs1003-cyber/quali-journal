@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qlib.internal/schemas/f13_local_nonprod_warehouse_review_record.schema.json",
+  "title": "F13 local-nonproduction Warehouse intake and review records",
+  "oneOf": [
+    {"$ref": "#/$defs/warehouse_item"},
+    {"$ref": "#/$defs/review_event"}
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]{0,159}$"
+    },
+    "idempotency": {
+      "type": "string",
+      "pattern": "^idem:warehouse:[0-9a-f]{64}$"
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["provider_type", "provider_ref", "source_event_id", "source_trace_id", "collection_reason"],
+      "properties": {
+        "provider_type": {"const": "analytics"},
+        "provider_ref": {"$ref": "#/$defs/identifier"},
+        "source_event_id": {"$ref": "#/$defs/identifier"},
+        "source_trace_id": {"$ref": "#/$defs/identifier"},
+        "collection_reason": {"$ref": "#/$defs/identifier"}
+      },
+      "additionalProperties": false
+    },
+    "warehouse_item": {
+      "type": "object",
+      "required": [
+        "schema_version", "contract_version", "warehouse_item_id", "source_candidate_id",
+        "source_candidate_record_id", "tenant_id", "organization_id", "cohort_id",
+        "source_event_id", "source_request_id", "source_trace_id", "query_hash", "item_type",
+        "provenance", "rights_status", "sensitivity", "classification", "current_status",
+        "previous_status", "revision", "review_required", "approved_for_library", "auto_promote",
+        "idempotency_key", "created_at", "updated_at"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "contract_version": {"const": "warehouse.local_nonproduction.review.v1"},
+        "warehouse_item_id": {"$ref": "#/$defs/identifier"},
+        "source_candidate_id": {"$ref": "#/$defs/identifier"},
+        "source_candidate_record_id": {"$ref": "#/$defs/identifier"},
+        "tenant_id": {"$ref": "#/$defs/identifier"},
+        "organization_id": {"$ref": "#/$defs/identifier"},
+        "cohort_id": {"$ref": "#/$defs/identifier"},
+        "source_event_id": {"$ref": "#/$defs/identifier"},
+        "source_request_id": {"$ref": "#/$defs/identifier"},
+        "source_trace_id": {"$ref": "#/$defs/identifier"},
+        "query_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "item_type": {"const": "analytics_improvement_candidate"},
+        "provenance": {"$ref": "#/$defs/provenance"},
+        "rights_status": {"enum": ["owned", "licensed", "permission_granted", "public_reference", "internal_only", "no_export", "unknown"]},
+        "sensitivity": {"enum": ["public", "internal", "restricted", "private", "secret"]},
+        "classification": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"},
+          "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 80}
+        },
+        "current_status": {"$ref": "#/$defs/status"},
+        "previous_status": {"oneOf": [{"$ref": "#/$defs/status"}, {"type": "null"}]},
+        "revision": {"type": "integer", "minimum": 1},
+        "review_required": {"const": true},
+        "approved_for_library": {"const": false},
+        "auto_promote": {"const": false},
+        "idempotency_key": {"$ref": "#/$defs/idempotency"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "enum": [
+        "captured", "classified", "source_verified", "review_ready", "reviewed",
+        "approved_for_warehouse", "hold_source_missing", "hold_sensitive",
+        "hold_copyright", "hold_review_needed", "rejected", "quarantined"
+      ]
+    },
+    "review_event": {
+      "type": "object",
+      "required": [
+        "review_event_id", "warehouse_item_id", "reviewer_id", "reviewer_role", "decision",
+        "decision_reason_code", "previous_status", "next_status", "expected_revision",
+        "new_revision", "approval_event_id", "reviewed_at", "idempotency_key"
+      ],
+      "properties": {
+        "review_event_id": {"$ref": "#/$defs/identifier"},
+        "warehouse_item_id": {"$ref": "#/$defs/identifier"},
+        "reviewer_id": {"$ref": "#/$defs/identifier"},
+        "reviewer_role": {"enum": ["CURATOR", "DOMAIN_EXPERT", "RIGHTS_REVIEWER", "OWNER"]},
+        "decision": {"enum": ["APPROVE_WAREHOUSE", "REQUEST_MORE_EVIDENCE", "REQUEST_RIGHTS_REVIEW", "REQUEST_DOMAIN_REVIEW", "REJECT", "QUARANTINE"]},
+        "decision_reason_code": {"$ref": "#/$defs/identifier"},
+        "previous_status": {"$ref": "#/$defs/status"},
+        "next_status": {"$ref": "#/$defs/status"},
+        "expected_revision": {"type": "integer", "minimum": 1},
+        "new_revision": {"type": "integer", "minimum": 2},
+        "approval_event_id": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]},
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "idempotency_key": {"$ref": "#/$defs/idempotency"}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {"properties": {"decision": {"const": "APPROVE_WAREHOUSE"}}, "required": ["decision"]},
+          "then": {"properties": {"approval_event_id": {"$ref": "#/$defs/identifier"}}},
+          "else": {"properties": {"approval_event_id": {"type": "null"}}}
+        }
+      ]
+    }
+  }
+}
