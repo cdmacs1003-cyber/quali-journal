@@ -33,6 +33,32 @@ FLUX_EVIDENCE_ID = "ev-flux-safe-summary-v1"
 FLUX_SEED_PATH = REPO_ROOT / "data" / "library" / "evidence_seeds" / "flux" / "ev-flux-safe-summary-v1.json"
 FLUX_ONTOLOGY_PATH = REPO_ROOT / "data" / "library" / "ontology" / "flux_domain_concepts.v1.json"
 FLUX_TERM_REGISTRY_PATH = REPO_ROOT / "data" / "library" / "semantic_terms" / "flux_term_registry.v1.json"
+SOLDERING_FIELD_USE_SAFE_ANSWER = (
+    "솔더링은 용융된 솔더를 이용해 접합부를 전기적·기계적으로 연결하는 공정입니다. "
+    "재료와 온도, 시간 등 공정 조건을 관리해 안정적인 접합을 형성해야 합니다."
+)
+WETTING_FIELD_USE_SAFE_ANSWER = (
+    "젖음성은 용융 솔더가 접합 표면에 고르게 퍼지고 밀착되는 성질입니다. "
+    "표면 상태, 온도, 플럭스 작용 같은 공정 조건이 젖음 결과에 영향을 줍니다."
+)
+FLUX_FIELD_USE_SAFE_ANSWER = (
+    "플럭스는 접합면의 산화물을 제거하거나 흐트러뜨리고, 가열 중 재산화를 줄여 "
+    "솔더가 표면에 잘 젖고 퍼지도록 돕습니다. 잔류물 처리는 플럭스의 화학 조성, "
+    "공정 조건, 제품 요구사항에 따라 결정해야 합니다."
+)
+FIELD_USE_FORBIDDEN_VISIBLE_TERMS = (
+    "sidecar",
+    "runtime",
+    "fixture",
+    "placeholder",
+    "safe summary",
+    "stub",
+    "mock",
+    "test data",
+    "evidence id",
+    "promotion trace",
+    "internal path",
+)
 ALLOWED_STATUSES = {"OK", "HOLD", "DENIED"}
 FORBIDDEN_KEYS = {
     "raw_text_ref",
@@ -166,19 +192,19 @@ def _create_task_scoped_runtime_sidecar(tmp_path: Path) -> Path:
             (
                 "ev-soldering-safe-summary-v1",
                 "btrace:sidecar-runtime:soldering-safe-summary-v1",
-                "Sidecar runtime soldering safe summary.",
+                SOLDERING_FIELD_USE_SAFE_ANSWER,
                 "qlib://runtime-sidecar/safe/ev-soldering-safe-summary-v1",
             ),
             (
                 WETTING_EVIDENCE_ID,
                 "btrace:sidecar-runtime:wetting-safe-summary-v1",
-                "Sidecar runtime wetting safe summary.",
+                WETTING_FIELD_USE_SAFE_ANSWER,
                 "qlib://runtime-sidecar/safe/ev-wetting-safe-summary-v1",
             ),
             (
                 FLUX_EVIDENCE_ID,
                 "btrace:sidecar-runtime:flux-safe-summary-v1",
-                "Sidecar runtime flux safe summary.",
+                FLUX_FIELD_USE_SAFE_ANSWER,
                 "qlib://runtime-sidecar/safe/ev-flux-safe-summary-v1",
             ),
         )
@@ -1108,7 +1134,7 @@ def test_skillup_route_uses_task_scoped_sidecar_manifest_without_public_path_exp
     body = response.json()
     assert body["result_status"] == "OK"
     assert body["answer_status"] == "ANSWERED"
-    assert body["safe_short_answer"] == "Sidecar runtime soldering safe summary."
+    assert body["safe_short_answer"] == SOLDERING_FIELD_USE_SAFE_ANSWER
     assert body["evidence"][0]["evidence_id"] == "ev-soldering-safe-summary-v1"
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
@@ -1148,7 +1174,7 @@ def test_task_scoped_sidecar_manifest_unknown_query_remains_hold(
     body = response.json()
     assert body["result_status"] == "HOLD"
     assert body["answer_status"] == "HOLD"
-    assert "Sidecar runtime soldering safe summary." not in "\n".join(_walk_values(body))
+    assert SOLDERING_FIELD_USE_SAFE_ANSWER not in "\n".join(_walk_values(body))
     assert body["raw_text_included"] is False
     assert body["internal_path_included"] is False
 
@@ -1156,8 +1182,8 @@ def test_task_scoped_sidecar_manifest_unknown_query_remains_hold(
 @pytest.mark.parametrize(
     ("question", "evidence_id", "safe_answer"),
     (
-        ("플럭스란?", FLUX_EVIDENCE_ID, "Sidecar runtime flux safe summary."),
-        ("젖음성이란?", WETTING_EVIDENCE_ID, "Sidecar runtime wetting safe summary."),
+        ("플럭스란?", FLUX_EVIDENCE_ID, FLUX_FIELD_USE_SAFE_ANSWER),
+        ("젖음성이란?", WETTING_EVIDENCE_ID, WETTING_FIELD_USE_SAFE_ANSWER),
     ),
 )
 def test_task_scoped_sidecar_manifest_korean_question_forms_use_sidecar(
@@ -1201,6 +1227,56 @@ def test_task_scoped_sidecar_manifest_korean_question_forms_use_sidecar(
         "credential",
     ):
         assert forbidden not in rendered
+
+
+def test_flux_field_use_answer_meets_bounded_content_quality_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    client: TestClient,
+):
+    manifest_path = _create_task_scoped_runtime_sidecar(tmp_path)
+    monkeypatch.setenv("F13_SAFE_METADATA_SIDECAR_MANIFEST", str(manifest_path))
+
+    response = client.post(
+        SKILLUP_ROUTE,
+        json={
+            "requester_module": "Skillup",
+            "ui_mode": "test_minimal",
+            "request_payload": {"question": "플럭스란?"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    answer = body["safe_short_answer"]
+    answer_present = bool(answer)
+    evidence_present = bool(body.get("evidence"))
+    lowered = answer.casefold()
+    sentence_count = sum(answer.count(mark) for mark in (".", "!", "?"))
+    concept_coverage = {
+        "oxide_control": "산화물" in answer and any(term in answer for term in ("제거", "흐트러", "제어")),
+        "reoxidation_limit": "재산화" in answer and any(term in answer for term in ("줄", "억제", "방지")),
+        "wetting_and_spreading": "젖" in answer and "퍼" in answer,
+        "residue_dependency": all(term in answer for term in ("잔류물", "화학", "공정", "제품 요구")),
+    }
+
+    assert body["result_status"] == "OK"
+    assert body["answer_status"] == "ANSWERED"
+    assert body["safe_short_answer"] == body["answer"]
+    assert answer_present is True
+    assert evidence_present is True
+    assert len(body["evidence"]) == 1
+    assert any("가" <= char <= "힣" for char in answer)
+    assert 2 <= sentence_count <= 4
+    assert concept_coverage == {
+        "oxide_control": True,
+        "reoxidation_limit": True,
+        "wetting_and_spreading": True,
+        "residue_dependency": True,
+    }
+    assert all(term not in lowered for term in FIELD_USE_FORBIDDEN_VISIBLE_TERMS)
+    assert body["raw_text_included"] is False
+    assert body["internal_path_included"] is False
 
 
 def test_skillup_route_uses_solder_seed_for_question_query(client: TestClient):
