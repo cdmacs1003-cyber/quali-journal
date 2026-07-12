@@ -96,6 +96,19 @@ BETA_MINIMAL_FEEDBACK_MAPPINGS = (
     ('data-beta-feedback="wrong"', 'wrong: "수정 필요"', "수정 필요"),
     ('data-beta-feedback="needs_review"', 'needs_review: "근거 확인 필요"', "근거 확인 필요"),
 )
+BETA_MINIMAL_SAFE_EVENT_CONTRACT = (
+    'data-state="IDLE">대기',
+    'LOADING: "확인 중"',
+    'question.addEventListener("keydown"',
+    'typeof form.requestSubmit === "function"',
+    'origin_event_id:activeCorrelationId',
+    'new CustomEvent("quali:skillup-safe-event"',
+    'event_type:eventType',
+    'endpoint_path_category:"F13_SKILLUP_BRIDGE_ANSWER"',
+    'http_status_category:statusCategory(code)',
+    'hold_reason_code:answerStatus === "HOLD" ? "EVIDENCE_REQUIRED_OR_POLICY_HOLD" : "NONE"',
+    'emitSafeEvent("feedback_control", {feedback_control_value:feedbackValue})',
+)
 
 
 @pytest.fixture
@@ -1260,6 +1273,32 @@ def test_skillup_beta_minimal_source_and_dist_sync_guard():
             assert data_attr in html, f"{data_attr!r} missing from {relative_path}"
             assert script_mapping in html, f"{script_mapping!r} missing from {relative_path}"
             assert visible_label in html, f"{visible_label!r} missing from {relative_path}"
+
+
+def test_skillup_beta_minimal_enter_submit_and_safe_event_contract():
+    html_by_path = {
+        path.relative_to(REPO_ROOT).as_posix(): path.read_text(encoding="utf-8")
+        for path in BETA_MINIMAL_HTML_PATHS
+    }
+
+    for relative_path, html in html_by_path.items():
+        for required in BETA_MINIMAL_SAFE_EVENT_CONTRACT:
+            assert required in html, f"{required!r} missing from {relative_path}"
+        assert 'data-state="HOLD">보류</span>' not in html
+        assert 'if (answerStatus === "ANSWERED" && resultStatus === "OK" && shortAnswer)' in html
+        safe_event_source = html.split("function emitSafeEvent", 1)[1].split(
+            "function summarize", 1
+        )[0]
+        for forbidden in (
+            "question",
+            "safe_short_answer",
+            "raw_text",
+            "raw_answer",
+            "raw_query",
+            "cookie",
+            "authorization",
+        ):
+            assert forbidden not in safe_event_source.lower()
 
 
 def test_bridge_semantic_adapter_does_not_expose_raw_json_or_paths(client: TestClient):

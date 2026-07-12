@@ -309,7 +309,7 @@
 
     <section class="q-beta-panel" aria-labelledby="beta-result-title">
       <h2 id="beta-result-title">답변 상태</h2>
-      <span id="beta-minimal-status" class="q-beta-status" data-state="HOLD">보류</span>
+      <span id="beta-minimal-status" class="q-beta-status" data-state="IDLE">대기</span>
       <div id="beta-minimal-result" class="q-beta-result" role="status" aria-live="polite">질문을 보내면 답변 또는 보류 상태를 확인합니다.</div>
       <div class="q-beta-actions" role="group" aria-label="피드백">
         <button type="button" data-beta-feedback="useful">도움 됨</button>
@@ -2116,6 +2116,7 @@ window.onerror = function(message, source, lineno, colno, error) {
   var responseClass = document.getElementById("beta-response-class");
   var bodyDisplay = document.getElementById("beta-body-display");
   var feedback = document.getElementById("beta-minimal-feedback");
+  var activeCorrelationId = null;
   var diagnosticsVisible = !(window.IS_BETA_MINIMAL_USER_VIEW && window.IS_BETA_MINIMAL_USER_VIEW());
   var SAFE_ANSWER_FIELDS = [
     "safe_short_answer",
@@ -2158,8 +2159,10 @@ window.onerror = function(message, source, lineno, colno, error) {
     setText(node, value);
   }
   function setState(value){
-    var safe = ["ANSWERED", "HOLD", "REDACTED", "INVALIDATED"].indexOf(value) >= 0 ? value : "HOLD";
+    var safe = ["IDLE", "LOADING", "ANSWERED", "HOLD", "REDACTED", "INVALIDATED"].indexOf(value) >= 0 ? value : "HOLD";
     var statusLabels = {
+      IDLE: "대기",
+      LOADING: "확인 중",
       ANSWERED: "답변됨",
       HOLD: "보류",
       REDACTED: "보류",
@@ -2210,7 +2213,7 @@ window.onerror = function(message, source, lineno, colno, error) {
   }
   function renderAnswerPanel(data, answerStatus, resultStatus){
     var shortAnswer = safeShortAnswer(data);
-    if (shortAnswer) return "답변\n" + shortAnswer;
+    if (answerStatus === "ANSWERED" && resultStatus === "OK" && shortAnswer) return "답변\n" + shortAnswer;
     if (answerStatus === "ANSWERED" || resultStatus === "OK") {
       return "검토 필요\n현재 화면에 보여줄 수 있는 승인된 짧은 답변이 없습니다.";
     }
@@ -2224,31 +2227,74 @@ window.onerror = function(message, source, lineno, colno, error) {
       return {kind:"response_non_json_sanitized", data:null};
     }
   }
-  function summarize(data, code, kind){
+  function newCorrelationId(){
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return "skillup-ui:" + window.crypto.randomUUID();
+    }
+    return "skillup-ui:" + Date.now().toString(36) + ":" + Math.random().toString(36).slice(2, 14);
+  }
+  function emitSafeEvent(eventType, detail){
+    var allowedTypes = ["request_submitted", "request_result", "feedback_control"];
+    if (allowedTypes.indexOf(eventType) < 0) return;
+    var payload = Object.assign({
+      event_type:eventType,
+      correlation_id:activeCorrelationId,
+      endpoint_path_category:"F13_SKILLUP_BRIDGE_ANSWER",
+      timestamp:new Date().toISOString()
+    }, detail || {});
+    window.dispatchEvent(new CustomEvent("quali:skillup-safe-event", {detail:payload}));
+  }
+  function summarize(data, code, kind, correlationId){
     var answerStatus = safeAnswerStatus(data);
     var resultStatus = safeResultStatus(data);
+    activeCorrelationId = correlationId;
     setState(answerStatus);
     setText(result, renderAnswerPanel(data, answerStatus, resultStatus));
     setDiagnosticText(transport, "transport_ok");
     setDiagnosticText(responseClass, kind);
     setDiagnosticText(bodyDisplay, "숨김 처리됨");
+    var safeAnswer = answerStatus === "ANSWERED" && resultStatus === "OK" ? safeShortAnswer(data) : "";
+    var evidenceItems = data && Array.isArray(data.evidence) ? data.evidence : [];
+    emitSafeEvent("request_result", {
+      http_status_category:statusCategory(code),
+      result_status:resultStatus,
+      answer_status:answerStatus,
+      answer_present:!!safeAnswer,
+      answer_length:safeAnswer.length,
+      evidence_present:evidenceItems.length > 0,
+      evidence_count:evidenceItems.length,
+      hold_reason_code:answerStatus === "HOLD" ? "EVIDENCE_REQUIRED_OR_POLICY_HOLD" : "NONE"
+    });
   }
-  function fail(category){
+  function fail(category, correlationId){
+    activeCorrelationId = correlationId || activeCorrelationId;
     setState("HOLD");
     setText(result, "보류\n이 질문은 아직 승인된 근거가 없어 보류합니다. 근거가 준비되면 답변할 수 있습니다.");
     setDiagnosticText(transport, category);
     setDiagnosticText(responseClass, "response_unknown_or_unparsed");
     setDiagnosticText(bodyDisplay, "숨김 처리됨");
+    emitSafeEvent("request_result", {
+      http_status_category:category,
+      result_status:"HOLD",
+      answer_status:"HOLD",
+      answer_present:false,
+      answer_length:0,
+      evidence_present:false,
+      evidence_count:0,
+      hold_reason_code:"TRANSPORT_OR_INPUT_HOLD"
+    });
   }
 
   form.addEventListener("submit", function(event){
     event.preventDefault();
     var text = (question && question.value ? question.value : "").trim();
     if (!text) {
-      fail("question_required");
+      fail("question_required", null);
       return;
     }
-    setState("HOLD");
+    activeCorrelationId = newCorrelationId();
+    emitSafeEvent("request_submitted", {request_length:text.slice(0, 800).length});
+    setState("LOADING");
     setText(result, "질문 상태를 확인하는 중입니다...");
     var xhr = new XMLHttpRequest();
     xhr.open("POST", ENDPOINT, true);
@@ -2257,15 +2303,23 @@ window.onerror = function(message, source, lineno, colno, error) {
     xhr.setRequestHeader("Accept", "application/json");
     xhr.onload = function(){
       var classified = classifyBody(xhr.responseText || "");
-      summarize(classified.data, xhr.status, classified.kind);
+      summarize(classified.data, xhr.status, classified.kind, activeCorrelationId);
     };
-    xhr.onerror = function(){ fail("transport_error"); };
-    xhr.ontimeout = function(){ fail("timeout_error"); };
+    xhr.onerror = function(){ fail("transport_error", activeCorrelationId); };
+    xhr.ontimeout = function(){ fail("timeout_error", activeCorrelationId); };
     xhr.send(JSON.stringify({
       requester_module:"Skillup",
       ui_mode:UI_MODE,
+      origin_event_id:activeCorrelationId,
       request_payload:{question:text.slice(0, 800)}
     }));
+  });
+
+  if (question) question.addEventListener("keydown", function(event){
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    if (typeof form.requestSubmit === "function") form.requestSubmit();
+    else form.dispatchEvent(new Event("submit", {bubbles:true, cancelable:true}));
   });
 
   document.querySelectorAll("[data-beta-feedback]").forEach(function(button){
@@ -2278,6 +2332,7 @@ window.onerror = function(message, source, lineno, colno, error) {
       };
       var feedbackValue = button.getAttribute("data-beta-feedback");
       setText(feedback, "의견 기록: " + (feedbackLabels[feedbackValue] || feedbackValue));
+      emitSafeEvent("feedback_control", {feedback_control_value:feedbackValue});
     });
   });
 })();
@@ -2285,4 +2340,3 @@ window.onerror = function(message, source, lineno, colno, error) {
 
 </body>
 </html>
-
