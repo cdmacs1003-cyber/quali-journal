@@ -155,6 +155,21 @@ BETA_MINIMAL_EVIDENCE_CONTRACT = (
     'renderEvidencePanel(null, "HOLD", "HOLD");',
     "resetEvidencePanel();",
 )
+BETA_MINIMAL_INTEGRATED_STATUS_CONTRACT = (
+    'id="beta-integrated-status"',
+    'aria-labelledby="beta-integrated-status-title"',
+    'data-status-domain="warehouse"',
+    'data-status-domain="library"',
+    'data-status-domain="bridge"',
+    'data-status-domain="skillup"',
+    'data-status-domain="feedback"',
+    'data-status-domain="analytics"',
+    'data-status-domain="release-board"',
+    'data-status-domain="active-risk"',
+    "\ud1b5\ud569 \uc6b4\uc601 \uc0c1\ud0dc",
+    "\ub85c\uceec \ube44\uc6b4\uc601 \uac80\uc99d \ubc94\uc704\uc758 \uc0c1\ud0dc\uc785\ub2c8\ub2e4.",
+    "NOT_GRANTED",
+)
 
 
 @pytest.fixture
@@ -1367,6 +1382,8 @@ def test_skillup_beta_minimal_source_and_dist_sync_guard():
             assert required in html, f"{required!r} missing from {relative_path}"
         for required in BETA_MINIMAL_EVIDENCE_CONTRACT:
             assert required in html, f"{required!r} missing from {relative_path}"
+        for required in BETA_MINIMAL_INTEGRATED_STATUS_CONTRACT:
+            assert required in html, f"{required!r} missing from {relative_path}"
         for data_attr, script_mapping, visible_label in BETA_MINIMAL_FEEDBACK_MAPPINGS:
             assert data_attr in html, f"{data_attr!r} missing from {relative_path}"
             assert script_mapping in html, f"{script_mapping!r} missing from {relative_path}"
@@ -1391,6 +1408,27 @@ def test_skillup_beta_minimal_source_and_dist_sync_guard():
             "c:\\",
         ):
             assert forbidden not in product_evidence_markup.lower()
+        integrated_status_markup = html.split('<section id="beta-integrated-status"', 1)[1].split(
+            '<section class="q-beta-panel q-beta-evidence"', 1
+        )[0]
+        for forbidden in (
+            "raw_query",
+            "raw_answer",
+            "raw_evidence",
+            "raw standard text",
+            "trace_id",
+            "evidence_id",
+            "database",
+            "table",
+            "column",
+            "file://",
+            "localhost",
+            "127.0.0.1",
+            "authorization",
+            "credential",
+            "secret",
+        ):
+            assert forbidden not in integrated_status_markup.lower()
 
 
 def test_skillup_beta_minimal_enter_submit_and_safe_event_contract():

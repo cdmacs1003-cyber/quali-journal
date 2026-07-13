@@ -269,6 +269,54 @@
   .q-beta-evidence-details[open] summary{margin-bottom:10px}
   .q-beta-evidence-hold strong{display:block;color:var(--q-hold)}
   .q-beta-evidence-hold p{margin:6px 0 0;color:var(--q-text-700);line-height:1.6}
+  .q-beta-operations{margin-top:12px}
+  .q-beta-operations-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:8px;
+  }
+  .q-beta-operations-header h2{margin:0}
+  .q-beta-operations-scope{
+    margin:0 0 12px;
+    color:var(--q-text-700);
+    line-height:1.6;
+  }
+  .q-beta-operations-status{
+    display:inline-flex;
+    align-items:center;
+    min-height:30px;
+    padding:4px 10px;
+    border-radius:999px;
+    background:var(--q-hold);
+    color:var(--q-panel);
+    font-weight:800;
+    white-space:nowrap;
+  }
+  .q-beta-operations-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:8px;
+    margin:0;
+  }
+  .q-beta-operations-grid div{
+    padding:10px;
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    background:var(--q-bg);
+  }
+  .q-beta-operations-grid dt{
+    color:var(--q-text-900);
+    font-weight:800;
+  }
+  .q-beta-operations-grid dd{
+    margin:4px 0 0;
+    color:var(--q-text-700);
+    line-height:1.55;
+  }
+  .q-beta-operations-grid strong{color:var(--q-pass)}
+  .q-beta-operations-grid [data-state="HOLD"] strong{color:var(--q-hold)}
   .q-beta-summary{
     display:grid;
     grid-template-columns:repeat(2,minmax(0,1fr));
@@ -294,7 +342,9 @@
   }
   @media (max-width:900px){
     .q-beta-grid{grid-template-columns:1fr}
-    .q-beta-summary{grid-template-columns:1fr}
+    .q-beta-summary,
+    .q-beta-operations-grid{grid-template-columns:1fr}
+    .q-beta-operations-header{align-items:flex-start;flex-direction:column}
   }
 </style>
   <meta name="qj-beta-minimal-smoke-markers" content="feedback_needs_review_marker no_raw_response_body_marker no_full_json_marker">
@@ -355,6 +405,24 @@
       <p id="beta-minimal-feedback" class="q-beta-copy">의견을 선택하면 이 화면에만 기록됩니다.</p>
     </section>
   </div>
+
+  <section id="beta-integrated-status" class="q-beta-panel q-beta-operations" aria-labelledby="beta-integrated-status-title">
+    <div class="q-beta-operations-header">
+      <h2 id="beta-integrated-status-title">통합 운영 상태</h2>
+      <span class="q-beta-operations-status" data-state="HOLD">제한부 승인</span>
+    </div>
+    <p class="q-beta-operations-scope">로컬 비운영 검증 범위의 상태입니다. Release, 배포, Production 승인이 아닙니다.</p>
+    <dl class="q-beta-operations-grid">
+      <div data-status-domain="warehouse"><dt>퀄리창고</dt><dd><strong>검증 완료</strong> · 후보, 검토, 승격 상태 확인</dd></div>
+      <div data-status-domain="library"><dt>퀄리도서관</dt><dd><strong>검증 완료</strong> · Evidence와 색인 상태 확인</dd></div>
+      <div data-status-domain="bridge"><dt>브릿지</dt><dd><strong>정상</strong> · 근거, 정책, 추적 상태 확인</dd></div>
+      <div data-status-domain="skillup"><dt>스킬업</dt><dd><strong>정상</strong> · ANSWERED와 HOLD 상태 구분</dd></div>
+      <div data-status-domain="feedback"><dt>Feedback Queue</dt><dd><strong>보호됨</strong> · 최소 기록과 중복 방지</dd></div>
+      <div data-status-domain="analytics"><dt>Analytics</dt><dd><strong>보호됨</strong> · 동의 상태와 원문 미저장</dd></div>
+      <div data-status-domain="release-board"><dt>Release Board</dt><dd><strong>초안</strong> · RC Freeze 검토용, release 승인 아님</dd></div>
+      <div data-status-domain="active-risk" data-state="HOLD"><dt>현재 제한</dt><dd><strong>HOLD</strong> · Release, 배포, Production은 NOT_GRANTED</dd></div>
+    </dl>
+  </section>
 
   <section class="q-beta-panel q-beta-evidence" data-internal-surface="true" data-beta-diagnostics="true" aria-hidden="true" aria-labelledby="beta-evidence-title">
     <h2 id="beta-evidence-title">근거 / 상태 요약</h2>
