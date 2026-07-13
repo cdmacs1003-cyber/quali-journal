@@ -115,6 +115,14 @@ BETA_MINIMAL_SYNC_STRINGS = (
     "beta-minimal-question",
     "beta-minimal-status",
     "beta-minimal-result",
+    "근거 보기",
+    "근거 있음",
+    "근거 수",
+    "근거 주제",
+    "추적 상태",
+    "확인 가능",
+    "근거 없음",
+    "현재 승인된 근거 범위에서는 답변할 수 없습니다.",
 )
 BETA_MINIMAL_FEEDBACK_MAPPINGS = (
     ('data-beta-feedback="useful"', 'useful: "도움 됨"', "도움 됨"),
@@ -134,6 +142,18 @@ BETA_MINIMAL_SAFE_EVENT_CONTRACT = (
     'http_status_category:statusCategory(code)',
     'hold_reason_code:answerStatus === "HOLD" ? "EVIDENCE_REQUIRED_OR_POLICY_HOLD" : "NONE"',
     'emitSafeEvent("feedback_control", {feedback_control_value:feedbackValue})',
+)
+BETA_MINIMAL_EVIDENCE_CONTRACT = (
+    'id="beta-evidence-state"',
+    'id="beta-evidence-details"',
+    'id="beta-evidence-hold"',
+    '<summary>근거 보기</summary>',
+    "function safeEvidenceItems(data)",
+    "function renderEvidencePanel(data, answerStatus, resultStatus)",
+    'setText(evidenceTrace, traceAvailable ? "확인 가능" : "확인 필요");',
+    "renderEvidencePanel(data, answerStatus, resultStatus);",
+    'renderEvidencePanel(null, "HOLD", "HOLD");',
+    "resetEvidencePanel();",
 )
 
 
@@ -1345,10 +1365,32 @@ def test_skillup_beta_minimal_source_and_dist_sync_guard():
     for relative_path, html in html_by_path.items():
         for required in BETA_MINIMAL_SYNC_STRINGS:
             assert required in html, f"{required!r} missing from {relative_path}"
+        for required in BETA_MINIMAL_EVIDENCE_CONTRACT:
+            assert required in html, f"{required!r} missing from {relative_path}"
         for data_attr, script_mapping, visible_label in BETA_MINIMAL_FEEDBACK_MAPPINGS:
             assert data_attr in html, f"{data_attr!r} missing from {relative_path}"
             assert script_mapping in html, f"{script_mapping!r} missing from {relative_path}"
             assert visible_label in html, f"{visible_label!r} missing from {relative_path}"
+        product_evidence_markup = html.split('<div id="beta-evidence-state"', 1)[1].split(
+            '<div class="q-beta-actions"', 1
+        )[0]
+        for forbidden in (
+            "evidence_id",
+            "trace_id",
+            "pointer://",
+            "qlib://",
+            "file://",
+            "localhost",
+            "127.0.0.1",
+            "raw_text",
+            "raw json",
+            "secret",
+            "token",
+            "credential",
+            "h:\\",
+            "c:\\",
+        ):
+            assert forbidden not in product_evidence_markup.lower()
 
 
 def test_skillup_beta_minimal_enter_submit_and_safe_event_contract():

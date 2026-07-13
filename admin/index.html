@@ -249,6 +249,26 @@
     min-height:68px;
     white-space:pre-line;
   }
+  .q-beta-evidence-state{margin-top:10px}
+  .q-beta-evidence-details,
+  .q-beta-evidence-hold{
+    border:1px solid var(--q-line);
+    border-radius:8px;
+    padding:10px;
+    background:var(--q-bg);
+  }
+  .q-beta-evidence-details summary{
+    color:var(--q-blue-700);
+    font-weight:800;
+    cursor:pointer;
+  }
+  .q-beta-evidence-details summary:focus-visible{
+    outline:3px solid var(--q-focus);
+    outline-offset:2px;
+  }
+  .q-beta-evidence-details[open] summary{margin-bottom:10px}
+  .q-beta-evidence-hold strong{display:block;color:var(--q-hold)}
+  .q-beta-evidence-hold p{margin:6px 0 0;color:var(--q-text-700);line-height:1.6}
   .q-beta-summary{
     display:grid;
     grid-template-columns:repeat(2,minmax(0,1fr));
@@ -311,6 +331,21 @@
       <h2 id="beta-result-title">답변 상태</h2>
       <span id="beta-minimal-status" class="q-beta-status" data-state="IDLE">대기</span>
       <div id="beta-minimal-result" class="q-beta-result" role="status" aria-live="polite">질문을 보내면 답변 또는 보류 상태를 확인합니다.</div>
+      <div id="beta-evidence-state" class="q-beta-evidence-state" aria-live="polite" hidden>
+        <details id="beta-evidence-details" class="q-beta-evidence-details" hidden>
+          <summary>근거 보기</summary>
+          <dl class="q-beta-summary">
+            <div><dt>근거 있음</dt><dd id="beta-evidence-present">예</dd></div>
+            <div><dt>근거 수</dt><dd id="beta-evidence-count">0</dd></div>
+            <div><dt>근거 주제</dt><dd id="beta-evidence-subject">승인된 스킬업 근거</dd></div>
+            <div><dt>추적 상태</dt><dd id="beta-evidence-trace">확인 가능</dd></div>
+          </dl>
+        </details>
+        <div id="beta-evidence-hold" class="q-beta-evidence-hold" role="note" hidden>
+          <strong>근거 없음</strong>
+          <p>현재 승인된 근거 범위에서는 답변할 수 없습니다.</p>
+        </div>
+      </div>
       <div class="q-beta-actions" role="group" aria-label="피드백">
         <button type="button" data-beta-feedback="useful">도움 됨</button>
         <button type="button" data-beta-feedback="confusing">어려움</button>
@@ -2112,6 +2147,13 @@ window.onerror = function(message, source, lineno, colno, error) {
   var question = document.getElementById("beta-minimal-question");
   var status = document.getElementById("beta-minimal-status");
   var result = document.getElementById("beta-minimal-result");
+  var evidenceState = document.getElementById("beta-evidence-state");
+  var evidenceDetails = document.getElementById("beta-evidence-details");
+  var evidenceHold = document.getElementById("beta-evidence-hold");
+  var evidencePresent = document.getElementById("beta-evidence-present");
+  var evidenceCount = document.getElementById("beta-evidence-count");
+  var evidenceSubject = document.getElementById("beta-evidence-subject");
+  var evidenceTrace = document.getElementById("beta-evidence-trace");
   var transport = document.getElementById("beta-transport");
   var responseClass = document.getElementById("beta-response-class");
   var bodyDisplay = document.getElementById("beta-body-display");
@@ -2153,6 +2195,9 @@ window.onerror = function(message, source, lineno, colno, error) {
 
   function setText(node, value){
     if (node) node.textContent = String(value == null ? "" : value);
+  }
+  function setHidden(node, value){
+    if (node) node.hidden = !!value;
   }
   function setDiagnosticText(node, value){
     if (!diagnosticsVisible) return;
@@ -2206,6 +2251,50 @@ window.onerror = function(message, source, lineno, colno, error) {
     }
     return "";
   }
+  function safeEvidenceItems(data){
+    if (!data || !Array.isArray(data.evidence)) return [];
+    return data.evidence.filter(function(item){
+      return item && typeof item === "object" && !Array.isArray(item);
+    });
+  }
+  function safeEvidenceSubject(items){
+    for (var i = 0; i < items.length; i += 1) {
+      var label = safeDisplayText(items[i].source_label);
+      if (!label || label.length > 80) continue;
+      return label === "Skillup Bridge safe evidence" ? "승인된 스킬업 근거" : label;
+    }
+    return "승인된 스킬업 근거";
+  }
+  function resetEvidencePanel(){
+    setHidden(evidenceState, true);
+    setHidden(evidenceDetails, true);
+    if (evidenceDetails) evidenceDetails.open = false;
+    setHidden(evidenceHold, true);
+    setText(evidencePresent, "예");
+    setText(evidenceCount, "0");
+    setText(evidenceSubject, "승인된 스킬업 근거");
+    setText(evidenceTrace, "확인 필요");
+  }
+  function renderEvidencePanel(data, answerStatus, resultStatus){
+    var items = safeEvidenceItems(data);
+    var answeredWithEvidence = answerStatus === "ANSWERED" && resultStatus === "OK" && items.length > 0;
+    if (answeredWithEvidence) {
+      var traceAvailable = !!safeDisplayText(data && data.trace_id);
+      setText(evidencePresent, "예");
+      setText(evidenceCount, items.length);
+      setText(evidenceSubject, safeEvidenceSubject(items));
+      setText(evidenceTrace, traceAvailable ? "확인 가능" : "확인 필요");
+      setHidden(evidenceHold, true);
+      setHidden(evidenceDetails, false);
+      if (evidenceDetails) evidenceDetails.open = false;
+      setHidden(evidenceState, false);
+      return;
+    }
+    setHidden(evidenceDetails, true);
+    if (evidenceDetails) evidenceDetails.open = false;
+    setHidden(evidenceHold, false);
+    setHidden(evidenceState, false);
+  }
   function koreanStatusLabel(answerStatus, resultStatus){
     if (answerStatus === "REDACTED") return "숨김";
     if (answerStatus === "INVALIDATED" || resultStatus === "ERROR") return "검토 필요";
@@ -2250,11 +2339,12 @@ window.onerror = function(message, source, lineno, colno, error) {
     activeCorrelationId = correlationId;
     setState(answerStatus);
     setText(result, renderAnswerPanel(data, answerStatus, resultStatus));
+    renderEvidencePanel(data, answerStatus, resultStatus);
     setDiagnosticText(transport, "transport_ok");
     setDiagnosticText(responseClass, kind);
     setDiagnosticText(bodyDisplay, "숨김 처리됨");
     var safeAnswer = answerStatus === "ANSWERED" && resultStatus === "OK" ? safeShortAnswer(data) : "";
-    var evidenceItems = data && Array.isArray(data.evidence) ? data.evidence : [];
+    var evidenceItems = safeEvidenceItems(data);
     emitSafeEvent("request_result", {
       http_status_category:statusCategory(code),
       result_status:resultStatus,
@@ -2270,6 +2360,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     activeCorrelationId = correlationId || activeCorrelationId;
     setState("HOLD");
     setText(result, "보류\n이 질문은 아직 승인된 근거가 없어 보류합니다. 근거가 준비되면 답변할 수 있습니다.");
+    renderEvidencePanel(null, "HOLD", "HOLD");
     setDiagnosticText(transport, category);
     setDiagnosticText(responseClass, "response_unknown_or_unparsed");
     setDiagnosticText(bodyDisplay, "숨김 처리됨");
@@ -2296,6 +2387,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     emitSafeEvent("request_submitted", {request_length:text.slice(0, 800).length});
     setState("LOADING");
     setText(result, "질문 상태를 확인하는 중입니다...");
+    resetEvidencePanel();
     var xhr = new XMLHttpRequest();
     xhr.open("POST", ENDPOINT, true);
     xhr.timeout = 15000;
