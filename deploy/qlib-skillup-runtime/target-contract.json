@@ -1,15 +1,15 @@
 {
   "schema_version": "1.0",
-  "contract_id": "R9ZNW-471-qlib-skillup-runtime",
+  "contract_id": "R9ZNW-473-qlib-skillup-runtime",
   "contract_status": "FROZEN_TARGET_CONTRACT",
   "source": {
     "repository": "H:/a/퀄리저널_track_a_clean_standalone",
     "branch": "track-a-07s-static-closure-proofpack",
-    "starting_head": "658a8342e3f28bf90b278733eba26c744bc720fa",
+    "starting_head": "fe07698bccc4b89846b1a4e1f23c47f162720361",
     "source_head": {
       "resolver": "git rev-parse HEAD",
-      "required_value": "FINAL_VALIDATED_R471_COMMIT",
-      "materialization": "image label source_commit and R471 ProofPack resolved contract",
+      "required_value": "FINAL_VALIDATED_R473_COMMIT",
+      "materialization": "image label source_commit and R473 ProofPack resolved contract",
       "reason": "a tracked file cannot contain the hash of the commit that contains itself"
     }
   },
@@ -35,7 +35,14 @@
     "all_authenticated_users_invoker_binding_present": false,
     "runtime_service_account_reference": "66***@developer.gserviceaccount.com",
     "environment_key_count": 0,
-    "secret_binding_count": 0
+    "secret_binding_count": 0,
+    "service_wide_min_instances": 0,
+    "service_wide_max_instances": 2,
+    "rejected_revision": "qlib-skillup-runtime-00003-som",
+    "rejected_revision_traffic_percent": 0,
+    "rejected_revision_max_scale": 20,
+    "rejected_revision_reuse_allowed": false,
+    "state_evidence": "R472 sealed ProofPack; R473 performs no remote mutation"
   },
   "artifact": {
     "dockerfile": "deploy/qlib-skillup-runtime/Dockerfile",
@@ -67,8 +74,8 @@
     "required_labels": {
       "source_repository": "quali-journal-track-a-clean-standalone",
       "source_branch": "track-a-07s-static-closure-proofpack",
-      "source_commit": "FINAL_VALIDATED_R471_COMMIT",
-      "task_id": "R9ZNW-471",
+      "source_commit": "FINAL_VALIDATED_R473_COMMIT",
+      "task_id": "R9ZNW-473",
       "target_service": "qlib-skillup-runtime",
       "target_mode": "authenticated_limited_field_beta"
     }
@@ -102,13 +109,40 @@
     ]
   },
   "resources": {
-    "min_instances": 0,
-    "max_instances": 2,
+    "service_wide_scaling": {
+      "min_instances": 0,
+      "max_instances": 2,
+      "gcloud_flags": ["--min=0", "--max=2"],
+      "scope": "Service-wide"
+    },
+    "revision_scaling": {
+      "min_instances": 0,
+      "max_instances": 2,
+      "gcloud_flags": ["--min-instances=0", "--max-instances=2"],
+      "scope": "immutable Revision",
+      "required_max_scale_annotation": "autoscaling.knative.dev/maxScale",
+      "required_max_scale_value": "2",
+      "traffic_forbidden_when_missing_or_not_exact": true
+    },
     "cpu": "1",
     "memory": "512Mi",
     "concurrency": 80,
     "timeout_seconds": 300,
     "cloud_sql_required": false
+  },
+  "deployment": {
+    "canonical_no_traffic_command": "gcloud run deploy $SERVICE --project $PROJECT_ID --region $REGION --image $IMMUTABLE_IMAGE --no-traffic --no-allow-unauthenticated --port 8080 --min=0 --max=2 --min-instances=0 --max-instances=2 --cpu 1 --memory 512Mi --concurrency 80 --timeout 300 --tag r474-candidate",
+    "service_wide_flags_required": ["--min=0", "--max=2"],
+    "revision_level_flags_required": ["--min-instances=0", "--max-instances=2"],
+    "service_wide_limit_is_revision_limit_substitute": false,
+    "pretraffic_revision_annotation_gate": {
+      "annotation": "autoscaling.knative.dev/maxScale",
+      "required_exact_value": "2",
+      "missing_result": "FAIL_TRAFFIC_FORBIDDEN",
+      "value_20_result": "FAIL_TRAFFIC_FORBIDDEN"
+    },
+    "rejected_revision": "qlib-skillup-runtime-00003-som",
+    "rejected_revision_use": "FORBIDDEN"
   },
   "data_impact": {
     "production_db_read": false,
@@ -141,7 +175,10 @@
       "50": 15,
       "100": 15
     },
-    "initial_rollback_revision": "qlib-skillup-runtime-00002-d9g"
+    "initial_rollback_revision": "qlib-skillup-runtime-00002-d9g",
+    "rollback_target_percent": 100,
+    "automatic_rollback_on_stop_condition": true,
+    "pretraffic_immutable_max_scale_gate_required": true
   },
   "monitoring": {
     "signals": [
@@ -173,6 +210,6 @@
     "authenticated smoke results at every stage",
     "monitoring and cost observations",
     "rollback readiness and final owner decision",
-    "R472 ProofPack manifest and SHA256 register"
+    "R474 ProofPack manifest and SHA256 register"
   ]
 }

@@ -22,6 +22,20 @@ def _contract() -> dict:
     return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
 
+def _has_complete_scaling_flags(command: str) -> bool:
+    required = {
+        "--min=0",
+        "--max=2",
+        "--min-instances=0",
+        "--max-instances=2",
+    }
+    return required.issubset(set(command.split()))
+
+
+def _immutable_max_scale_allows_traffic(value: object) -> bool:
+    return value is not None and str(value) == "2"
+
+
 def test_target_contract_is_exact_private_no_data_change_target():
     contract = _contract()
     target = contract["target"]
@@ -61,8 +75,21 @@ def test_target_contract_runtime_resource_secret_and_traffic_closure():
     assert "private service" in runtime["authentication_enforcement"]
     assert len(runtime["required_deployer_permissions"]) == 7
     assert contract["resources"] == {
-        "min_instances": 0,
-        "max_instances": 2,
+        "service_wide_scaling": {
+            "min_instances": 0,
+            "max_instances": 2,
+            "gcloud_flags": ["--min=0", "--max=2"],
+            "scope": "Service-wide",
+        },
+        "revision_scaling": {
+            "min_instances": 0,
+            "max_instances": 2,
+            "gcloud_flags": ["--min-instances=0", "--max-instances=2"],
+            "scope": "immutable Revision",
+            "required_max_scale_annotation": "autoscaling.knative.dev/maxScale",
+            "required_max_scale_value": "2",
+            "traffic_forbidden_when_missing_or_not_exact": True,
+        },
         "cpu": "1",
         "memory": "512Mi",
         "concurrency": 80,
@@ -71,7 +98,39 @@ def test_target_contract_runtime_resource_secret_and_traffic_closure():
     }
     assert contract["traffic"]["strategy_percent"] == [0, 5, 20, 50, 100]
     assert contract["traffic"]["initial_rollback_revision"] == "qlib-skillup-runtime-00002-d9g"
+    assert contract["traffic"]["rollback_target_percent"] == 100
+    assert contract["traffic"]["automatic_rollback_on_stop_condition"] is True
+    assert contract["traffic"]["pretraffic_immutable_max_scale_gate_required"] is True
     assert contract["source"]["source_head"]["resolver"] == "git rev-parse HEAD"
+
+
+def test_deployment_command_separates_service_and_revision_scaling_contracts():
+    deployment = _contract()["deployment"]
+    command = deployment["canonical_no_traffic_command"]
+    assert _has_complete_scaling_flags(command)
+    assert not _has_complete_scaling_flags(
+        "gcloud run deploy qlib-skillup-runtime --min=0 --max=2"
+    )
+    assert deployment["service_wide_flags_required"] == ["--min=0", "--max=2"]
+    assert deployment["revision_level_flags_required"] == [
+        "--min-instances=0",
+        "--max-instances=2",
+    ]
+    assert deployment["service_wide_limit_is_revision_limit_substitute"] is False
+
+
+def test_pretraffic_gate_requires_exact_immutable_max_scale_two():
+    deployment = _contract()["deployment"]
+    gate = deployment["pretraffic_revision_annotation_gate"]
+    assert gate["annotation"] == "autoscaling.knative.dev/maxScale"
+    assert gate["required_exact_value"] == "2"
+    assert _immutable_max_scale_allows_traffic("2")
+    assert not _immutable_max_scale_allows_traffic(20)
+    assert not _immutable_max_scale_allows_traffic("20")
+    assert not _immutable_max_scale_allows_traffic(None)
+    assert gate["missing_result"] == "FAIL_TRAFFIC_FORBIDDEN"
+    assert gate["value_20_result"] == "FAIL_TRAFFIC_FORBIDDEN"
+    assert deployment["rejected_revision_use"] == "FORBIDDEN"
 
 
 def test_dockerfile_is_digest_pinned_nonroot_and_minimal():
@@ -277,6 +336,15 @@ def test_runbook_is_target_specific_staged_and_nonexecuting():
     assert "asia-northeast1" in text
     assert "quali-admin-domap" in text and "must never target or mutate" in text
     assert "does not grant deployment authorization" in text
+    canonical_deploy_line = next(
+        line for line in text.splitlines() if line.startswith("gcloud run deploy ")
+    )
+    assert _has_complete_scaling_flags(canonical_deploy_line)
+    assert "autoscaling.knative.dev/maxScale" in text
+    assert "-cne '2'" in text
+    assert "Service-wide `--max=2`" in text
+    assert "qlib-skillup-runtime-00003-som" in text
+    assert "must not be reused" in text
     for split in ("=5,", "=20,", "=50,", "=100"):
         assert split in text
     for duration in ("Observe 10 minutes", "Observe 15 minutes", "Final observation: 15 minutes"):
