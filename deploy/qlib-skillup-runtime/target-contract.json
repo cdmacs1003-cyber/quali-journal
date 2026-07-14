@@ -1,0 +1,159 @@
+{
+  "schema_version": "1.0",
+  "contract_id": "R9ZNW-469A-qlib-skillup-runtime",
+  "contract_status": "FROZEN_TARGET_CONTRACT",
+  "source": {
+    "repository": "H:/a/퀄리저널_track_a_clean_standalone",
+    "branch": "track-a-07s-static-closure-proofpack",
+    "starting_head": "658a8342e3f28bf90b278733eba26c744bc720fa",
+    "source_head": {
+      "resolver": "git rev-parse HEAD",
+      "required_value": "FINAL_VALIDATED_R469A_COMMIT",
+      "materialization": "image label source_commit and R469A ProofPack resolved contract",
+      "reason": "a tracked file cannot contain the hash of the commit that contains itself"
+    }
+  },
+  "target": {
+    "service": "qlib-skillup-runtime",
+    "region": "asia-northeast1",
+    "platform": "Cloud Run",
+    "mode": "authenticated_limited_field_beta",
+    "purpose": "QLIB_SKILLUP_FROZEN_RC",
+    "container_port": 8080,
+    "public_access": false,
+    "custom_domain": "DEFERRED_NOT_AUTHORIZED",
+    "protected_unrelated_service": "quali-admin-domap",
+    "protected_unrelated_service_action": "DO_NOT_DEPLOY_DO_NOT_MUTATE_DO_NOT_ROUTE_TRAFFIC"
+  },
+  "observed_target_metadata": {
+    "observed_at_kst": "2026-07-14",
+    "service_exists": true,
+    "current_stable_revision": "qlib-skillup-runtime-00002-d9g",
+    "current_stable_traffic_percent": 100,
+    "ingress": "all",
+    "anonymous_invoker_binding_present": false,
+    "all_authenticated_users_invoker_binding_present": false,
+    "runtime_service_account_reference": "66***@developer.gserviceaccount.com",
+    "environment_key_count": 0,
+    "secret_binding_count": 0
+  },
+  "artifact": {
+    "dockerfile": "deploy/qlib-skillup-runtime/Dockerfile",
+    "dependency_lock": "deploy/qlib-skillup-runtime/requirements.lock",
+    "source_date_epoch_resolver": "git show -s --format=%ct <final-source-commit>",
+    "reproducibility_rule": "two no-cache timestamp-rewritten linux/amd64 OCI archives from the same final commit must be byte-identical and have the same manifest digest",
+    "canonical_build_command": "powershell -File tools/build_qlib_runtime_artifact.ps1 -OutputPath <task-owned-new-path>.tar -SourceCommit <final-source-commit>",
+    "tag_convention": "qlib-skillup-runtime:r469a-<12-char-source-commit>",
+    "immutable_publication_reference": "<registry>/qlib-skillup-runtime@sha256:<digest>",
+    "required_labels": {
+      "source_repository": "quali-journal-track-a-clean-standalone",
+      "source_branch": "track-a-07s-static-closure-proofpack",
+      "source_commit": "FINAL_VALIDATED_R469A_COMMIT",
+      "task_id": "R9ZNW-469A",
+      "target_service": "qlib-skillup-runtime",
+      "target_mode": "authenticated_limited_field_beta"
+    }
+  },
+  "runtime": {
+    "health_endpoint": "/health",
+    "authenticated_smoke_routes": [
+      "GET /health",
+      "GET /",
+      "POST /api/f13/bridge/skillup/bridge-answer"
+    ],
+    "required_platform_environment_keys": [
+      "PORT",
+      "K_SERVICE",
+      "K_REVISION",
+      "K_CONFIGURATION"
+    ],
+    "required_application_environment_keys": [],
+    "required_secret_bindings": [],
+    "required_secret_binding_count": 0,
+    "authentication_enforcement": "Cloud Run IAM private service; no allUsers or allAuthenticatedUsers invoker binding",
+    "runtime_service_account_requirement": "existing selected-service runtime identity; reference remains masked",
+    "required_deployer_permissions": [
+      "run.services.get",
+      "run.services.create",
+      "run.services.update",
+      "run.routes.invoke",
+      "iam.serviceAccounts.actAs",
+      "artifactregistry.repositories.downloadArtifacts",
+      "artifactregistry.repositories.uploadArtifacts"
+    ]
+  },
+  "resources": {
+    "min_instances": 0,
+    "max_instances": 2,
+    "cpu": "1",
+    "memory": "512Mi",
+    "concurrency": 80,
+    "timeout_seconds": 300,
+    "cloud_sql_required": false
+  },
+  "data_impact": {
+    "production_db_read": false,
+    "production_db_write": false,
+    "schema_change": false,
+    "migration": false,
+    "production_library_write": false,
+    "persistent_storage_change": false,
+    "queue_or_scheduler_change": false,
+    "external_provider_write": false,
+    "raw_user_text_retention": false,
+    "analytics_retention_change": false,
+    "raw_standard_text_export": false,
+    "unknown_rights_use": false,
+    "cloud_sql_quali_pg_dependency": false,
+    "bridge_evidence_trace_required": true,
+    "packaged_evidence_identifiers": [
+      "ev-flux-safe-summary-v1",
+      "ev-solder-basic-and-types-safe-summary-v1",
+      "ev-soldering-safe-summary-v1",
+      "ev-wetting-safe-summary-v1"
+    ]
+  },
+  "traffic": {
+    "strategy_percent": [0, 5, 20, 50, 100],
+    "observation_minutes": {
+      "revision_specific_smoke": "until_all_required_checks_pass",
+      "5": 10,
+      "20": 10,
+      "50": 15,
+      "100": 15
+    },
+    "initial_rollback_revision": "qlib-skillup-runtime-00002-d9g"
+  },
+  "monitoring": {
+    "signals": [
+      "health status",
+      "authenticated request success",
+      "HTTP error rate",
+      "latency",
+      "instance count",
+      "CPU and memory",
+      "Evidence and Trace policy result",
+      "unexpected write or leak signal"
+    ],
+    "stop_conditions": [
+      "health failure",
+      "authentication boundary regression",
+      "Evidence/Trace failure",
+      "raw/internal-path or secret exposure",
+      "unexpected Production write",
+      "error-rate increase above recorded baseline threshold",
+      "cost/capacity anomaly",
+      "rollback-target loss",
+      "owner stop instruction"
+    ]
+  },
+  "post_deploy_evidence": [
+    "immutable image digest and source labels",
+    "pre/post service configuration",
+    "revision and traffic history",
+    "authenticated smoke results at every stage",
+    "monitoring and cost observations",
+    "rollback readiness and final owner decision",
+    "R470 ProofPack manifest and SHA256 register"
+  ]
+}

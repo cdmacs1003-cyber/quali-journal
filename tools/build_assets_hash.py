@@ -39,7 +39,7 @@ def build():
 
     manifest: dict[str, str] = {}
     # 1) assets -> dist/assets (해시 파일명으로 복사)
-    for p in SRC_DIR.rglob("*"):
+    for p in sorted(SRC_DIR.rglob("*"), key=lambda item: item.relative_to(SRC_DIR).as_posix()):
         if p.is_dir():
             continue
         rel = p.relative_to(SRC_DIR).as_posix()  # 예: js/app.js, style.css
@@ -48,7 +48,9 @@ def build():
         hashed = f"{stem}.{h}{ext}"
         dst = DST_ASSETS / hashed
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(p, dst)
+        # Copy content only. Source mtimes and filesystem enumeration order must
+        # not influence the generated artifact.
+        shutil.copyfile(p, dst)
         manifest[f"assets/{rel}"] = f"assets/{hashed}"
 
     # 2) index.html 읽어서 assets 참조 치환
@@ -70,8 +72,11 @@ def build():
 
     # 3) dist/index.html + manifest.json 기록
     DIST.mkdir(parents=True, exist_ok=True)
-    (DIST / "index.html").write_text(html, encoding="utf-8")
-    (DIST / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Write explicit UTF-8 bytes so Windows/Linux newline translation cannot
+    # make the same tracked source produce different dist content.
+    (DIST / "index.html").write_bytes(html.encode("utf-8"))
+    manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    (DIST / "manifest.json").write_bytes(manifest_text.encode("utf-8"))
 
     print(f"[OK] 해시 적용 {len(manifest)}개 → {DIST} 생성 완료")
     print(f"     UI_BASE = {UI_BASE}")
