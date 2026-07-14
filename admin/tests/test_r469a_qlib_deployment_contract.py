@@ -107,6 +107,8 @@ def test_target_contract_runtime_resource_secret_and_traffic_closure():
 def test_deployment_command_separates_service_and_revision_scaling_contracts():
     deployment = _contract()["deployment"]
     command = deployment["canonical_no_traffic_command"]
+    assert "--allow-unauthenticated" not in command
+    assert "--no-allow-unauthenticated" not in command
     assert _has_complete_scaling_flags(command)
     assert not _has_complete_scaling_flags(
         "gcloud run deploy qlib-skillup-runtime --min=0 --max=2"
@@ -117,6 +119,34 @@ def test_deployment_command_separates_service_and_revision_scaling_contracts():
         "--max-instances=2",
     ]
     assert deployment["service_wide_limit_is_revision_limit_substitute"] is False
+
+
+def test_private_access_is_read_only_and_iam_mismatch_forbids_traffic():
+    deployment = _contract()["deployment"]
+    gate = deployment["private_access_read_only_gate"]
+    assert deployment["iam_mutating_deploy_flags_forbidden"] == [
+        "--allow-unauthenticated",
+        "--no-allow-unauthenticated",
+    ]
+    assert gate["predeploy_iam_policy_read_required"] is True
+    assert gate["predeploy_normalized_iam_hash_required"] is True
+    assert gate["predeploy_public_member_count_required"] == 0
+    assert gate["postdeploy_iam_policy_read_required"] is True
+    assert gate["postdeploy_normalized_iam_hash_required"] is True
+    assert gate["postdeploy_public_member_count_required"] == 0
+    assert gate["pre_post_iam_hash_match_required"] is True
+    assert gate["set_iam_policy_audit_call_count_required"] == 0
+    assert gate["traffic_forbidden_on_hash_mismatch"] is True
+    assert gate["traffic_forbidden_on_public_member"] is True
+    assert gate["traffic_forbidden_on_set_iam_policy_audit"] is True
+    assert gate["traffic_forbidden_on_policy_delta"] is True
+
+
+def test_rejected_r474_candidates_cannot_be_reused():
+    deployment = _contract()["deployment"]
+    assert deployment["rejected_revision_use"] == "FORBIDDEN"
+    assert deployment["additional_rejected_revisions"] == ["qlib-skillup-runtime-00004-kos"]
+    assert deployment["rejected_revision_reuse"] == "FORBIDDEN"
 
 
 def test_pretraffic_gate_requires_exact_immutable_max_scale_two():

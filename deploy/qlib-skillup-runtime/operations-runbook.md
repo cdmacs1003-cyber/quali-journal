@@ -2,7 +2,7 @@
 
 Status: `READY_NOT_EXECUTED` only after R473 scaling-contract reclosure and new owner digest approval pass.
 
-This runbook is for `qlib-skillup-runtime` in `asia-northeast1` only. It must never target or mutate `quali-admin-domap`. It does not grant deployment authorization. Every command below is deferred to a separately authorized R474 packet.
+This runbook is for `qlib-skillup-runtime` in `asia-northeast1` only. It must never target or mutate `quali-admin-domap`. It does not grant deployment authorization. Every command below is deferred to a separately authorized R476 packet.
 
 ## Fixed boundary
 
@@ -51,7 +51,9 @@ gcloud run services get-iam-policy $SERVICE --region $REGION --project $PROJECT_
 gcloud run revisions list --service $SERVICE --region $REGION --project $PROJECT_ID --format=json
 ```
 
-Store only redacted/masked metadata in the R474 ProofPack. Capture the current revision and traffic, confirm `$STABLE_REVISION` still exists, and confirm no `allUsers` or `allAuthenticatedUsers` invoker binding.
+Store only redacted/masked metadata in the R476 ProofPack. Capture the current revision and traffic, confirm `$STABLE_REVISION` still exists, and confirm no `allUsers` or `allAuthenticatedUsers` invoker binding. Read and normalize the IAM policy before deployment, record its SHA256 and public-member count, and stop without mutation if the public-member count is nonzero.
+
+The private boundary is read-only in this workflow. Never pass `--allow-unauthenticated` or `--no-allow-unauthenticated`; both flags can invoke `SetIamPolicy`. Before any candidate traffic, read and normalize the IAM policy again, compare it byte-for-byte/hash-for-hash with the predeploy snapshot, require public-member count 0, require policy delta 0, and require `SetIamPolicy` audit count 0. Any mismatch forbids candidate traffic and triggers the stop procedure; do not repair IAM in-band.
 
 ## 2. Reproduce and publish the immutable artifact
 
@@ -71,10 +73,12 @@ Resolve `$IMMUTABLE_IMAGE` to the pushed `@sha256:` reference. Stop if its label
 ## 3. Create a no-traffic private revision
 
 ```powershell
-gcloud run deploy $SERVICE --project $PROJECT_ID --region $REGION --image $IMMUTABLE_IMAGE --no-traffic --no-allow-unauthenticated --port 8080 --min=0 --max=2 --min-instances=0 --max-instances=2 --cpu 1 --memory 512Mi --concurrency 80 --timeout 300 --tag r474-candidate
+gcloud run deploy $SERVICE --project $PROJECT_ID --region $REGION --image $IMMUTABLE_IMAGE --no-traffic --port 8080 --min=0 --max=2 --min-instances=0 --max-instances=2 --cpu 1 --memory 512Mi --concurrency 80 --timeout 300 --tag r476-candidate
 ```
 
-Capture a newly created candidate revision name and abort if it equals `$REJECTED_REVISION`. Confirm no Cloud SQL attachment, volume, migration, queue, scheduler, secret binding, or Production DB/Library setting was added. Required application secret binding count is zero.
+Capture a newly created candidate revision name and abort if it equals `$REJECTED_REVISION` or `qlib-skillup-runtime-00004-kos`. Confirm no Cloud SQL attachment, volume, migration, queue, scheduler, secret binding, or Production DB/Library setting was added. Required application secret binding count is zero.
+
+Immediately after the read-only candidate configuration check, repeat the IAM policy read and normalized hash. Require the pre/post hashes to match exactly, public member count 0, no policy delta, and zero `SetIamPolicy` audit calls. If any check fails, keep stable at 100%, assign candidate 0%, and do not run smoke or traffic.
 
 Before revision-specific smoke or any percentage traffic, read the immutable revision annotation and require the exact value `2`:
 

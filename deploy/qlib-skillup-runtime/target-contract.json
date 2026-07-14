@@ -131,7 +131,22 @@
     "cloud_sql_required": false
   },
   "deployment": {
-    "canonical_no_traffic_command": "gcloud run deploy $SERVICE --project $PROJECT_ID --region $REGION --image $IMMUTABLE_IMAGE --no-traffic --no-allow-unauthenticated --port 8080 --min=0 --max=2 --min-instances=0 --max-instances=2 --cpu 1 --memory 512Mi --concurrency 80 --timeout 300 --tag r474-candidate",
+    "canonical_no_traffic_command": "gcloud run deploy $SERVICE --project $PROJECT_ID --region $REGION --image $IMMUTABLE_IMAGE --no-traffic --port 8080 --min=0 --max=2 --min-instances=0 --max-instances=2 --cpu 1 --memory 512Mi --concurrency 80 --timeout 300 --tag r476-candidate",
+    "iam_mutating_deploy_flags_forbidden": ["--allow-unauthenticated", "--no-allow-unauthenticated"],
+    "private_access_read_only_gate": {
+      "predeploy_iam_policy_read_required": true,
+      "predeploy_normalized_iam_hash_required": true,
+      "predeploy_public_member_count_required": 0,
+      "postdeploy_iam_policy_read_required": true,
+      "postdeploy_normalized_iam_hash_required": true,
+      "postdeploy_public_member_count_required": 0,
+      "pre_post_iam_hash_match_required": true,
+      "set_iam_policy_audit_call_count_required": 0,
+      "traffic_forbidden_on_hash_mismatch": true,
+      "traffic_forbidden_on_public_member": true,
+      "traffic_forbidden_on_set_iam_policy_audit": true,
+      "traffic_forbidden_on_policy_delta": true
+    },
     "service_wide_flags_required": ["--min=0", "--max=2"],
     "revision_level_flags_required": ["--min-instances=0", "--max-instances=2"],
     "service_wide_limit_is_revision_limit_substitute": false,
@@ -142,7 +157,9 @@
       "value_20_result": "FAIL_TRAFFIC_FORBIDDEN"
     },
     "rejected_revision": "qlib-skillup-runtime-00003-som",
-    "rejected_revision_use": "FORBIDDEN"
+    "rejected_revision_use": "FORBIDDEN",
+    "additional_rejected_revisions": ["qlib-skillup-runtime-00004-kos"],
+    "rejected_revision_reuse": "FORBIDDEN"
   },
   "data_impact": {
     "production_db_read": false,
