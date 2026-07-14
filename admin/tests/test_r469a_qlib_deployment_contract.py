@@ -111,6 +111,12 @@ def test_canonical_artifact_builder_enforces_clean_head_and_rewritten_timestamps
     assert "--platform linux/amd64" in text
     assert "rewrite-timestamp=true" in text
     assert "SOURCE_DATE_EPOCH" in text
+    assert '--builder $CanonicalBuilder' in text
+    assert '$CanonicalBuilder = "desktop-linux"' in text
+    assert '$ExpectedDockerDesktopVersion = "4.50.0.209931"' in text
+    assert '$ExpectedDockerVersion = "28.5.1"' in text
+    assert '$ExpectedBuildxVersion = "v0.29.1-desktop.1"' in text
+    assert '$ExpectedBuildKitVersion = "v0.25.1"' in text
     assert "registry_write = $false" in text
 
 

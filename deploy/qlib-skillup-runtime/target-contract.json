@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "contract_id": "R9ZNW-469A-qlib-skillup-runtime",
+  "contract_id": "R9ZNW-471-qlib-skillup-runtime",
   "contract_status": "FROZEN_TARGET_CONTRACT",
   "source": {
     "repository": "H:/a/퀄리저널_track_a_clean_standalone",
@@ -8,8 +8,8 @@
     "starting_head": "658a8342e3f28bf90b278733eba26c744bc720fa",
     "source_head": {
       "resolver": "git rev-parse HEAD",
-      "required_value": "FINAL_VALIDATED_R469A_COMMIT",
-      "materialization": "image label source_commit and R469A ProofPack resolved contract",
+      "required_value": "FINAL_VALIDATED_R471_COMMIT",
+      "materialization": "image label source_commit and R471 ProofPack resolved contract",
       "reason": "a tracked file cannot contain the hash of the commit that contains itself"
     }
   },
@@ -41,15 +41,34 @@
     "dockerfile": "deploy/qlib-skillup-runtime/Dockerfile",
     "dependency_lock": "deploy/qlib-skillup-runtime/requirements.lock",
     "source_date_epoch_resolver": "git show -s --format=%ct <final-source-commit>",
-    "reproducibility_rule": "two no-cache timestamp-rewritten linux/amd64 OCI archives from the same final commit must be byte-identical and have the same manifest digest",
+    "reproducibility_rule": "two no-cache timestamp-rewritten linux/amd64 OCI archives from the same final commit and the exact canonical toolchain must be byte-identical and have the same manifest, config and layer digests",
     "canonical_build_command": "powershell -File tools/build_qlib_runtime_artifact.ps1 -OutputPath <task-owned-new-path>.tar -SourceCommit <final-source-commit>",
-    "tag_convention": "qlib-skillup-runtime:r469a-<12-char-source-commit>",
-    "immutable_publication_reference": "<registry>/qlib-skillup-runtime@sha256:<digest>",
+    "tag_convention": "qlib-skillup-runtime:r471-<12-char-source-commit>",
+    "immutable_publication_reference": "asia-northeast1-docker.pkg.dev/${ACTIVE_PROJECT}/cloud-run-source-deploy/qlib-skillup-runtime@sha256:<digest>",
+    "registry_resolution": {
+      "project": "runtime-resolved active project; never stored in public evidence",
+      "repository": "cloud-run-source-deploy",
+      "location": "asia-northeast1",
+      "format": "DOCKER",
+      "mode": "STANDARD_REPOSITORY",
+      "public_member_count": 0,
+      "status": "CANONICAL_WITH_LIMITS_READ_ONLY_VERIFIED_R471"
+    },
+    "canonical_toolchain": {
+      "docker_desktop": "4.50.0.209931",
+      "docker_client": "28.5.1",
+      "docker_server": "28.5.1",
+      "buildx": "v0.29.1-desktop.1",
+      "buildkit": "v0.25.1",
+      "builder": "desktop-linux",
+      "driver": "docker",
+      "platform": "linux/amd64"
+    },
     "required_labels": {
       "source_repository": "quali-journal-track-a-clean-standalone",
       "source_branch": "track-a-07s-static-closure-proofpack",
-      "source_commit": "FINAL_VALIDATED_R469A_COMMIT",
-      "task_id": "R9ZNW-469A",
+      "source_commit": "FINAL_VALIDATED_R471_COMMIT",
+      "task_id": "R9ZNW-471",
       "target_service": "qlib-skillup-runtime",
       "target_mode": "authenticated_limited_field_beta"
     }
@@ -154,6 +173,6 @@
     "authenticated smoke results at every stage",
     "monitoring and cost observations",
     "rollback readiness and final owner decision",
-    "R470 ProofPack manifest and SHA256 register"
+    "R472 ProofPack manifest and SHA256 register"
   ]
 }

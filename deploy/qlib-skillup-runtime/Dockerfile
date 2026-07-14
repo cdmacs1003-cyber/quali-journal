@@ -26,7 +26,7 @@ ARG SOURCE_DATE_EPOCH
 LABEL source_repository="${SOURCE_REPOSITORY}" \
       source_branch="${SOURCE_BRANCH}" \
       source_commit="${SOURCE_COMMIT}" \
-      task_id="R9ZNW-469A" \
+      task_id="R9ZNW-471" \
       target_service="qlib-skillup-runtime" \
       target_mode="authenticated_limited_field_beta"
 

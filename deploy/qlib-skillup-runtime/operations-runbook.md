@@ -1,8 +1,8 @@
-# qlib-skillup-runtime R470 deployment runbook
+# qlib-skillup-runtime R472 deployment retry runbook
 
-Status: `READY_NOT_EXECUTED` only after R469A technical validation passes.
+Status: `READY_NOT_EXECUTED` only after R471 artifact reclosure and new owner digest approval pass.
 
-This runbook is for `qlib-skillup-runtime` in `asia-northeast1` only. It must never target or mutate `quali-admin-domap`. It does not grant deployment authorization. Every command below is deferred to a separately authorized R470 packet.
+This runbook is for `qlib-skillup-runtime` in `asia-northeast1` only. It must never target or mutate `quali-admin-domap`. It does not grant deployment authorization. Every command below is deferred to a separately authorized R472 packet.
 
 ## Fixed boundary
 
@@ -14,27 +14,30 @@ This runbook is for `qlib-skillup-runtime` in `asia-northeast1` only. It must ne
 - Resources: min 0, max 2, CPU 1, memory 512Mi, concurrency 80, timeout 300 seconds.
 - Initial stable rollback revision: `qlib-skillup-runtime-00002-d9g`.
 
-## Required R470 variables
+## Required R472 variables
 
-R470 must resolve these without printing credentials or secret values:
+R472 must resolve these without printing credentials or secret values:
 
 ```powershell
-$PROJECT_ID = '<separately-authorized-project-id>'
+$PROJECT_ID = '<runtime-resolved-active-project-id>'
 $REGION = 'asia-northeast1'
 $SERVICE = 'qlib-skillup-runtime'
 $STABLE_REVISION = 'qlib-skillup-runtime-00002-d9g'
 $SOURCE_COMMIT = git rev-parse HEAD
 $SOURCE_DATE_EPOCH = git show -s --format=%ct $SOURCE_COMMIT
 $OCI_ARTIFACT = '<task-owned-new-path>/qlib-skillup-runtime.oci.tar'
-$LOCAL_IMAGE = "qlib-skillup-runtime:r469a-$($SOURCE_COMMIT.Substring(0,12))"
-$IMMUTABLE_IMAGE = '<registry>/qlib-skillup-runtime@sha256:<resolved-digest>'
+$LOCAL_IMAGE = "qlib-skillup-runtime:r471-$($SOURCE_COMMIT.Substring(0,12))"
+$REGISTRY = "asia-northeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy"
+$IMMUTABLE_IMAGE = "$REGISTRY/qlib-skillup-runtime@sha256:<resolved-digest>"
 ```
 
-Abort unless `$SOURCE_COMMIT` is the final validated R469A commit and `git status --short` contains only the 17 preserved inherited untracked candidates.
+Abort unless `$SOURCE_COMMIT` is the final validated R471 commit and `git status --short` contains only the 17 preserved inherited untracked candidates.
+
+The runtime-resolved project value must match the active authenticated project and must not be written to public reports. Abort unless the existing `cloud-run-source-deploy` repository remains a private `DOCKER` `STANDARD_REPOSITORY` in `asia-northeast1`.
 
 ## 1. Pre-deploy evidence and service capture
 
-1. Verify R463-R469A ProofPack manifests and SHA256 registers with zero missing, unregistered or mismatched files.
+1. Verify R463-R471 ProofPack manifests and SHA256 registers with zero missing, unregistered or mismatched files.
 2. Verify the image labels `source_repository`, `source_branch`, `source_commit`, `task_id`, `target_service`, and `target_mode`.
 3. Export current configuration before any mutation:
 
@@ -44,27 +47,27 @@ gcloud run services get-iam-policy $SERVICE --region $REGION --project $PROJECT_
 gcloud run revisions list --service $SERVICE --region $REGION --project $PROJECT_ID --format=json
 ```
 
-Store only redacted/masked metadata in the R470 ProofPack. Capture the current revision and traffic, confirm `$STABLE_REVISION` still exists, and confirm no `allUsers` or `allAuthenticatedUsers` invoker binding.
+Store only redacted/masked metadata in the R472 ProofPack. Capture the current revision and traffic, confirm `$STABLE_REVISION` still exists, and confirm no `allUsers` or `allAuthenticatedUsers` invoker binding.
 
 ## 2. Reproduce and publish the immutable artifact
 
-The R469A local image hash must match the validated artifact. Registry write is allowed only by the future R470 authorization.
+The R471 local image hash must match the newly owner-approved artifact digest. Registry write is allowed only by the future R472 authorization.
 
 ```powershell
 powershell -File tools/build_qlib_runtime_artifact.ps1 -OutputPath $OCI_ARTIFACT -SourceCommit $SOURCE_COMMIT
 docker load --input $OCI_ARTIFACT
 # Publish only through the separately authorized registry workflow.
-docker tag $LOCAL_IMAGE '<registry>/qlib-skillup-runtime:r469a-<12-char-source-commit>'
-docker push '<registry>/qlib-skillup-runtime:r469a-<12-char-source-commit>'
-docker buildx imagetools inspect '<registry>/qlib-skillup-runtime:r469a-<12-char-source-commit>'
+docker tag $LOCAL_IMAGE "$REGISTRY/qlib-skillup-runtime:r471-<12-char-source-commit>"
+docker push "$REGISTRY/qlib-skillup-runtime:r471-<12-char-source-commit>"
+docker buildx imagetools inspect "$REGISTRY/qlib-skillup-runtime:r471-<12-char-source-commit>"
 ```
 
-Resolve `$IMMUTABLE_IMAGE` to the pushed `@sha256:` reference. Stop if its labels or digest differ from the R469A record.
+Resolve `$IMMUTABLE_IMAGE` to the pushed `@sha256:` reference. Stop if its labels or digest differ from the owner-approved R471 record.
 
 ## 3. Create a no-traffic private revision
 
 ```powershell
-gcloud run deploy $SERVICE --project $PROJECT_ID --region $REGION --image $IMMUTABLE_IMAGE --no-traffic --no-allow-unauthenticated --port 8080 --min 0 --max 2 --cpu 1 --memory 512Mi --concurrency 80 --timeout 300 --tag r470-candidate
+gcloud run deploy $SERVICE --project $PROJECT_ID --region $REGION --image $IMMUTABLE_IMAGE --no-traffic --no-allow-unauthenticated --port 8080 --min 0 --max 2 --cpu 1 --memory 512Mi --concurrency 80 --timeout 300 --tag r472-candidate
 ```
 
 Capture the candidate revision name. Confirm no Cloud SQL attachment, volume, migration, queue, scheduler, secret binding, or Production DB/Library setting was added. Required application secret binding count is zero.
@@ -108,4 +111,4 @@ Verify the candidate receives 0% service traffic. Do not delete either revision 
 
 ## 7. Completion evidence and cleanup
 
-The R470 ProofPack must contain redacted pre/post configuration, stable and candidate revisions, immutable image digest and labels, traffic commands/results, stage observation timestamps, health/auth/Evidence/Trace results, leak/write zero counts, cost/capacity observations, rollback evidence if used, final repository state, manifest, and SHA256 register. Remove only task-owned local containers, networks and temporary artifacts. Create the single R470 Completion Report. Deployment remains incomplete until the owner provides explicit R470 execution authorization and the post-deploy evidence passes.
+The R472 ProofPack must contain redacted pre/post configuration, stable and candidate revisions, immutable image digest and labels, traffic commands/results, stage observation timestamps, health/auth/Evidence/Trace results, leak/write zero counts, cost/capacity observations, rollback evidence if used, final repository state, manifest, and SHA256 register. Remove only task-owned local containers, networks and temporary artifacts. Create the single R472 Completion Report. Deployment remains incomplete until the owner provides exact new-digest R472 execution authorization and the post-deploy evidence passes.
