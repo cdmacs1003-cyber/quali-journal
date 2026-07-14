@@ -1,0 +1,1071 @@
+"""Detached, reconnectable traffic-observation controller.
+
+The controller owns only its observation directory and child process.  Local-test
+mode is deterministic and performs no network or HTTP work.  Production mode
+delegates one sample at a time to an approved sampler whose argv is supplied in
+the process-only ``QLIB_OBSERVER_PRODUCTION_SAMPLER`` environment variable.  The
+argv and the sampler's raw output are never written to artifacts.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import ctypes
+import hashlib
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+SCHEMA_VERSION = 1
+PRODUCTION_SAMPLER_ENV = "QLIB_OBSERVER_PRODUCTION_SAMPLER"
+IDENTITY_MATERIAL_ENV = "QLIB_OBSERVER_IDENTITY_MATERIAL"
+OBSERVATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SAFE_SAMPLE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+SENSITIVE_KEY_PARTS = (
+    "answer",
+    "authorization",
+    "credential",
+    "email",
+    "path",
+    "project",
+    "query",
+    "revision",
+    "secret",
+    "service",
+    "token",
+    "url",
+)
+RAW_LOCATION_PATTERN = re.compile(
+    r"(?:[A-Za-z][A-Za-z0-9+.-]*://|[A-Za-z]:[\\/]|(?:^|\s)[\\/]{2}|[^\s@]+@[^\s@]+)"
+)
+STOP_REASONS = ("FAILURE_INJECTION", "OWNER_STOP", "TASK_CLEANUP")
+
+
+class ObserverError(RuntimeError):
+    """Base error whose message is safe to show to an operator."""
+
+
+class DuplicateObservationError(ObserverError):
+    """Raised when an observation id already owns an artifact directory."""
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _validate_observation_id(observation_id: str) -> str:
+    if not OBSERVATION_ID_PATTERN.fullmatch(observation_id):
+        raise ObserverError("observation_id must use 1-64 safe identifier characters")
+    return observation_id
+
+
+def _artifact_dir(artifact_root: Path | str, observation_id: str) -> Path:
+    safe_id = _validate_observation_id(observation_id)
+    return Path(artifact_root).resolve() / safe_id
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp"
+    )
+    encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+    for attempt in range(40):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if attempt == 39:
+                raise
+            time.sleep(0.025)
+        except OSError as exc:
+            if (
+                os.name != "nt"
+                or getattr(exc, "winerror", None) not in {5, 32, 33}
+                or attempt == 39
+            ):
+                raise
+            time.sleep(0.025)
+
+
+def _append_event(path: Path, payload: dict[str, Any]) -> None:
+    encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n"
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _read_json(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _pid_exists(pid: int | None) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return False
+        return exit_code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _acquire_terminal_claim(directory: Path, outcome: str) -> bool:
+    claim_path = directory / "terminal-claim.json"
+    for _attempt in range(2):
+        try:
+            descriptor = os.open(
+                claim_path,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+        except FileExistsError:
+            if (directory / "final.json").exists() or (
+                directory / "incomplete.json"
+            ).exists():
+                return False
+            claim = _read_json(claim_path) or {}
+            owner_pid = claim.get("pid")
+            if isinstance(owner_pid, int) and not _pid_exists(owner_pid):
+                try:
+                    claim_path.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+            return False
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "outcome": outcome,
+            "pid": os.getpid(),
+            "claimed_at_utc": _utc_now(),
+        }
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        return True
+    return False
+
+
+def _launch_via_wmi(command: list[str]) -> int:
+    command_line = subprocess.list2cmdline(command)
+    encoded_command_line = base64.b64encode(command_line.encode("utf-8")).decode("ascii")
+    powershell_source = (
+        "$c=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
+        + encoded_command_line
+        + "'));"
+        + "$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+        + "-Arguments @{CommandLine=$c};"
+        + "if($null-eq$r-or[int]$r.ReturnValue-ne0){exit 41};"
+        + "[Console]::Out.Write([string]$r.ProcessId)"
+    )
+    encoded_powershell = base64.b64encode(
+        powershell_source.encode("utf-16le")
+    ).decode("ascii")
+    try:
+        completed = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-EncodedCommand",
+                encoded_powershell,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+    except OSError as exc:
+        raise ObserverError("WMI observer launch is unavailable") from exc
+    process_ids = re.findall(r"\b\d+\b", completed.stdout)
+    if completed.returncode != 0 or not process_ids:
+        raise ObserverError("WMI observer launch is unavailable")
+    process_id = int(process_ids[-1])
+    if process_id <= 0:
+        raise ObserverError("WMI observer launch is unavailable")
+    return process_id
+
+
+def _validate_configuration(
+    *,
+    duration_seconds: float,
+    sample_interval_seconds: float,
+    max_gap_seconds: float,
+    stale_after_seconds: float,
+    mode: str,
+) -> None:
+    if mode not in {"local-test", "production"}:
+        raise ObserverError("mode must be local-test or production")
+    if duration_seconds <= 0:
+        raise ObserverError("duration_seconds must be positive")
+    if sample_interval_seconds <= 0:
+        raise ObserverError("sample_interval_seconds must be positive")
+    if max_gap_seconds < sample_interval_seconds:
+        raise ObserverError("max_gap_seconds must be at least the sample interval")
+    if stale_after_seconds <= max_gap_seconds:
+        raise ObserverError("stale_after_seconds must exceed max_gap_seconds")
+
+
+def _load_production_sampler(environment: dict[str, str] | None = None) -> list[str]:
+    source = (environment or os.environ).get(PRODUCTION_SAMPLER_ENV, "")
+    try:
+        argv = json.loads(source)
+    except json.JSONDecodeError as exc:
+        raise ObserverError("production sampler configuration is missing or invalid") from exc
+    return _validate_sampler_argv(argv)
+
+
+def _validate_sampler_argv(argv: Any) -> list[str]:
+    if (
+        not isinstance(argv, list)
+        or not argv
+        or len(argv) > 32
+        or any(not isinstance(item, str) or not item or len(item) > 1024 for item in argv)
+    ):
+        raise ObserverError("production sampler configuration is missing or invalid")
+    return list(argv)
+
+
+def _decode_sampler_argv(encoded: str) -> list[str]:
+    try:
+        raw = base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8")
+        argv = json.loads(raw)
+    except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ObserverError("production sampler configuration is missing or invalid") from exc
+    return _validate_sampler_argv(argv)
+
+
+def _sanitize_sample_value(value: Any, *, key: str = "sample") -> Any:
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ObserverError("sampler returned a non-finite number")
+        return value
+    if isinstance(value, str):
+        if len(value) > 128 or RAW_LOCATION_PATTERN.search(value) or "\\" in value or "/" in value:
+            raise ObserverError("sampler returned a disallowed string value")
+        return value
+    if isinstance(value, list):
+        if len(value) > 64:
+            raise ObserverError("sampler returned an oversized list")
+        return [_sanitize_sample_value(item, key=key) for item in value]
+    if isinstance(value, dict):
+        if len(value) > 64:
+            raise ObserverError("sampler returned an oversized object")
+        sanitized: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str) or not SAFE_SAMPLE_KEY_PATTERN.fullmatch(raw_key):
+                raise ObserverError("sampler returned an invalid field name")
+            if any(part in raw_key.lower() for part in SENSITIVE_KEY_PARTS):
+                raise ObserverError("sampler returned a disallowed field")
+            sanitized[raw_key] = _sanitize_sample_value(raw_value, key=raw_key)
+        return sanitized
+    raise ObserverError(f"sampler returned an unsupported value for {key}")
+
+
+def _local_sample(observation_id: str, sequence: int) -> dict[str, Any]:
+    seed = f"{observation_id}:{sequence}".encode("utf-8")
+    return {
+        "sample_status": "OK",
+        "deterministic_value": hashlib.sha256(seed).hexdigest()[:16],
+    }
+
+
+def _production_sample(argv: list[str], timeout_seconds: float) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            shell=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ObserverError("production sampler execution failed") from exc
+    if completed.returncode != 0:
+        raise ObserverError("production sampler execution failed")
+    try:
+        raw_sample = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise ObserverError("production sampler returned invalid JSON") from exc
+    sanitized = _sanitize_sample_value(raw_sample)
+    if not isinstance(sanitized, dict):
+        raise ObserverError("production sampler must return a JSON object")
+    return sanitized
+
+
+def _write_incomplete(
+    directory: Path,
+    *,
+    reason: str,
+    process_exit_code: int,
+) -> dict[str, Any]:
+    existing_final = _read_json(directory / "final.json")
+    if existing_final is not None:
+        return existing_final
+    existing = _read_json(directory / "incomplete.json")
+    if existing is not None:
+        return existing
+
+    start = _read_json(directory / "start.json") or {}
+    state = _read_json(directory / "state.json") or {}
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "observation_id": start.get("observation_id"),
+        "mode": start.get("mode"),
+        "status": "INCOMPLETE",
+        "verification_status": "NOT_VERIFIED",
+        "reason": reason,
+        "requested_duration_seconds": start.get("requested_duration_seconds"),
+        "started_at_utc": start.get("started_at_utc"),
+        "ended_at_utc": _utc_now(),
+        "monotonic_elapsed_seconds": state.get("monotonic_elapsed_seconds", 0.0),
+        "sample_count": state.get("sample_count", 0),
+        "sample_interval_seconds": start.get("sample_interval_seconds"),
+        "maximum_gap_seconds": state.get("maximum_gap_seconds", 0.0),
+        "maximum_allowed_gap_seconds": start.get("maximum_allowed_gap_seconds"),
+        "process_exit_code": process_exit_code,
+        "completion_marker": False,
+    }
+    if not _acquire_terminal_claim(directory, "INCOMPLETE"):
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            existing_final = _read_json(directory / "final.json")
+            if existing_final is not None:
+                return existing_final
+            existing = _read_json(directory / "incomplete.json")
+            if existing is not None:
+                return existing
+            time.sleep(0.02)
+        payload["reason"] = "TERMINAL_WRITE_PENDING"
+        return payload
+
+    if (directory / "final.json").exists():
+        return _read_json(directory / "final.json") or payload
+    _append_event(
+        directory / "events.ndjson",
+        {
+            "event": "INCOMPLETE",
+            "at_utc": payload["ended_at_utc"],
+            "reason": reason,
+            "process_exit_code": process_exit_code,
+        },
+    )
+    state.update(
+        {
+            "status": "INCOMPLETE",
+            "verification_status": "NOT_VERIFIED",
+            "reason": reason,
+            "ended_at_utc": payload["ended_at_utc"],
+        }
+    )
+    _atomic_write_json(directory / "state.json", state)
+    _atomic_write_json(directory / "incomplete.json", payload)
+    return _read_json(directory / "incomplete.json") or payload
+
+
+def start_observation(
+    *,
+    artifact_root: Path | str,
+    observation_id: str,
+    duration_seconds: float,
+    sample_interval_seconds: float,
+    max_gap_seconds: float,
+    stale_after_seconds: float,
+    mode: str,
+) -> dict[str, Any]:
+    _validate_configuration(
+        duration_seconds=duration_seconds,
+        sample_interval_seconds=sample_interval_seconds,
+        max_gap_seconds=max_gap_seconds,
+        stale_after_seconds=stale_after_seconds,
+        mode=mode,
+    )
+    production_sampler = _load_production_sampler() if mode == "production" else None
+
+    directory = _artifact_dir(artifact_root, observation_id)
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        directory.mkdir()
+    except FileExistsError as exc:
+        raise DuplicateObservationError("duplicate observation_id detected") from exc
+
+    launched_at = _utc_now()
+    start = {
+        "schema_version": SCHEMA_VERSION,
+        "observation_id": observation_id,
+        "mode": mode,
+        "launcher_started_at_utc": launched_at,
+        "requested_duration_seconds": duration_seconds,
+        "sample_interval_seconds": sample_interval_seconds,
+        "maximum_allowed_gap_seconds": max_gap_seconds,
+        "stale_after_seconds": stale_after_seconds,
+    }
+    _atomic_write_json(directory / "start.json", start)
+    _atomic_write_json(
+        directory / "state.json",
+        {
+            "schema_version": SCHEMA_VERSION,
+            "observation_id": observation_id,
+            "mode": mode,
+            "status": "STARTING",
+            "sample_count": 0,
+            "maximum_gap_seconds": 0.0,
+            "monotonic_elapsed_seconds": 0.0,
+        },
+    )
+    _append_event(
+        directory / "events.ndjson",
+        {"event": "LAUNCHED", "at_utc": launched_at, "mode": mode},
+    )
+
+    command = [
+        sys.executable,
+        "-B",
+        str(Path(__file__).resolve()),
+        "_run",
+        "--artifact-dir",
+        str(directory),
+    ]
+    if production_sampler is not None:
+        encoded_sampler = base64.urlsafe_b64encode(
+            json.dumps(production_sampler, ensure_ascii=True).encode("utf-8")
+        ).decode("ascii")
+        command.extend(["--sampler-config-b64", encoded_sampler])
+    child_environment = os.environ.copy()
+    child_environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    child_environment.pop(PRODUCTION_SAMPLER_ENV, None)
+    child_environment.pop(IDENTITY_MATERIAL_ENV, None)
+    popen_options: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+        "env": child_environment,
+    }
+    if os.name == "nt":
+        popen_options["creationflags"] = (
+            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+        )
+    else:
+        popen_options["start_new_session"] = True
+
+    try:
+        child = subprocess.Popen(command, **popen_options)
+    except PermissionError as exc:
+        if os.name != "nt" or getattr(exc, "winerror", None) != 5:
+            _write_incomplete(directory, reason="LAUNCH_FAILED", process_exit_code=70)
+            raise ObserverError("detached observer launch failed") from exc
+        try:
+            child_pid = _launch_via_wmi(command)
+        except ObserverError:
+            _write_incomplete(directory, reason="LAUNCH_FAILED", process_exit_code=70)
+            raise
+        _atomic_write_json(
+            directory / "process.json",
+            {
+                "schema_version": SCHEMA_VERSION,
+                "observation_id": observation_id,
+                "pid": child_pid,
+                "launched_at_utc": launched_at,
+                "launcher_backend": "WINDOWS_WMI",
+            },
+        )
+        return {
+            "observation_id": observation_id,
+            "mode": mode,
+            "status": "STARTED",
+            "pid": child_pid,
+            "launcher_backend": "WINDOWS_WMI",
+            "artifact_path": str(directory),
+        }
+    except OSError as exc:
+        _write_incomplete(directory, reason="LAUNCH_FAILED", process_exit_code=70)
+        raise ObserverError("detached observer launch failed") from exc
+
+    child_pid = child.pid
+    # The detached worker is intentionally not waitable by this short-lived
+    # launcher.  Mark only the local Popen wrapper as released so its destructor
+    # does not report the still-running, independently owned worker as a leak.
+    child.returncode = 0
+    _atomic_write_json(
+        directory / "process.json",
+        {
+            "schema_version": SCHEMA_VERSION,
+            "observation_id": observation_id,
+            "pid": child_pid,
+            "launched_at_utc": launched_at,
+        },
+    )
+    return {
+        "observation_id": observation_id,
+        "mode": mode,
+        "status": "STARTED",
+        "pid": child_pid,
+        "launcher_backend": "DIRECT_PROCESS",
+        "artifact_path": str(directory),
+    }
+
+
+def _run_worker(
+    directory: Path,
+    *,
+    sampler_config_b64: str | None = None,
+) -> int:
+    start = _read_json(directory / "start.json")
+    if start is None:
+        return 70
+    observation_id = str(start.get("observation_id", ""))
+    mode = str(start.get("mode", ""))
+    try:
+        _validate_observation_id(observation_id)
+        duration_seconds = float(start["requested_duration_seconds"])
+        interval_seconds = float(start["sample_interval_seconds"])
+        max_gap_seconds = float(start["maximum_allowed_gap_seconds"])
+        stale_after_seconds = float(start["stale_after_seconds"])
+        _validate_configuration(
+            duration_seconds=duration_seconds,
+            sample_interval_seconds=interval_seconds,
+            max_gap_seconds=max_gap_seconds,
+            stale_after_seconds=stale_after_seconds,
+            mode=mode,
+        )
+        sampler_argv = (
+            _decode_sampler_argv(sampler_config_b64)
+            if mode == "production" and sampler_config_b64
+            else _load_production_sampler()
+            if mode == "production"
+            else None
+        )
+    except (KeyError, TypeError, ValueError, ObserverError):
+        _write_incomplete(directory, reason="INVALID_START_METADATA", process_exit_code=70)
+        return 70
+
+    started_at_utc = _utc_now()
+    start["started_at_utc"] = started_at_utc
+    _atomic_write_json(directory / "start.json", start)
+    _append_event(
+        directory / "events.ndjson",
+        {"event": "WORKER_STARTED", "at_utc": started_at_utc, "mode": mode},
+    )
+
+    started_monotonic = time.monotonic()
+    previous_sample_monotonic: float | None = None
+    maximum_gap_seconds = 0.0
+    sample_count = 0
+    next_sample_monotonic = started_monotonic
+
+    while True:
+        if (directory / "incomplete.json").exists():
+            return 42
+        stop_request = _read_json(directory / "stop-request.json")
+        if stop_request is not None:
+            reason = str(stop_request.get("reason", "TASK_CLEANUP"))
+            if reason not in STOP_REASONS:
+                reason = "TASK_CLEANUP"
+            _write_incomplete(directory, reason=reason, process_exit_code=42)
+            return 42
+
+        now_monotonic = time.monotonic()
+        if now_monotonic < next_sample_monotonic:
+            time.sleep(min(0.2, next_sample_monotonic - now_monotonic))
+            continue
+
+        elapsed = now_monotonic - started_monotonic
+        if previous_sample_monotonic is not None:
+            maximum_gap_seconds = max(
+                maximum_gap_seconds, now_monotonic - previous_sample_monotonic
+            )
+        previous_sample_monotonic = now_monotonic
+
+        try:
+            if mode == "local-test":
+                sample = _local_sample(observation_id, sample_count)
+            else:
+                assert sampler_argv is not None
+                sample = _production_sample(
+                    sampler_argv,
+                    timeout_seconds=max(1.0, min(interval_seconds, 30.0)),
+                )
+        except ObserverError:
+            _write_incomplete(directory, reason="SAMPLER_FAILURE", process_exit_code=42)
+            return 42
+
+        sampled_at_utc = _utc_now()
+        sample_count += 1
+        rounded_elapsed = round(time.monotonic() - started_monotonic, 6)
+        rounded_gap = round(maximum_gap_seconds, 6)
+        sample_event = {
+            "event": "SAMPLE",
+            "at_utc": sampled_at_utc,
+            "sequence": sample_count,
+            "monotonic_elapsed_seconds": rounded_elapsed,
+            "mode": mode,
+            "sample": sample,
+        }
+        _append_event(directory / "events.ndjson", sample_event)
+        _atomic_write_json(
+            directory / "heartbeat.json",
+            {
+                "schema_version": SCHEMA_VERSION,
+                "observation_id": observation_id,
+                "mode": mode,
+                "heartbeat_at_utc": sampled_at_utc,
+                "sequence": sample_count,
+                "monotonic_elapsed_seconds": rounded_elapsed,
+                "maximum_gap_seconds": rounded_gap,
+            },
+        )
+        state = {
+            "schema_version": SCHEMA_VERSION,
+            "observation_id": observation_id,
+            "mode": mode,
+            "status": "RUNNING",
+            "verification_status": "NOT_VERIFIED",
+            "pid": os.getpid(),
+            "started_at_utc": started_at_utc,
+            "last_heartbeat_at_utc": sampled_at_utc,
+            "sample_count": sample_count,
+            "monotonic_elapsed_seconds": rounded_elapsed,
+            "maximum_gap_seconds": rounded_gap,
+        }
+        _atomic_write_json(directory / "state.json", state)
+
+        if maximum_gap_seconds > max_gap_seconds:
+            _write_incomplete(directory, reason="SAMPLE_GAP_EXCEEDED", process_exit_code=42)
+            return 42
+        if rounded_elapsed >= duration_seconds:
+            ended_at_utc = _utc_now()
+            final = {
+                "schema_version": SCHEMA_VERSION,
+                "observation_id": observation_id,
+                "mode": mode,
+                "status": "PASS",
+                "verification_status": "PASS",
+                "completion_marker": True,
+                "requested_duration_seconds": duration_seconds,
+                "started_at_utc": started_at_utc,
+                "ended_at_utc": ended_at_utc,
+                "monotonic_elapsed_seconds": rounded_elapsed,
+                "sample_count": sample_count,
+                "expected_minimum_sample_count": math.floor(
+                    duration_seconds / interval_seconds
+                )
+                + 1,
+                "sample_interval_seconds": interval_seconds,
+                "maximum_gap_seconds": rounded_gap,
+                "maximum_allowed_gap_seconds": max_gap_seconds,
+                "process_exit_code": 0,
+            }
+            if (directory / "incomplete.json").exists():
+                return 42
+            if not _acquire_terminal_claim(directory, "PASS"):
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    if (directory / "final.json").exists():
+                        return 0
+                    if (directory / "incomplete.json").exists():
+                        return 42
+                    time.sleep(0.02)
+                return 42
+            _append_event(
+                directory / "events.ndjson",
+                {
+                    "event": "COMPLETED",
+                    "at_utc": ended_at_utc,
+                    "monotonic_elapsed_seconds": rounded_elapsed,
+                    "sample_count": sample_count,
+                },
+            )
+            state.update(
+                {
+                    "status": "PASS",
+                    "verification_status": "PASS",
+                    "ended_at_utc": ended_at_utc,
+                    "process_exit_code": 0,
+                }
+            )
+            _atomic_write_json(directory / "state.json", state)
+            # The completion marker is the final write.  A reconnecting poller
+            # can therefore treat its presence as proof that all incremental
+            # state has already been flushed.
+            _atomic_write_json(directory / "final.json", final)
+            return 0
+
+        next_sample_monotonic = started_monotonic + sample_count * interval_seconds
+
+
+def _validate_final(start: dict[str, Any], final: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if final.get("completion_marker") is not True:
+        failures.append("MISSING_COMPLETION_MARKER")
+    if final.get("status") != "PASS" or final.get("verification_status") != "PASS":
+        failures.append("FINAL_STATUS_NOT_PASS")
+    if final.get("observation_id") != start.get("observation_id"):
+        failures.append("OBSERVATION_ID_MISMATCH")
+    if final.get("mode") != start.get("mode"):
+        failures.append("MODE_MISMATCH")
+    try:
+        requested = float(start["requested_duration_seconds"])
+        elapsed = float(final["monotonic_elapsed_seconds"])
+        maximum_gap = float(final["maximum_gap_seconds"])
+        allowed_gap = float(start["maximum_allowed_gap_seconds"])
+        sample_count = int(final["sample_count"])
+    except (KeyError, TypeError, ValueError):
+        failures.append("FINAL_NUMERIC_FIELDS_INVALID")
+    else:
+        if elapsed < requested:
+            failures.append("REQUESTED_DURATION_NOT_MET")
+        if maximum_gap > allowed_gap:
+            failures.append("SAMPLE_GAP_EXCEEDED")
+        if sample_count < 1:
+            failures.append("SAMPLE_COUNT_INVALID")
+    if final.get("process_exit_code") != 0:
+        failures.append("PROCESS_EXIT_CODE_NOT_ZERO")
+    return failures
+
+
+def poll_observation(
+    *, artifact_root: Path | str, observation_id: str
+) -> dict[str, Any]:
+    directory = _artifact_dir(artifact_root, observation_id)
+    start = _read_json(directory / "start.json")
+    if start is None:
+        return {
+            "observation_id": observation_id,
+            "status": "NOT_VERIFIED",
+            "verification_status": "NOT_VERIFIED",
+            "reason": "START_METADATA_MISSING",
+        }
+
+    final = _read_json(directory / "final.json")
+    incomplete = _read_json(directory / "incomplete.json")
+    if final is not None and incomplete is not None:
+        return {
+            "observation_id": observation_id,
+            "mode": start.get("mode"),
+            "status": "NOT_VERIFIED",
+            "verification_status": "NOT_VERIFIED",
+            "reason": "TERMINAL_ARTIFACT_CONFLICT",
+        }
+    if incomplete is not None:
+        return incomplete
+    if final is not None:
+        failures = _validate_final(start, final)
+        if failures:
+            return {
+                "observation_id": observation_id,
+                "mode": start.get("mode"),
+                "status": "NOT_VERIFIED",
+                "verification_status": "NOT_VERIFIED",
+                "reason": "INVALID_FINAL_SUMMARY",
+                "validation_failures": failures,
+            }
+        return final
+
+    state = _read_json(directory / "state.json") or {}
+    heartbeat = _read_json(directory / "heartbeat.json") or {}
+    process = _read_json(directory / "process.json") or {}
+    stop_request = _read_json(directory / "stop-request.json")
+    if stop_request is not None:
+        requested_reason = str(stop_request.get("reason", "TASK_CLEANUP"))
+        if requested_reason not in STOP_REASONS:
+            requested_reason = "TASK_CLEANUP"
+        stop_pid = process.get("pid")
+        if _pid_exists(stop_pid if isinstance(stop_pid, int) else None):
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "observation_id": observation_id,
+                "mode": start.get("mode"),
+                "status": "RUNNING",
+                "phase": "STOPPING",
+                "verification_status": "NOT_VERIFIED",
+                "pid": stop_pid,
+                "sample_count": state.get("sample_count", 0),
+                "monotonic_elapsed_seconds": state.get(
+                    "monotonic_elapsed_seconds", 0.0
+                ),
+                "completion_marker": False,
+            }
+        return _write_incomplete(
+            directory, reason=requested_reason, process_exit_code=42
+        )
+    try:
+        maximum_gap = float(state.get("maximum_gap_seconds", 0.0))
+        allowed_gap = float(start["maximum_allowed_gap_seconds"])
+    except (KeyError, TypeError, ValueError):
+        maximum_gap, allowed_gap = 0.0, 0.0
+    if maximum_gap > allowed_gap:
+        return _write_incomplete(
+            directory, reason="SAMPLE_GAP_EXCEEDED", process_exit_code=42
+        )
+
+    heartbeat_at = (
+        heartbeat.get("heartbeat_at_utc")
+        or start.get("started_at_utc")
+        or start.get("launcher_started_at_utc")
+    )
+    heartbeat_age: float | None = None
+    if isinstance(heartbeat_at, str):
+        try:
+            heartbeat_age = max(
+                0.0,
+                (datetime.now(timezone.utc) - _parse_utc(heartbeat_at)).total_seconds(),
+            )
+        except ValueError:
+            heartbeat_age = None
+    try:
+        stale_after = float(start["stale_after_seconds"])
+    except (KeyError, TypeError, ValueError):
+        stale_after = 0.0
+    if heartbeat_age is None or heartbeat_age > stale_after:
+        return _write_incomplete(
+            directory, reason="STALE_HEARTBEAT", process_exit_code=42
+        )
+
+    pid = process.get("pid")
+    if pid is None:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "observation_id": observation_id,
+            "mode": start.get("mode"),
+            "status": "RUNNING",
+            "phase": "STARTING",
+            "verification_status": "NOT_VERIFIED",
+            "pid": None,
+            "monotonic_elapsed_seconds": state.get("monotonic_elapsed_seconds", 0.0),
+            "sample_count": state.get("sample_count", 0),
+            "maximum_gap_seconds": maximum_gap,
+            "maximum_allowed_gap_seconds": allowed_gap,
+            "heartbeat_age_seconds": round(heartbeat_age, 6),
+            "completion_marker": False,
+        }
+    if not _pid_exists(pid if isinstance(pid, int) else None):
+        loss_path = directory / "process-loss.json"
+        loss = _read_json(loss_path)
+        heartbeat_sequence = heartbeat.get("sequence")
+        if loss is None or loss.get("heartbeat_sequence") != heartbeat_sequence:
+            loss = {
+                "schema_version": SCHEMA_VERSION,
+                "observation_id": observation_id,
+                "first_detected_at_utc": _utc_now(),
+                "heartbeat_sequence": heartbeat_sequence,
+                "consecutive_detection_count": 1,
+            }
+            _atomic_write_json(loss_path, loss)
+        else:
+            loss["consecutive_detection_count"] = int(
+                loss.get("consecutive_detection_count", 1)
+            ) + 1
+            loss["last_detected_at_utc"] = _utc_now()
+            _atomic_write_json(loss_path, loss)
+        try:
+            loss_age = (
+                datetime.now(timezone.utc)
+                - _parse_utc(str(loss["first_detected_at_utc"]))
+            ).total_seconds()
+        except (KeyError, ValueError):
+            loss_age = 0.0
+        if loss_age >= 1.0 and int(loss.get("consecutive_detection_count", 0)) >= 2:
+            return _write_incomplete(
+                directory, reason="CHILD_PROCESS_LOSS", process_exit_code=42
+            )
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "observation_id": observation_id,
+            "mode": start.get("mode"),
+            "status": "RUNNING",
+            "phase": "CHILD_PROCESS_LOSS_SUSPECTED",
+            "verification_status": "NOT_VERIFIED",
+            "pid": pid,
+            "monotonic_elapsed_seconds": state.get("monotonic_elapsed_seconds", 0.0),
+            "sample_count": state.get("sample_count", 0),
+            "completion_marker": False,
+        }
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "observation_id": observation_id,
+        "mode": start.get("mode"),
+        "status": "RUNNING",
+        "verification_status": "NOT_VERIFIED",
+        "pid": pid,
+        "monotonic_elapsed_seconds": state.get("monotonic_elapsed_seconds", 0.0),
+        "sample_count": state.get("sample_count", 0),
+        "maximum_gap_seconds": maximum_gap,
+        "maximum_allowed_gap_seconds": allowed_gap,
+        "heartbeat_age_seconds": round(heartbeat_age, 6),
+        "completion_marker": False,
+    }
+
+
+def stop_observation(
+    *,
+    artifact_root: Path | str,
+    observation_id: str,
+    reason: str,
+    wait_seconds: float = 10.0,
+) -> dict[str, Any]:
+    if reason not in STOP_REASONS:
+        raise ObserverError("unsupported stop reason")
+    directory = _artifact_dir(artifact_root, observation_id)
+    current = poll_observation(artifact_root=artifact_root, observation_id=observation_id)
+    if current.get("status") != "RUNNING":
+        return current
+    _atomic_write_json(
+        directory / "stop-request.json",
+        {
+            "schema_version": SCHEMA_VERSION,
+            "observation_id": observation_id,
+            "reason": reason,
+            "requested_at_utc": _utc_now(),
+        },
+    )
+    deadline = time.monotonic() + max(0.0, wait_seconds)
+    while time.monotonic() < deadline:
+        time.sleep(0.1)
+        current = poll_observation(
+            artifact_root=artifact_root, observation_id=observation_id
+        )
+        if current.get("status") != "RUNNING":
+            return current
+    return {
+        "observation_id": observation_id,
+        "status": "STOP_REQUESTED",
+        "verification_status": "NOT_VERIFIED",
+        "reason": reason,
+    }
+
+
+def _print_json(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=True, sort_keys=True, indent=2))
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Detached QLIB traffic observer")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    start_parser = subparsers.add_parser("start")
+    start_parser.add_argument("--artifact-root", required=True)
+    start_parser.add_argument("--observation-id", required=True)
+    start_parser.add_argument("--duration-seconds", type=float, required=True)
+    start_parser.add_argument("--sample-interval-seconds", type=float, default=5.0)
+    start_parser.add_argument("--max-gap-seconds", type=float, default=8.0)
+    start_parser.add_argument("--stale-after-seconds", type=float, default=20.0)
+    start_parser.add_argument("--mode", choices=("local-test", "production"), required=True)
+
+    poll_parser = subparsers.add_parser("poll")
+    poll_parser.add_argument("--artifact-root", required=True)
+    poll_parser.add_argument("--observation-id", required=True)
+
+    stop_parser = subparsers.add_parser("stop")
+    stop_parser.add_argument("--artifact-root", required=True)
+    stop_parser.add_argument("--observation-id", required=True)
+    stop_parser.add_argument("--reason", choices=STOP_REASONS, required=True)
+
+    worker_parser = subparsers.add_parser("_run", help=argparse.SUPPRESS)
+    worker_parser.add_argument("--artifact-dir", required=True)
+    worker_parser.add_argument("--sampler-config-b64")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    try:
+        if args.command == "start":
+            result = start_observation(
+                artifact_root=args.artifact_root,
+                observation_id=args.observation_id,
+                duration_seconds=args.duration_seconds,
+                sample_interval_seconds=args.sample_interval_seconds,
+                max_gap_seconds=args.max_gap_seconds,
+                stale_after_seconds=args.stale_after_seconds,
+                mode=args.mode,
+            )
+        elif args.command == "poll":
+            result = poll_observation(
+                artifact_root=args.artifact_root,
+                observation_id=args.observation_id,
+            )
+        elif args.command == "stop":
+            result = stop_observation(
+                artifact_root=args.artifact_root,
+                observation_id=args.observation_id,
+                reason=args.reason,
+            )
+        else:
+            return _run_worker(
+                Path(args.artifact_dir).resolve(),
+                sampler_config_b64=args.sampler_config_b64,
+            )
+    except DuplicateObservationError as exc:
+        _print_json(
+            {
+                "status": "DUPLICATE_OBSERVATION_ID",
+                "verification_status": "NOT_VERIFIED",
+                "reason": str(exc),
+            }
+        )
+        return 3
+    except ObserverError as exc:
+        _print_json(
+            {
+                "status": "NOT_VERIFIED",
+                "verification_status": "NOT_VERIFIED",
+                "reason": str(exc),
+            }
+        )
+        return 2
+
+    _print_json(result)
+    return 0 if result.get("status") in {"STARTED", "RUNNING", "PASS"} else 4
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

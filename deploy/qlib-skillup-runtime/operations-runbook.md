@@ -1,8 +1,10 @@
-# qlib-skillup-runtime R474 deployment retry runbook
+# qlib-skillup-runtime limited field beta deployment runbook
 
-Status: `READY_NOT_EXECUTED` only after R473 scaling-contract reclosure and new owner digest approval pass.
+Status: `R476_STOPPED_AND_ROLLED_BACK`; any retry remains `NOT_GRANTED` pending an exact R478 owner decision.
 
 This runbook is for `qlib-skillup-runtime` in `asia-northeast1` only. It must never target or mutate `quali-admin-domap`. It does not grant deployment authorization. Every command below is deferred to a separately authorized R476 packet.
+
+The R476 authorization is spent. No retry or mutation is allowed unless a separate exact R478 owner decision grants it.
 
 ## Fixed boundary
 
@@ -16,6 +18,7 @@ This runbook is for `qlib-skillup-runtime` in `asia-northeast1` only. It must ne
 - Service-wide max 2 never substitutes for immutable revision annotation `autoscaling.knative.dev/maxScale=2`.
 - Initial stable rollback revision: `qlib-skillup-runtime-00002-d9g`.
 - Rejected revision `qlib-skillup-runtime-00003-som` must remain at 0% percentage traffic and must not be reused.
+- Withdrawn R476 candidate `qlib-skillup-runtime-00010-zuj` must remain at 0% traffic and must not be reused.
 
 ## Required R474 variables
 
@@ -106,6 +109,21 @@ Remain at 0% until the immutable maxScale gate and every smoke check pass. Any f
 ## 5. Staged traffic and observations
 
 At each stage, preserve the exact candidate/stable split, execute the health/auth/Evidence/Trace checks, and record error, latency, instance, CPU, memory and cost signals.
+
+Every 10/15-minute window must use the canonical detached controller. The launcher must return promptly, and every later poll must run from a new shell using the same observation id. PowerShell background jobs and a foreground sleep/observe loop are forbidden because their lifetime is coupled to the launching shell. The task-owned production sampler is passed only through the process environment, obtains identity material in its own memory, and emits sanitized JSON; its argv, identity material, raw URL, request text and raw output must never be persisted by the controller.
+
+```powershell
+$OBSERVER_ROOT = '<task-owned-proofpack-root>/observer'
+$OBSERVATION_ID = 'stage-005-<approved-run-id>'
+$env:QLIB_OBSERVER_PRODUCTION_SAMPLER = '["powershell","-NoProfile","-File","<approved-task-owned-sanitized-sampler>"]'
+python -B tools/qlib_traffic_observer.py start --artifact-root $OBSERVER_ROOT --observation-id $OBSERVATION_ID --mode production --duration-seconds 600 --sample-interval-seconds 50 --max-gap-seconds 58 --stale-after-seconds 75
+$env:QLIB_OBSERVER_PRODUCTION_SAMPLER = $null
+
+# Run from a new shell; each invocation returns immediately.
+python -B tools/qlib_traffic_observer.py poll --artifact-root $OBSERVER_ROOT --observation-id $OBSERVATION_ID
+```
+
+Use 600 seconds for the 5% and 20% stages and 900 seconds for the 50% and 100% stages. A stage is PASS only when `final.json` exists, `completion_marker=true`, `process_exit_code=0`, `monotonic_elapsed_seconds` is at least the requested duration, and the recorded maximum gap does not exceed the configured limit. Missing final markers, stale heartbeats, excess sample gaps, duplicate observation ids and child-process loss are `INCOMPLETE/NOT_VERIFIED` and trigger the stop procedure. Keep `start.json`, `events.ndjson`, `heartbeat.json`, `state.json`, and either `final.json` or `incomplete.json` in the ProofPack.
 
 ```powershell
 gcloud run services update-traffic $SERVICE --project $PROJECT_ID --region $REGION --to-revisions "$CANDIDATE_REVISION=5,$STABLE_REVISION=95"
