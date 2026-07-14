@@ -270,6 +270,14 @@
   .q-beta-evidence-hold strong{display:block;color:var(--q-hold)}
   .q-beta-evidence-hold p{margin:6px 0 0;color:var(--q-text-700);line-height:1.6}
   .q-beta-operations{margin-top:12px}
+  .q-beta-operations-disclosure{margin-top:12px}
+  .q-beta-operations-disclosure > summary{
+    cursor:pointer;
+    color:var(--q-text-700);
+    font-weight:800;
+    line-height:1.5;
+  }
+  .q-beta-operations-disclosure > .q-beta-operations{margin-top:8px}
   .q-beta-operations-header{
     display:flex;
     align-items:center;
@@ -383,7 +391,7 @@
       <div id="beta-minimal-result" class="q-beta-result" role="status" aria-live="polite">질문을 보내면 답변 또는 보류 상태를 확인합니다.</div>
       <div id="beta-evidence-state" class="q-beta-evidence-state" aria-live="polite" hidden>
         <details id="beta-evidence-details" class="q-beta-evidence-details" hidden>
-          <summary>근거 보기</summary>
+          <summary>판단 근거 보기</summary>
           <dl class="q-beta-summary">
             <div><dt>근거 있음</dt><dd id="beta-evidence-present">예</dd></div>
             <div><dt>근거 수</dt><dd id="beta-evidence-count">0</dd></div>
@@ -397,16 +405,17 @@
         </div>
       </div>
       <div class="q-beta-actions" role="group" aria-label="피드백">
-        <button type="button" data-beta-feedback="useful">도움 됨</button>
-        <button type="button" data-beta-feedback="confusing">어려움</button>
-        <button type="button" data-beta-feedback="wrong">수정 필요</button>
-        <button type="button" data-beta-feedback="needs_review">근거 확인 필요</button>
+        <button type="button" data-beta-feedback="useful">도움됐어요</button>
+        <button type="button" data-beta-feedback="confusing">이해하기 어려워요</button>
+        <button type="button" data-beta-feedback="wrong">답변이 이상해요</button>
       </div>
       <p id="beta-minimal-feedback" class="q-beta-copy">의견을 선택하면 이 화면에만 기록됩니다.</p>
     </section>
   </div>
 
-  <section id="beta-integrated-status" class="q-beta-panel q-beta-operations" aria-labelledby="beta-integrated-status-title">
+  <details id="beta-integrated-status-disclosure" class="q-beta-operations-disclosure">
+    <summary>관리자용 운영 상태</summary>
+    <section id="beta-integrated-status" class="q-beta-panel q-beta-operations" aria-labelledby="beta-integrated-status-title">
     <div class="q-beta-operations-header">
       <h2 id="beta-integrated-status-title">통합 운영 상태</h2>
       <span class="q-beta-operations-status" data-state="HOLD">제한부 승인</span>
@@ -422,7 +431,8 @@
       <div data-status-domain="release-board"><dt>Release Board</dt><dd><strong>초안</strong> · RC Freeze 검토용, release 승인 아님</dd></div>
       <div data-status-domain="active-risk" data-state="HOLD"><dt>현재 제한</dt><dd><strong>HOLD</strong> · Release, 배포, Production은 NOT_GRANTED</dd></div>
     </dl>
-  </section>
+    </section>
+  </details>
 
   <section class="q-beta-panel q-beta-evidence" data-internal-surface="true" data-beta-diagnostics="true" aria-hidden="true" aria-labelledby="beta-evidence-title">
     <h2 id="beta-evidence-title">근거 / 상태 요약</h2>
@@ -2382,13 +2392,19 @@ window.onerror = function(message, source, lineno, colno, error) {
   document.querySelectorAll("[data-beta-feedback]").forEach(function(button){
     button.addEventListener("click", function(){
       var feedbackLabels = {
-        useful: "도움 됨",
-        confusing: "어려움",
-        wrong: "수정 필요",
-        needs_review: "근거 확인 필요"
+        useful: "도움됐어요",
+        confusing: "이해하기 어려워요",
+        wrong: "답변이 이상해요"
       };
-      var feedbackValue = button.getAttribute("data-beta-feedback");
-      setText(feedback, "의견 기록: " + (feedbackLabels[feedbackValue] || feedbackValue));
+      var feedbackCodes = {
+        useful: "HELPFUL",
+        confusing: "HARD_TO_UNDERSTAND",
+        wrong: "REVIEW_REQUESTED"
+      };
+      var feedbackChoice = button.getAttribute("data-beta-feedback");
+      var feedbackValue = feedbackCodes[feedbackChoice];
+      if (!feedbackValue) return;
+      setText(feedback, "의견 기록: " + feedbackLabels[feedbackChoice]);
       emitSafeEvent("feedback_control", {feedback_control_value:feedbackValue});
     });
   });

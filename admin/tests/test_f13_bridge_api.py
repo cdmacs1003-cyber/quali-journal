@@ -107,15 +107,15 @@ BETA_MINIMAL_SYNC_STRINGS = (
     "현재 화면에 보여줄 수 있는 승인된 짧은 답변이 없습니다.",
     "이 질문은 아직 승인된 근거가 없어 보류합니다. 근거가 준비되면 답변할 수 있습니다.",
     "의견을 선택하면 이 화면에만 기록됩니다.",
-    "도움 됨",
-    "어려움",
-    "수정 필요",
-    "근거 확인 필요",
+    "도움됐어요",
+    "이해하기 어려워요",
+    "답변이 이상해요",
+    "관리자용 운영 상태",
     "beta-minimal-form",
     "beta-minimal-question",
     "beta-minimal-status",
     "beta-minimal-result",
-    "근거 보기",
+    "판단 근거 보기",
     "근거 있음",
     "근거 수",
     "근거 주제",
@@ -125,10 +125,19 @@ BETA_MINIMAL_SYNC_STRINGS = (
     "현재 승인된 근거 범위에서는 답변할 수 없습니다.",
 )
 BETA_MINIMAL_FEEDBACK_MAPPINGS = (
-    ('data-beta-feedback="useful"', 'useful: "도움 됨"', "도움 됨"),
-    ('data-beta-feedback="confusing"', 'confusing: "어려움"', "어려움"),
-    ('data-beta-feedback="wrong"', 'wrong: "수정 필요"', "수정 필요"),
-    ('data-beta-feedback="needs_review"', 'needs_review: "근거 확인 필요"', "근거 확인 필요"),
+    ('data-beta-feedback="useful"', 'useful: "도움됐어요"', 'useful: "HELPFUL"', "도움됐어요"),
+    (
+        'data-beta-feedback="confusing"',
+        'confusing: "이해하기 어려워요"',
+        'confusing: "HARD_TO_UNDERSTAND"',
+        "이해하기 어려워요",
+    ),
+    (
+        'data-beta-feedback="wrong"',
+        'wrong: "답변이 이상해요"',
+        'wrong: "REVIEW_REQUESTED"',
+        "답변이 이상해요",
+    ),
 )
 BETA_MINIMAL_SAFE_EVENT_CONTRACT = (
     'data-state="IDLE">대기',
@@ -141,13 +150,14 @@ BETA_MINIMAL_SAFE_EVENT_CONTRACT = (
     'endpoint_path_category:"F13_SKILLUP_BRIDGE_ANSWER"',
     'http_status_category:statusCategory(code)',
     'hold_reason_code:answerStatus === "HOLD" ? "EVIDENCE_REQUIRED_OR_POLICY_HOLD" : "NONE"',
+    "var feedbackValue = feedbackCodes[feedbackChoice];",
     'emitSafeEvent("feedback_control", {feedback_control_value:feedbackValue})',
 )
 BETA_MINIMAL_EVIDENCE_CONTRACT = (
     'id="beta-evidence-state"',
     'id="beta-evidence-details"',
     'id="beta-evidence-hold"',
-    '<summary>근거 보기</summary>',
+    '<summary>판단 근거 보기</summary>',
     "function safeEvidenceItems(data)",
     "function renderEvidencePanel(data, answerStatus, resultStatus)",
     'setText(evidenceTrace, traceAvailable ? "확인 가능" : "확인 필요");',
@@ -156,6 +166,8 @@ BETA_MINIMAL_EVIDENCE_CONTRACT = (
     "resetEvidencePanel();",
 )
 BETA_MINIMAL_INTEGRATED_STATUS_CONTRACT = (
+    'id="beta-integrated-status-disclosure"',
+    '<summary>관리자용 운영 상태</summary>',
     'id="beta-integrated-status"',
     'aria-labelledby="beta-integrated-status-title"',
     'data-status-domain="warehouse"',
@@ -1384,10 +1396,22 @@ def test_skillup_beta_minimal_source_and_dist_sync_guard():
             assert required in html, f"{required!r} missing from {relative_path}"
         for required in BETA_MINIMAL_INTEGRATED_STATUS_CONTRACT:
             assert required in html, f"{required!r} missing from {relative_path}"
-        for data_attr, script_mapping, visible_label in BETA_MINIMAL_FEEDBACK_MAPPINGS:
+        for data_attr, label_mapping, code_mapping, visible_label in BETA_MINIMAL_FEEDBACK_MAPPINGS:
             assert data_attr in html, f"{data_attr!r} missing from {relative_path}"
-            assert script_mapping in html, f"{script_mapping!r} missing from {relative_path}"
+            assert label_mapping in html, f"{label_mapping!r} missing from {relative_path}"
+            assert code_mapping in html, f"{code_mapping!r} missing from {relative_path}"
             assert visible_label in html, f"{visible_label!r} missing from {relative_path}"
+        feedback_markup = html.split(
+            '<div class="q-beta-actions" role="group" aria-label="피드백">', 1
+        )[1].split("</div>", 1)[0]
+        assert feedback_markup.count('data-beta-feedback="') == 3
+        assert 'data-beta-feedback="needs_review"' not in feedback_markup
+        assert ">도움 됨</button>" not in feedback_markup
+        assert ">어려움</button>" not in feedback_markup
+        assert ">수정 필요</button>" not in feedback_markup
+        assert "근거 확인 필요" not in feedback_markup
+        for internal_code in ("HELPFUL", "HARD_TO_UNDERSTAND", "REVIEW_REQUESTED"):
+            assert internal_code not in feedback_markup
         product_evidence_markup = html.split('<div id="beta-evidence-state"', 1)[1].split(
             '<div class="q-beta-actions"', 1
         )[0]
@@ -1411,6 +1435,10 @@ def test_skillup_beta_minimal_source_and_dist_sync_guard():
         integrated_status_markup = html.split('<section id="beta-integrated-status"', 1)[1].split(
             '<section class="q-beta-panel q-beta-evidence"', 1
         )[0]
+        disclosure_opening_tag = html.split('<details id="beta-integrated-status-disclosure"', 1)[1].split(
+            ">", 1
+        )[0]
+        assert " open" not in disclosure_opening_tag
         for forbidden in (
             "raw_query",
             "raw_answer",
