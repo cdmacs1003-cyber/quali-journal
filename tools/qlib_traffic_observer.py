@@ -49,6 +49,311 @@ RAW_LOCATION_PATTERN = re.compile(
 )
 STOP_REASONS = ("FAILURE_INJECTION", "OWNER_STOP", "TASK_CLEANUP")
 
+# R479 staged-traffic decision contract.  These values are deliberately kept
+# in the observer module so the runbook and focused tests share one executable
+# source of truth without coupling the detached lifecycle to cloud APIs.
+UNAUTHENTICATED_EXPECTED_STATUS = 403
+AUTHENTICATED_EXPECTED_STATUS = 200
+HEALTH_NORMALIZED_VALUE = "ok"
+PROBE_TIMEOUT_SECONDS = 10.0
+SYNTHETIC_HEALTH_FAILURE_ALLOWED = 0
+SYNTHETIC_AUTH_FAILURE_ALLOWED = 0
+UNEXPECTED_5XX_ALLOWED = 0
+EVIDENCE_TRACE_MISSING_ALLOWED = 0
+RAW_SECRET_INTERNAL_PATH_EXPOSURE_ALLOWED = 0
+PRODUCTION_WRITE_ALLOWED = 0
+
+ABSOLUTE_P95_LATENCY_LIMIT_MS = 3000.0
+RELATIVE_P95_MULTIPLIER_FROM_STABLE_BASELINE = 2.0
+AGGREGATE_5XX_ABSOLUTE_LIMIT_PERCENT = 1.0
+AGGREGATE_5XX_BASELINE_DELTA_LIMIT_PERCENTAGE_POINT = 0.5
+MINIMUM_AGGREGATE_WINDOW_REQUEST_COUNT = 20
+CONSECUTIVE_BREACH_WINDOW_LIMIT = 2
+
+NEW_CANDIDATE_EFFECTIVE_MIN = 0
+NEW_CANDIDATE_EFFECTIVE_MAX = 2
+NEW_CANDIDATE_IMMUTABLE_MAXSCALE = 2
+NEW_CANDIDATE_ACTIVE_INSTANCE_LIMIT = 2
+FAILED_STARTUP_ALLOWED = 0
+REQUEST_DROP_OR_THROTTLE_ALLOWED = 0
+PENDING_NOT_READY_LIMIT_SECONDS = 120
+CONCURRENCY_EXPECTED = 80
+CPU_EXPECTED = 1.0
+MEMORY_EXPECTED = "512Mi"
+TIMEOUT_EXPECTED_SECONDS = 300
+
+CANDIDATE_REVISION_CREATION_LIMIT = 1
+TOTAL_AUTHORIZED_OBSERVATION_SECONDS = 3000
+UNEXPECTED_BILLABLE_RESOURCE_DELTA_ALLOWED = 0
+IMAGE_PUSH_ALLOWED = 0
+CLOUD_SQL_BINDING_ALLOWED = 0
+ADDITIONAL_SERVICE_OR_SCHEDULER_ALLOWED = 0
+
+
+def normalize_health_value(value: Any) -> str:
+    """Normalize the bounded health value without accepting other values."""
+
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+def latency_stop_limit_ms(stable_baseline_p95_ms: float) -> float:
+    baseline = float(stable_baseline_p95_ms)
+    if not math.isfinite(baseline) or baseline < 0:
+        raise ObserverError("stable baseline p95 must be a finite non-negative value")
+    return max(
+        ABSOLUTE_P95_LATENCY_LIMIT_MS,
+        baseline * RELATIVE_P95_MULTIPLIER_FROM_STABLE_BASELINE,
+    )
+
+
+def error_rate_stop_limit_percent(stable_baseline_5xx_rate_percent: float) -> float:
+    baseline = float(stable_baseline_5xx_rate_percent)
+    if not math.isfinite(baseline) or baseline < 0:
+        raise ObserverError("stable baseline 5xx rate must be a finite non-negative value")
+    return max(
+        AGGREGATE_5XX_ABSOLUTE_LIMIT_PERCENT,
+        baseline + AGGREGATE_5XX_BASELINE_DELTA_LIMIT_PERCENTAGE_POINT,
+    )
+
+
+def evaluate_functional_contract(
+    *,
+    unauthenticated_status: int,
+    authenticated_status: int,
+    health_value: Any,
+    timeout_count: int = 0,
+    unexpected_5xx_count: int = 0,
+    evidence_trace_missing_count: int = 0,
+    exposure_count: int = 0,
+    production_write_count: int = 0,
+) -> dict[str, Any]:
+    normalized = normalize_health_value(health_value)
+    health_failures = int(normalized != HEALTH_NORMALIZED_VALUE)
+    auth_failures = int(
+        unauthenticated_status != UNAUTHENTICATED_EXPECTED_STATUS
+        or authenticated_status != AUTHENTICATED_EXPECTED_STATUS
+    )
+    failures = {
+        "synthetic_health_failure_count": health_failures,
+        "synthetic_auth_failure_count": auth_failures,
+        "timeout_count": int(timeout_count),
+        "unexpected_5xx_count": int(unexpected_5xx_count),
+        "evidence_trace_missing_count": int(evidence_trace_missing_count),
+        "exposure_count": int(exposure_count),
+        "production_write_count": int(production_write_count),
+    }
+    passed = (
+        failures["synthetic_health_failure_count"]
+        <= SYNTHETIC_HEALTH_FAILURE_ALLOWED
+        and failures["synthetic_auth_failure_count"] <= SYNTHETIC_AUTH_FAILURE_ALLOWED
+        and failures["timeout_count"] == 0
+        and failures["unexpected_5xx_count"] <= UNEXPECTED_5XX_ALLOWED
+        and failures["evidence_trace_missing_count"]
+        <= EVIDENCE_TRACE_MISSING_ALLOWED
+        and failures["exposure_count"]
+        <= RAW_SECRET_INTERNAL_PATH_EXPOSURE_ALLOWED
+        and failures["production_write_count"] <= PRODUCTION_WRITE_ALLOWED
+    )
+    return {
+        "status": "PASS" if passed else "STOP",
+        "normalized_health": normalized,
+        **failures,
+    }
+
+
+def evaluate_aggregate_windows(
+    windows: list[dict[str, Any]],
+    *,
+    stable_baseline_p95_ms: float,
+    stable_baseline_5xx_rate_percent: float,
+) -> dict[str, Any]:
+    latency_limit = latency_stop_limit_ms(stable_baseline_p95_ms)
+    error_limit = error_rate_stop_limit_percent(stable_baseline_5xx_rate_percent)
+    latency_consecutive = 0
+    error_consecutive = 0
+    latency_stop = False
+    error_stop = False
+    insufficient_count = 0
+    window_results: list[dict[str, Any]] = []
+
+    for index, window in enumerate(windows):
+        request_count = int(window.get("request_count", 0))
+        if request_count < MINIMUM_AGGREGATE_WINDOW_REQUEST_COUNT:
+            insufficient_count += 1
+            latency_consecutive = 0
+            error_consecutive = 0
+            window_results.append(
+                {
+                    "index": index,
+                    "request_count": request_count,
+                    "status": "INSUFFICIENT_DATA",
+                }
+            )
+            continue
+
+        p95_latency_ms = float(window["p95_latency_ms"])
+        rate_percent = float(window["five_xx_rate_percent"])
+        latency_breach = p95_latency_ms > latency_limit
+        error_breach = rate_percent > error_limit
+        latency_consecutive = latency_consecutive + 1 if latency_breach else 0
+        error_consecutive = error_consecutive + 1 if error_breach else 0
+        latency_stop = latency_stop or (
+            latency_consecutive >= CONSECUTIVE_BREACH_WINDOW_LIMIT
+        )
+        error_stop = error_stop or (
+            error_consecutive >= CONSECUTIVE_BREACH_WINDOW_LIMIT
+        )
+        window_results.append(
+            {
+                "index": index,
+                "request_count": request_count,
+                "status": "PASS",
+                "latency_breach": latency_breach,
+                "error_rate_breach": error_breach,
+            }
+        )
+
+    stop = latency_stop or error_stop
+    status = (
+        "STOP"
+        if stop
+        else "INSUFFICIENT_DATA"
+        if insufficient_count
+        else "PASS"
+    )
+    return {
+        "status": status,
+        "aggregate_metric_status": status,
+        "fallback_required": insufficient_count > 0,
+        "latency_stop_limit_ms": latency_limit,
+        "error_rate_stop_limit_percent": error_limit,
+        "latency_stop": latency_stop,
+        "error_rate_stop": error_stop,
+        "window_results": window_results,
+    }
+
+
+def evaluate_low_volume_fallback(
+    *,
+    synthetic_health_failure_count: int,
+    synthetic_auth_failure_count: int,
+    unexpected_synthetic_5xx_count: int,
+    synthetic_p95_latency_ms: float,
+    latency_limit_ms: float,
+    timeout_count: int,
+    evidence_trace_missing_count: int,
+    capacity_status: str,
+    cost_proxy_status: str,
+    observer_final_status: str,
+) -> dict[str, Any]:
+    passed = (
+        synthetic_health_failure_count == 0
+        and synthetic_auth_failure_count == 0
+        and unexpected_synthetic_5xx_count == 0
+        and float(synthetic_p95_latency_ms) <= float(latency_limit_ms)
+        and timeout_count == 0
+        and evidence_trace_missing_count == 0
+        and capacity_status == "PASS"
+        and cost_proxy_status == "PASS_WITH_LIMITS"
+        and observer_final_status == "PASS"
+    )
+    return {
+        "status": "PASS_WITH_LOW_VOLUME_LIMITS" if passed else "STOP",
+        "aggregate_metric_status": "INSUFFICIENT_DATA",
+        "fallback_required": True,
+    }
+
+
+def evaluate_capacity_contract(
+    *,
+    effective_min: int,
+    effective_max: int,
+    immutable_maxscale: int,
+    active_instances: int,
+    failed_startup_count: int,
+    request_drop_or_throttle_count: int,
+    pending_not_ready_seconds: float,
+    concurrency: int,
+    cpu: float,
+    memory: str,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    passed = (
+        effective_min == NEW_CANDIDATE_EFFECTIVE_MIN
+        and effective_max == NEW_CANDIDATE_EFFECTIVE_MAX
+        and immutable_maxscale == NEW_CANDIDATE_IMMUTABLE_MAXSCALE
+        and active_instances <= NEW_CANDIDATE_ACTIVE_INSTANCE_LIMIT
+        and failed_startup_count <= FAILED_STARTUP_ALLOWED
+        and request_drop_or_throttle_count <= REQUEST_DROP_OR_THROTTLE_ALLOWED
+        and float(pending_not_ready_seconds) <= PENDING_NOT_READY_LIMIT_SECONDS
+        and concurrency == CONCURRENCY_EXPECTED
+        and float(cpu) == CPU_EXPECTED
+        and memory == MEMORY_EXPECTED
+        and timeout_seconds == TIMEOUT_EXPECTED_SECONDS
+    )
+    return {"status": "PASS" if passed else "STOP"}
+
+
+def evaluate_cost_proxy_contract(
+    *,
+    candidate_min_instances: int,
+    candidate_max_instances: int,
+    candidate_revision_creation_count: int,
+    total_observation_seconds: int,
+    unexpected_billable_resource_delta_count: int,
+    image_push_count: int,
+    cloud_sql_binding_count: int,
+    additional_service_or_scheduler_count: int,
+    active_candidate_instance_count: int,
+    authoritative_billing_available: bool = False,
+) -> dict[str, Any]:
+    passed = (
+        candidate_min_instances == NEW_CANDIDATE_EFFECTIVE_MIN
+        and candidate_max_instances == NEW_CANDIDATE_EFFECTIVE_MAX
+        and candidate_revision_creation_count <= CANDIDATE_REVISION_CREATION_LIMIT
+        and total_observation_seconds <= TOTAL_AUTHORIZED_OBSERVATION_SECONDS
+        and unexpected_billable_resource_delta_count
+        <= UNEXPECTED_BILLABLE_RESOURCE_DELTA_ALLOWED
+        and image_push_count <= IMAGE_PUSH_ALLOWED
+        and cloud_sql_binding_count <= CLOUD_SQL_BINDING_ALLOWED
+        and additional_service_or_scheduler_count
+        <= ADDITIONAL_SERVICE_OR_SCHEDULER_ALLOWED
+        and active_candidate_instance_count <= NEW_CANDIDATE_ACTIVE_INSTANCE_LIMIT
+    )
+    return {
+        "status": "PASS_WITH_LIMITS" if passed else "STOP",
+        "real_time_billing_amount_status": (
+            "VERIFIED" if authoritative_billing_available else "NOT_VERIFIED"
+        ),
+    }
+
+
+def validate_registry_final_artifact(artifact: dict[str, Any]) -> list[str]:
+    """Return failures; an intermediate registry response can never pass."""
+
+    required_true = (
+        "completion_marker",
+        "manifest_digest_match",
+        "config_digest_match",
+        "required_labels_match",
+        "source_commit_match",
+        "runtime_user_match",
+        "private_access",
+    )
+    failures = [name for name in required_true if artifact.get(name) is not True]
+    if int(artifact.get("layer_count", 0)) <= 0:
+        failures.append("layer_count")
+    if artifact.get("latest_used") is not False:
+        failures.append("latest_used")
+    for name in (
+        "registry_mutation_audit_count",
+        "image_push_republication_count",
+        "deletion_count",
+    ):
+        if int(artifact.get(name, -1)) != 0:
+            failures.append(name)
+    return failures
+
 
 class ObserverError(RuntimeError):
     """Base error whose message is safe to show to an operator."""
@@ -757,6 +1062,7 @@ def _validate_final(start: dict[str, Any], final: dict[str, Any]) -> list[str]:
         maximum_gap = float(final["maximum_gap_seconds"])
         allowed_gap = float(start["maximum_allowed_gap_seconds"])
         sample_count = int(final["sample_count"])
+        sample_interval = float(start["sample_interval_seconds"])
     except (KeyError, TypeError, ValueError):
         failures.append("FINAL_NUMERIC_FIELDS_INVALID")
     else:
@@ -764,8 +1070,12 @@ def _validate_final(start: dict[str, Any], final: dict[str, Any]) -> list[str]:
             failures.append("REQUESTED_DURATION_NOT_MET")
         if maximum_gap > allowed_gap:
             failures.append("SAMPLE_GAP_EXCEEDED")
-        if sample_count < 1:
-            failures.append("SAMPLE_COUNT_INVALID")
+        if sample_interval <= 0:
+            failures.append("FINAL_NUMERIC_FIELDS_INVALID")
+        else:
+            expected_minimum = math.floor(requested / sample_interval) + 1
+            if sample_count < expected_minimum:
+                failures.append("SAMPLE_COUNT_BELOW_EXPECTED_MINIMUM")
     if final.get("process_exit_code") != 0:
         failures.append("PROCESS_EXIT_CODE_NOT_ZERO")
     return failures

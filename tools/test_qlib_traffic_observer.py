@@ -58,13 +58,15 @@ class QlibTrafficObserverTests(unittest.TestCase):
                     wait_seconds=3.0,
                 )
 
-    def _start_short(self, prefix: str, *, duration: float = 0.45) -> dict[str, object]:
+    def _start_short(
+        self, prefix: str, *, duration: float = 0.45, interval: float = 0.1
+    ) -> dict[str, object]:
         observation_id = self._new_id(prefix)
         return observer.start_observation(
             artifact_root=self.root,
             observation_id=observation_id,
             duration_seconds=duration,
-            sample_interval_seconds=0.05,
+            sample_interval_seconds=interval,
             max_gap_seconds=2.0,
             stale_after_seconds=5.0,
             mode="local-test",
@@ -273,7 +275,7 @@ class QlibTrafficObserverTests(unittest.TestCase):
     def test_repeated_detached_launches_do_not_race_process_metadata(self) -> None:
         observation_ids: list[str] = []
         for index in range(5):
-            launch = self._start_short(f"race-{index}", duration=0.2)
+            launch = self._start_short(f"race-{index}", duration=0.2, interval=0.2)
             observation_ids.append(str(launch["observation_id"]))
         for observation_id in observation_ids:
             result = self._wait_terminal(observation_id)
@@ -386,6 +388,211 @@ class QlibTrafficObserverTests(unittest.TestCase):
         self.assertIn("monotonic_elapsed_seconds", text)
         self.assertIn("00010-zuj", text)
         self.assertIn("must not be reused", text)
+
+
+class R479DecisionContractTests(unittest.TestCase):
+    def test_health_normalization_and_functional_zero_tolerance(self) -> None:
+        for value in ("OK", "ok", "  Ok  "):
+            with self.subTest(value=value):
+                result = observer.evaluate_functional_contract(
+                    unauthenticated_status=403,
+                    authenticated_status=200,
+                    health_value=value,
+                )
+                self.assertEqual(result["status"], "PASS")
+                self.assertEqual(result["normalized_health"], "ok")
+
+        self.assertEqual(
+            observer.evaluate_functional_contract(
+                unauthenticated_status=403,
+                authenticated_status=200,
+                health_value="healthy",
+            )["status"],
+            "STOP",
+        )
+        self.assertEqual(
+            observer.evaluate_functional_contract(
+                unauthenticated_status=200,
+                authenticated_status=200,
+                health_value="ok",
+                unexpected_5xx_count=1,
+            )["status"],
+            "STOP",
+        )
+
+    def test_latency_and_error_limits_require_two_consecutive_windows(self) -> None:
+        self.assertEqual(observer.latency_stop_limit_ms(1200), 3000)
+        self.assertEqual(observer.latency_stop_limit_ms(2000), 4000)
+        self.assertEqual(observer.error_rate_stop_limit_percent(0.2), 1.0)
+        self.assertEqual(observer.error_rate_stop_limit_percent(0.8), 1.3)
+
+        latency_stop = observer.evaluate_aggregate_windows(
+            [
+                {"request_count": 20, "p95_latency_ms": 3001, "five_xx_rate_percent": 0},
+                {"request_count": 20, "p95_latency_ms": 3002, "five_xx_rate_percent": 0},
+            ],
+            stable_baseline_p95_ms=100,
+            stable_baseline_5xx_rate_percent=0,
+        )
+        self.assertEqual(latency_stop["status"], "STOP")
+        self.assertTrue(latency_stop["latency_stop"])
+
+        error_stop = observer.evaluate_aggregate_windows(
+            [
+                {"request_count": 20, "p95_latency_ms": 100, "five_xx_rate_percent": 1.1},
+                {"request_count": 20, "p95_latency_ms": 100, "five_xx_rate_percent": 1.2},
+            ],
+            stable_baseline_p95_ms=100,
+            stable_baseline_5xx_rate_percent=0,
+        )
+        self.assertEqual(error_stop["status"], "STOP")
+        self.assertTrue(error_stop["error_rate_stop"])
+
+        nonconsecutive = observer.evaluate_aggregate_windows(
+            [
+                {"request_count": 20, "p95_latency_ms": 3001, "five_xx_rate_percent": 1.1},
+                {"request_count": 20, "p95_latency_ms": 100, "five_xx_rate_percent": 0},
+                {"request_count": 20, "p95_latency_ms": 3001, "five_xx_rate_percent": 1.1},
+            ],
+            stable_baseline_p95_ms=100,
+            stable_baseline_5xx_rate_percent=0,
+        )
+        self.assertEqual(nonconsecutive["status"], "PASS")
+
+    def test_low_volume_is_insufficient_and_requires_exact_fallback(self) -> None:
+        aggregate = observer.evaluate_aggregate_windows(
+            [{"request_count": 19, "p95_latency_ms": 100, "five_xx_rate_percent": 0}],
+            stable_baseline_p95_ms=100,
+            stable_baseline_5xx_rate_percent=0,
+        )
+        self.assertEqual(aggregate["aggregate_metric_status"], "INSUFFICIENT_DATA")
+        self.assertTrue(aggregate["fallback_required"])
+
+        fallback = observer.evaluate_low_volume_fallback(
+            synthetic_health_failure_count=0,
+            synthetic_auth_failure_count=0,
+            unexpected_synthetic_5xx_count=0,
+            synthetic_p95_latency_ms=250,
+            latency_limit_ms=3000,
+            timeout_count=0,
+            evidence_trace_missing_count=0,
+            capacity_status="PASS",
+            cost_proxy_status="PASS_WITH_LIMITS",
+            observer_final_status="PASS",
+        )
+        self.assertEqual(fallback["status"], "PASS_WITH_LOW_VOLUME_LIMITS")
+        failed = observer.evaluate_low_volume_fallback(
+            synthetic_health_failure_count=0,
+            synthetic_auth_failure_count=0,
+            unexpected_synthetic_5xx_count=0,
+            synthetic_p95_latency_ms=3001,
+            latency_limit_ms=3000,
+            timeout_count=0,
+            evidence_trace_missing_count=0,
+            capacity_status="PASS",
+            cost_proxy_status="PASS_WITH_LIMITS",
+            observer_final_status="PASS",
+        )
+        self.assertEqual(failed["status"], "STOP")
+
+    def test_candidate_capacity_is_separate_from_historical_stable_maxscale(self) -> None:
+        contract = dict(
+            effective_min=0,
+            effective_max=2,
+            immutable_maxscale=2,
+            active_instances=2,
+            failed_startup_count=0,
+            request_drop_or_throttle_count=0,
+            pending_not_ready_seconds=120,
+            concurrency=80,
+            cpu=1,
+            memory="512Mi",
+            timeout_seconds=300,
+        )
+        self.assertEqual(observer.evaluate_capacity_contract(**contract)["status"], "PASS")
+        contract["immutable_maxscale"] = 20
+        self.assertEqual(observer.evaluate_capacity_contract(**contract)["status"], "STOP")
+
+    def test_cost_proxy_is_bounded_and_never_claims_unverified_amount(self) -> None:
+        contract = dict(
+            candidate_min_instances=0,
+            candidate_max_instances=2,
+            candidate_revision_creation_count=1,
+            total_observation_seconds=3000,
+            unexpected_billable_resource_delta_count=0,
+            image_push_count=0,
+            cloud_sql_binding_count=0,
+            additional_service_or_scheduler_count=0,
+            active_candidate_instance_count=2,
+        )
+        result = observer.evaluate_cost_proxy_contract(**contract)
+        self.assertEqual(result["status"], "PASS_WITH_LIMITS")
+        self.assertEqual(result["real_time_billing_amount_status"], "NOT_VERIFIED")
+        contract["total_observation_seconds"] = 3001
+        self.assertEqual(observer.evaluate_cost_proxy_contract(**contract)["status"], "STOP")
+
+    def test_registry_intermediate_output_and_short_final_are_rejected(self) -> None:
+        registry = {
+            "manifest_digest_match": True,
+            "config_digest_match": True,
+            "layer_count": 16,
+            "required_labels_match": True,
+            "source_commit_match": True,
+            "runtime_user_match": True,
+            "private_access": True,
+            "latest_used": False,
+            "registry_mutation_audit_count": 0,
+            "image_push_republication_count": 0,
+            "deletion_count": 0,
+        }
+        self.assertIn("completion_marker", observer.validate_registry_final_artifact(registry))
+        registry["completion_marker"] = True
+        self.assertEqual(observer.validate_registry_final_artifact(registry), [])
+
+        start = {
+            "observation_id": "sample-minimum",
+            "mode": "production",
+            "requested_duration_seconds": 600,
+            "sample_interval_seconds": 50,
+            "maximum_allowed_gap_seconds": 58,
+        }
+        final = {
+            "observation_id": "sample-minimum",
+            "mode": "production",
+            "status": "PASS",
+            "verification_status": "PASS",
+            "completion_marker": True,
+            "monotonic_elapsed_seconds": 600,
+            "maximum_gap_seconds": 50,
+            "sample_count": 12,
+            "process_exit_code": 0,
+        }
+        self.assertIn(
+            "SAMPLE_COUNT_BELOW_EXPECTED_MINIMUM",
+            observer._validate_final(start, final),
+        )
+
+    def test_runbook_and_observer_constants_match(self) -> None:
+        text = RUNBOOK_PATH.read_text(encoding="utf-8")
+        expected_fragments = (
+            "historical rollback revision's immutable maxScale is 20",
+            "LATENCY_STOP_LIMIT_MS=max(3000, stable_baseline_p95_ms * 2.0)",
+            "ERROR_RATE_STOP_LIMIT_PERCENT=max(1.0, stable_baseline_5xx_rate_percent + 0.5)",
+            "fewer than 20 requests is `INSUFFICIENT_DATA`",
+            "active instances<=2",
+            "total authorized staged observation seconds<=3000",
+            "case-insensitive, surrounding-whitespace-trimmed normalization",
+        )
+        for fragment in expected_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, text)
+        self.assertEqual(observer.UNAUTHENTICATED_EXPECTED_STATUS, 403)
+        self.assertEqual(observer.AUTHENTICATED_EXPECTED_STATUS, 200)
+        self.assertEqual(observer.ABSOLUTE_P95_LATENCY_LIMIT_MS, 3000)
+        self.assertEqual(observer.RELATIVE_P95_MULTIPLIER_FROM_STABLE_BASELINE, 2.0)
+        self.assertEqual(observer.MINIMUM_AGGREGATE_WINDOW_REQUEST_COUNT, 20)
+        self.assertEqual(observer.NEW_CANDIDATE_IMMUTABLE_MAXSCALE, 2)
+        self.assertEqual(observer.TOTAL_AUTHORIZED_OBSERVATION_SECONDS, 3000)
 
 
 if __name__ == "__main__":
