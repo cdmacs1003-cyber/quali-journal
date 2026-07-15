@@ -791,5 +791,315 @@ class R481PretrafficEvidenceContractTests(unittest.TestCase):
                 self.assertIn(fragment.lower(), text.lower())
 
 
+class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
+    @staticmethod
+    def _completed(payload: dict[str, object], returncode: int = 42) -> mock.Mock:
+        return mock.Mock(
+            returncode=returncode,
+            stdout=json.dumps(payload),
+            stderr="raw dependency detail must not persist",
+        )
+
+    @staticmethod
+    def _readiness_sample(target_contract: str) -> dict[str, object]:
+        return {
+            "sample_status": "PASS",
+            "target_contract": target_contract,
+            "target_selector_hash": "a" * 64,
+            "command_contract_hash": "b" * 64,
+            "argument_name_set": ["target", "expected_candidate", "expected_stable"],
+            "sanitized_environment_key_set": ["PYTHONDONTWRITEBYTECODE"],
+            "import_status": "PASS",
+            "dependency_status": "PASS",
+            "auth_handoff_status": "PASS",
+            "target_construction_status": "PASS",
+            "health_sample_status": "PASS",
+            "readiness_status": "PASS",
+            "raw_response_persisted": False,
+            "identity_material_persisted": False,
+        }
+
+    def test_r482_stage_fixture_is_structured_not_generic_sampler_failure(self) -> None:
+        r482_failure = {
+            "sample_status": "FAIL",
+            "timeout_count": 0,
+            "unexpected_5xx_count": 0,
+            "auth_failure_count": 0,
+            "ui_failure_count": 1,
+            "flow_failure_count": 1,
+            "evidence_missing_count": 1,
+            "trace_missing_count": 1,
+            "raw_response_persisted": False,
+            "identity_material_persisted": False,
+        }
+        with mock.patch.object(
+            observer.subprocess, "run", return_value=self._completed(r482_failure)
+        ):
+            with self.assertRaises(observer.SamplerFailure) as caught:
+                observer._production_sample(["sampler"], 10)
+        self.assertEqual(caught.exception.category, "FUNCTIONAL_HTTP_FAILURE")
+        self.assertNotEqual(caught.exception.category, "SAMPLER_FAILURE")
+        self.assertEqual(
+            caught.exception.metadata["first_failure_phase"],
+            "SAMPLER_FUNCTIONAL_RESULT",
+        )
+
+    def test_http_auth_timeout_parse_and_dependency_categories_are_distinct(self) -> None:
+        for category in ("HTTP_403", "HTTP_404", "HTTP_5XX", "AUTH_FAILURE"):
+            with self.subTest(category=category):
+                payload = {"sample_status": "FAIL", "failure_category": category}
+                with mock.patch.object(
+                    observer.subprocess, "run", return_value=self._completed(payload)
+                ):
+                    with self.assertRaises(observer.SamplerFailure) as caught:
+                        observer._production_sample(["sampler"], 10)
+                self.assertEqual(caught.exception.category, category)
+
+        with mock.patch.object(
+            observer.subprocess,
+            "run",
+            side_effect=observer.subprocess.TimeoutExpired("sampler", 10),
+        ):
+            with self.assertRaises(observer.SamplerFailure) as timeout:
+                observer._production_sample(["sampler"], 10)
+        self.assertEqual(timeout.exception.category, "TIMEOUT")
+
+        invalid = mock.Mock(returncode=0, stdout="not-json", stderr="private detail")
+        with mock.patch.object(observer.subprocess, "run", return_value=invalid):
+            with self.assertRaises(observer.SamplerFailure) as parse:
+                observer._production_sample(["sampler"], 10)
+        self.assertEqual(parse.exception.category, "JSON_PARSE_FAILURE")
+
+        with mock.patch.object(observer.subprocess, "run", side_effect=OSError("raw")):
+            with self.assertRaises(observer.SamplerFailure) as dependency:
+                observer._production_sample(["sampler"], 10)
+        self.assertEqual(
+            dependency.exception.category, "DEPENDENCY_OR_SUBPROCESS_DEFECT"
+        )
+
+    def test_stable_candidate_only_surface_404_is_non_retryable_stop(self) -> None:
+        completed = self._completed(
+            {"sample_status": "FAIL", "failure_category": "HTTP_404"}
+        )
+        with mock.patch.object(
+            observer.subprocess, "run", return_value=completed
+        ) as run:
+            with self.assertRaises(observer.SamplerFailure) as caught:
+                observer._production_sample(["sampler"], 10)
+        self.assertEqual(caught.exception.category, "HTTP_404")
+        self.assertFalse(caught.exception.metadata["retryable"])
+        self.assertEqual(run.call_count, 1)
+
+    def test_incomplete_artifact_has_structured_failure_without_raw_message(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="r483-incomplete-") as temporary:
+            directory = Path(temporary)
+            observer._atomic_write_json(
+                directory / "start.json",
+                {
+                    "observation_id": "r483-fixture",
+                    "mode": "production",
+                    "requested_duration_seconds": 600,
+                    "sample_interval_seconds": 50,
+                    "maximum_allowed_gap_seconds": 58,
+                },
+            )
+            (directory / "events.ndjson").write_text("", encoding="utf-8")
+            failure = observer.SamplerFailure(
+                "HTTP_404",
+                phase="SAMPLER_FUNCTIONAL_RESULT",
+                dependency_class="SAMPLER_CONTRACT",
+                exit_category="SAMPLER_EXIT_NONZERO",
+                source_line=123,
+            )
+            result = observer._write_incomplete(
+                directory,
+                reason="SAMPLER_HTTP_404",
+                process_exit_code=42,
+                failure_metadata=failure.metadata,
+            )
+            serialized = json.dumps(result)
+            self.assertEqual(result["first_failure"]["failure_category"], "HTTP_404")
+            self.assertEqual(result["first_failure"]["source_line"], 123)
+            self.assertFalse(result["first_failure"]["retryable"])
+            self.assertNotIn("raw dependency detail", serialized)
+            self.assertNotIn("Authorization", serialized)
+            self.assertNotRegex(serialized, r"[A-Za-z][A-Za-z0-9+.-]*://")
+
+    def test_detached_stage_failure_fixture_writes_http_category(self) -> None:
+        payload = json.dumps(
+            {"sample_status": "FAIL", "failure_category": "HTTP_404"}
+        )
+        sampler = [
+            sys.executable,
+            "-c",
+            f"import sys; print({payload!r}); sys.exit(42)",
+        ]
+        previous = os.environ.get(observer.PRODUCTION_SAMPLER_ENV)
+        with tempfile.TemporaryDirectory(prefix="r483-stage-fixture-") as temporary:
+            try:
+                os.environ[observer.PRODUCTION_SAMPLER_ENV] = json.dumps(sampler)
+                launch = observer.start_observation(
+                    artifact_root=temporary,
+                    observation_id="stage-005-fixture",
+                    duration_seconds=1,
+                    sample_interval_seconds=1,
+                    max_gap_seconds=2,
+                    stale_after_seconds=3,
+                    mode="production",
+                )
+                deadline = time.monotonic() + 8
+                result: dict[str, object] = {}
+                while time.monotonic() < deadline:
+                    result = observer.poll_observation(
+                        artifact_root=temporary,
+                        observation_id=str(launch["observation_id"]),
+                    )
+                    if result.get("status") != "RUNNING":
+                        break
+                    time.sleep(0.05)
+            finally:
+                if previous is None:
+                    os.environ.pop(observer.PRODUCTION_SAMPLER_ENV, None)
+                else:
+                    os.environ[observer.PRODUCTION_SAMPLER_ENV] = previous
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertEqual(result["reason"], "SAMPLER_HTTP_404")
+            self.assertEqual(result["first_failure"]["failure_category"], "HTTP_404")
+            self.assertFalse(result["completion_marker"])
+
+    def test_service_and_revision_targets_are_separate_and_readiness_fails_closed(self) -> None:
+        revision = self._readiness_sample("REVISION_FUNCTIONAL")
+        split = self._readiness_sample("SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL")
+        observer.validate_production_sample_contract(
+            revision, required_target_contract="REVISION_FUNCTIONAL"
+        )
+        observer.validate_production_sample_contract(
+            split,
+            required_target_contract="SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL",
+        )
+        with self.assertRaises(observer.SamplerFailure) as mismatch:
+            observer.validate_production_sample_contract(
+                revision,
+                required_target_contract="SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL",
+            )
+        self.assertEqual(mismatch.exception.category, "TARGET_ROUTING_CONTRACT_DEFECT")
+        failed = dict(split)
+        failed["auth_handoff_status"] = "STOP"
+        with self.assertRaises(observer.SamplerFailure) as auth:
+            observer.validate_production_sample_contract(
+                failed,
+                required_target_contract="SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL",
+            )
+        self.assertEqual(auth.exception.category, "AUTH_FAILURE")
+
+    def test_detached_child_contract_uses_absolute_module_and_scrubbed_environment(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="r483-launch-") as temporary:
+            fake_child = mock.Mock(pid=424242, returncode=None)
+            sampler = [sys.executable, "-c", "print('{}')"]
+            previous_sampler = os.environ.get(observer.PRODUCTION_SAMPLER_ENV)
+            previous_identity = os.environ.get(observer.IDENTITY_MATERIAL_ENV)
+            os.environ[observer.PRODUCTION_SAMPLER_ENV] = json.dumps(sampler)
+            os.environ[observer.IDENTITY_MATERIAL_ENV] = "memory-only-fixture"
+            try:
+                with mock.patch.object(
+                    observer.subprocess, "Popen", return_value=fake_child
+                ) as popen:
+                    result = observer.start_observation(
+                        artifact_root=temporary,
+                        observation_id="r483-launch",
+                        duration_seconds=1,
+                        sample_interval_seconds=1,
+                        max_gap_seconds=2,
+                        stale_after_seconds=3,
+                        mode="production",
+                        required_target_contract="REVISION_FUNCTIONAL",
+                    )
+            finally:
+                if previous_sampler is None:
+                    os.environ.pop(observer.PRODUCTION_SAMPLER_ENV, None)
+                else:
+                    os.environ[observer.PRODUCTION_SAMPLER_ENV] = previous_sampler
+                if previous_identity is None:
+                    os.environ.pop(observer.IDENTITY_MATERIAL_ENV, None)
+                else:
+                    os.environ[observer.IDENTITY_MATERIAL_ENV] = previous_identity
+            command = popen.call_args.args[0]
+            options = popen.call_args.kwargs
+            self.assertEqual(command[0], sys.executable)
+            self.assertEqual(Path(command[2]).resolve(), Path(observer.__file__).resolve())
+            self.assertNotIn("cwd", options)
+            self.assertNotIn(observer.PRODUCTION_SAMPLER_ENV, options["env"])
+            self.assertNotIn(observer.IDENTITY_MATERIAL_ENV, options["env"])
+            self.assertEqual(result["status"], "STARTED")
+
+    def test_verified_external_transient_retry_is_bounded(self) -> None:
+        transient = self._completed(
+            {
+                "sample_status": "FAIL",
+                "failure_category": "VERIFIED_EXTERNAL_TRANSIENT",
+            }
+        )
+        passed = self._completed({"sample_status": "PASS"}, returncode=0)
+        with mock.patch.object(
+            observer.subprocess, "run", side_effect=[transient, passed]
+        ) as run:
+            result = observer._production_sample(["sampler"], 10)
+        self.assertEqual(result["sample_status"], "PASS")
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(observer.MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES, 1)
+        self.assertLessEqual(observer.MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS, 10)
+
+    def test_rollback_command_and_post_verification_are_deterministic(self) -> None:
+        command = observer.build_stable_rollback_command(
+            service="qlib-skillup-runtime",
+            project="project-under-test",
+            region="asia-northeast1",
+            stable_revision="qlib-skillup-runtime-00002-d9g",
+        )
+        self.assertEqual(command[:4], ["gcloud", "run", "services", "update-traffic"])
+        self.assertIn("qlib-skillup-runtime-00002-d9g=100", command)
+        serialized = " ".join(command)
+        for forbidden in (
+            "set-iam-policy",
+            "allow-unauthenticated",
+            "images delete",
+            "quali-admin-domap",
+        ):
+            self.assertNotIn(forbidden, serialized)
+        snapshot = {
+            "historical_stable_traffic_percent": 100,
+            "other_positive_traffic_count": 0,
+            "historical_stable_ready": True,
+            "unauthenticated_health_http": 403,
+            "authenticated_health_http": 200,
+            "normalized_health": " OK ",
+            "iam_hash_match": True,
+            "public_member_count": 0,
+            "authoritative_set_iam_policy_count": 0,
+        }
+        self.assertEqual(
+            observer.evaluate_stable_rollback_verification(snapshot)["status"],
+            "PASS",
+        )
+        snapshot["other_positive_traffic_count"] = 1
+        self.assertEqual(
+            observer.evaluate_stable_rollback_verification(snapshot)["status"],
+            "STOP",
+        )
+
+    def test_runbook_records_compatibility_hold_and_reliability_contract(self) -> None:
+        text = RUNBOOK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+            "PRODUCT_SPLIT_TRAFFIC_COMPATIBILITY_DEFECT",
+            "SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL",
+            "SAMPLER_HTTP_404",
+            "MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES=1",
+            "mutation command is executed and recorded separately",
+            "R484 deployment remains NOT_GRANTED",
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, text)
+
+
 if __name__ == "__main__":
     unittest.main()

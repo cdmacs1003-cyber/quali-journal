@@ -1,6 +1,6 @@
 # qlib-skillup-runtime limited field beta deployment runbook
 
-Status: `R479_DEPLOYMENT_PRECONDITION_CONTRACT_DEFINED`; R480 deployment remains `NOT_GRANTED` without a separate exact owner decision.
+Status: `R483_STAGE_OBSERVER_RELIABILITY_DEFINED`; R484 deployment remains `NOT_GRANTED` without a separate exact owner decision and a resolved split-traffic compatibility strategy.
 
 This runbook is for `qlib-skillup-runtime` in `asia-northeast1` only. It must never target or mutate `quali-admin-domap`. It does not grant deployment authorization. Every command below is deferred to a separately authorized R476 packet.
 
@@ -21,6 +21,20 @@ The R476 and R478 execution authorizations are spent. This runbook defines the c
 - Rollback restores traffic to the existing Ready historical revision; it does not create a new maxScale-20 revision.
 - Rejected revision `qlib-skillup-runtime-00003-som` must remain at 0% percentage traffic and must not be reused.
 - Withdrawn R476 candidate `qlib-skillup-runtime-00010-zuj` must remain at 0% traffic and must not be reused.
+
+## R482 incident closure and compatibility HOLD
+
+R482 established `PRODUCT_SPLIT_TRAFFIC_COMPATIBILITY_DEFECT`. The no-traffic smoke used the candidate-tagged revision target and passed. The 5% stage used the service-wide target while its sampler also called candidate-only UI, ANSWERED, HOLD, Evidence and Trace surfaces. The historical stable revision does not provide those surfaces and returned HTTP 404 in the recorded stable-service reproduction. A service-wide split therefore cannot make those candidate-only functional calls revision-consistent. This is an actual staged-user compatibility risk, not merely an observer routing inconvenience.
+
+The canonical observer must preserve that STOP. It may classify the failure as `SAMPLER_HTTP_404` with sanitized structured metadata, but it must never convert the product incompatibility to PASS. R484 deployment remains NOT_GRANTED until an owner selects and validates one strategy:
+
+| Strategy | Safety effect | Required follow-up |
+|---|---|---|
+| Backward-compatible surface on every traffic-bearing revision | Service-wide user requests remain route-compatible | Separate runtime/product repair and immutable-image approval |
+| Candidate-tagged or revision-specific limited-user route | Functional beta requests reach only the candidate | Separate owner decision; does not prove service-wide split compatibility |
+| Blue/green single-revision promotion after no-traffic validation | Avoids mixed incompatible surfaces | Separate cutover and rollback authorization |
+
+Session affinity is not a substitute for compatible traffic-bearing revisions unless separately proved for every request path. Until a strategy is approved, percentage traffic deployment is HOLD.
 
 ## Required R474 variables
 
@@ -115,11 +129,21 @@ At each stage, preserve the exact candidate/stable split, execute the health/aut
 
 Every 10/15-minute window must use the canonical detached controller. The launcher must return promptly, and every later poll must run from a new shell using the same observation id. PowerShell background jobs and a foreground sleep/observe loop are forbidden because their lifetime is coupled to the launching shell. The task-owned production sampler is passed only through the process environment, obtains identity material in its own memory, and emits sanitized JSON; its argv, identity material, raw URL, request text and raw output must never be persisted by the controller.
 
+Before any percentage traffic mutation, run a short production-mode readiness observation at 0% candidate traffic through the same detached controller, Python/module path, working directory inheritance, sampler argv encoding, sanitized child environment and auth handoff used by the stage. It must complete and emit at least one valid health sample plus `import_status`, `dependency_status`, `auth_handoff_status`, `target_construction_status`, `health_sample_status` and `readiness_status` equal to `PASS`. Raw-response and identity-material persistence flags must be false. A missing field or mismatch is incomplete/STOP.
+
+The sampler target contract is explicit:
+
+- `HEALTH_ONLY_SERVICE`: service-wide health, latency and aggregate error only;
+- `REVISION_FUNCTIONAL`: candidate revision/tag UI, ANSWERED, HOLD, Evidence and Trace only;
+- `SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL`: both paths are independently constructed and reported; aggregate probes use the service target while functional probes use the candidate revision target.
+
+Never issue candidate-only functional calls to the service-wide split target unless a separately validated compatibility matrix proves every traffic-bearing revision implements those surfaces. Production stages require `SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL`. Smoke requires `REVISION_FUNCTIONAL`.
+
 ```powershell
 $OBSERVER_ROOT = '<task-owned-proofpack-root>/observer'
 $OBSERVATION_ID = 'stage-005-<approved-run-id>'
 $env:QLIB_OBSERVER_PRODUCTION_SAMPLER = '["powershell","-NoProfile","-File","<approved-task-owned-sanitized-sampler>"]'
-python -B tools/qlib_traffic_observer.py start --artifact-root $OBSERVER_ROOT --observation-id $OBSERVATION_ID --mode production --duration-seconds 600 --sample-interval-seconds 50 --max-gap-seconds 58 --stale-after-seconds 75
+python -B tools/qlib_traffic_observer.py start --artifact-root $OBSERVER_ROOT --observation-id $OBSERVATION_ID --mode production --required-target-contract SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL --duration-seconds 600 --sample-interval-seconds 50 --max-gap-seconds 58 --stale-after-seconds 75
 $env:QLIB_OBSERVER_PRODUCTION_SAMPLER = $null
 
 # Run from a new shell; each invocation returns immediately.
@@ -127,6 +151,8 @@ python -B tools/qlib_traffic_observer.py poll --artifact-root $OBSERVER_ROOT --o
 ```
 
 Use 600 seconds for the 5% and 20% stages and 900 seconds for the 50% and 100% stages. A stage is PASS only when `final.json` exists, `completion_marker=true`, `process_exit_code=0`, `monotonic_elapsed_seconds` is at least the requested duration, and the recorded maximum gap does not exceed the configured limit. Missing final markers, stale heartbeats, excess sample gaps, duplicate observation ids and child-process loss are `INCOMPLETE/NOT_VERIFIED` and trigger the stop procedure. Keep `start.json`, `events.ndjson`, `heartbeat.json`, `state.json`, and either `final.json` or `incomplete.json` in the ProofPack.
+
+Sampler failures must not collapse to generic `SAMPLER_FAILURE`. The incomplete artifact records only the first failure phase, one of HTTP 403, HTTP 404, HTTP 5xx, timeout, JSON parse, auth, target routing, import/environment, argument/serialization, dependency/subprocess, functional HTTP, or verified external transient categories, the canonical source file/function/line, dependency class, exit category and retryable flag. Raw exception messages, stderr, URLs, response bodies and identity material are forbidden. Non-retryable 4xx, configuration, import, auth and dependency failures stop immediately. Only a sampler-declared `VERIFIED_EXTERNAL_TRANSIENT` may retry, with `MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES=1` and `MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS=10`.
 
 ```powershell
 gcloud run services update-traffic $SERVICE --project $PROJECT_ID --region $REGION --to-revisions "$CANDIDATE_REVISION=5,$STABLE_REVISION=95"
@@ -220,10 +246,16 @@ Privacy-safe match artifacts contain only detector rule id, response-surface cat
 Stop on any functional/authentication failure, Evidence/Trace failure, raw/internal-path/secret exposure, Production write, synthetic timeout, unexpected synthetic 5xx, two consecutive qualifying latency or aggregate-5xx windows above the exact limits, a failed low-volume fallback, fresh-candidate capacity failure, cost-proxy excess, observer incomplete/final-marker failure, rollback-target loss, IAM/public-member/SetIamPolicy drift, traffic mismatch, or owner stop instruction.
 
 ```powershell
-gcloud run services update-traffic $SERVICE --project $PROJECT_ID --region $REGION --to-revisions "$STABLE_REVISION=100"
+$ROLLBACK_COMMAND = @('gcloud','run','services','update-traffic',$SERVICE,'--project',$PROJECT_ID,'--region',$REGION,'--to-revisions',"$STABLE_REVISION=100",'--quiet')
+$ROLLBACK_EXECUTABLE = $ROLLBACK_COMMAND[0]
+$ROLLBACK_ARGUMENTS = $ROLLBACK_COMMAND[1..($ROLLBACK_COMMAND.Count-1)]
+& $ROLLBACK_EXECUTABLE @ROLLBACK_ARGUMENTS
+if ($LASTEXITCODE -ne 0) { throw 'ROLLBACK_MUTATION_COMMAND_FAILED' }
 ```
 
-Verify the candidate receives 0% service traffic. Do not delete either revision during emergency rollback. Repeat authenticated health and flow checks against the restored stable service and record post-rollback evidence.
+The mutation command is executed and recorded separately from every read-only verification dependency. Its exit category must not be overwritten by a later describe, IAM, token, health or artifact-write failure. After mutation success, independently verify stable traffic 100%, every candidate 0%, no other positive traffic, stable Ready, unauthenticated/authenticated health 403/200 with normalized `ok`, IAM hash unchanged, public members 0 and authoritative SetIamPolicy count 0. A post-verification failure remains STOP but is reported as `ROLLBACK_POST_VERIFICATION_FAILED`, not as an ambiguous mutation failure. Do not delete either revision during emergency rollback.
+
+The R482 helper coupled the mutation and all verification dependencies behind one generic exception and therefore returned exit 1 without proving which phase failed or whether traffic changed. The direct stable-100 command succeeded because it used the deterministic primary mutation path alone. Future rollback tooling must use the isolated command construction and post-verification contract above; a monolithic helper is not the primary path.
 
 ## 7. Completion evidence and cleanup
 

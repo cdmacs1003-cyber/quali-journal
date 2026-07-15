@@ -30,6 +30,8 @@ PRODUCTION_SAMPLER_ENV = "QLIB_OBSERVER_PRODUCTION_SAMPLER"
 IDENTITY_MATERIAL_ENV = "QLIB_OBSERVER_IDENTITY_MATERIAL"
 OBSERVATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SAFE_SAMPLE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+SAFE_CONTRACT_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+SHA256_HEX_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 SENSITIVE_KEY_PARTS = (
     "answer",
     "authorization",
@@ -48,6 +50,27 @@ RAW_LOCATION_PATTERN = re.compile(
     r"(?:[A-Za-z][A-Za-z0-9+.-]*://|[A-Za-z]:[\\/]|(?:^|\s)[\\/]{2}|[^\s@]+@[^\s@]+)"
 )
 STOP_REASONS = ("FAILURE_INJECTION", "OWNER_STOP", "TASK_CLEANUP")
+PRODUCTION_TARGET_CONTRACTS = (
+    "HEALTH_ONLY_SERVICE",
+    "REVISION_FUNCTIONAL",
+    "SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL",
+)
+SAMPLER_FAILURE_CATEGORIES = (
+    "HTTP_403",
+    "HTTP_404",
+    "HTTP_5XX",
+    "TIMEOUT",
+    "JSON_PARSE_FAILURE",
+    "AUTH_FAILURE",
+    "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+    "ARGUMENT_OR_SERIALIZATION_DEFECT",
+    "DETACHED_ENVIRONMENT_OR_IMPORT_DEFECT",
+    "TARGET_ROUTING_CONTRACT_DEFECT",
+    "FUNCTIONAL_HTTP_FAILURE",
+    "VERIFIED_EXTERNAL_TRANSIENT",
+)
+MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES = 1
+MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS = 10.0
 
 # R479 staged-traffic decision contract.  These values are deliberately kept
 # in the observer module so the runbook and focused tests share one executable
@@ -325,6 +348,61 @@ def evaluate_cost_proxy_contract(
         "real_time_billing_amount_status": (
             "VERIFIED" if authoritative_billing_available else "NOT_VERIFIED"
         ),
+    }
+
+
+_CLOUD_IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+
+
+def build_stable_rollback_command(
+    *, service: str, project: str, region: str, stable_revision: str
+) -> list[str]:
+    """Construct the one deterministic mutation command; execution is external."""
+
+    values = (service, project, region, stable_revision)
+    if any(not _CLOUD_IDENTIFIER_PATTERN.fullmatch(value) for value in values):
+        raise ObserverError("rollback identifiers must use bounded cloud identifiers")
+    return [
+        "gcloud",
+        "run",
+        "services",
+        "update-traffic",
+        service,
+        "--project",
+        project,
+        "--region",
+        region,
+        "--to-revisions",
+        f"{stable_revision}=100",
+        "--quiet",
+    ]
+
+
+def evaluate_stable_rollback_verification(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate read-only rollback evidence separately from mutation execution."""
+
+    failures = []
+    expected = {
+        "historical_stable_traffic_percent": 100,
+        "other_positive_traffic_count": 0,
+        "unauthenticated_health_http": UNAUTHENTICATED_EXPECTED_STATUS,
+        "authenticated_health_http": AUTHENTICATED_EXPECTED_STATUS,
+        "public_member_count": 0,
+        "authoritative_set_iam_policy_count": 0,
+    }
+    for key, value in expected.items():
+        if snapshot.get(key) != value:
+            failures.append(key)
+    if snapshot.get("historical_stable_ready") is not True:
+        failures.append("historical_stable_ready")
+    if normalize_health_value(snapshot.get("normalized_health")) != HEALTH_NORMALIZED_VALUE:
+        failures.append("normalized_health")
+    if snapshot.get("iam_hash_match") is not True:
+        failures.append("iam_hash_match")
+    return {
+        "status": "PASS" if not failures else "STOP",
+        "verification_failures": failures,
+        "mutation_result_is_separate": True,
     }
 
 
@@ -656,6 +734,39 @@ class DuplicateObservationError(ObserverError):
     """Raised when an observation id already owns an artifact directory."""
 
 
+class SamplerFailure(ObserverError):
+    """A sanitized sampler failure that is safe to persist in artifacts."""
+
+    def __init__(
+        self,
+        category: str,
+        *,
+        phase: str,
+        dependency_class: str,
+        exit_category: str,
+        retryable: bool = False,
+        source_function: str = "_production_sample",
+        source_line: int = 0,
+    ) -> None:
+        if category not in SAMPLER_FAILURE_CATEGORIES:
+            category = "ARGUMENT_OR_SERIALIZATION_DEFECT"
+        self.category = category
+        self.metadata = {
+            "first_failure_phase": phase,
+            "failure_category": category,
+            "source_file": "tools/qlib_traffic_observer.py",
+            "source_function": source_function,
+            "source_line": int(source_line),
+            "exception_class": "SamplerFailure",
+            "dependency_class": dependency_class,
+            "exit_category": exit_category,
+            "retryable": bool(retryable),
+            "raw_exception_message_persisted": False,
+            "raw_sampler_output_persisted": False,
+        }
+        super().__init__(f"production sampler failed: {category}")
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -912,7 +1023,127 @@ def _local_sample(observation_id: str, sequence: int) -> dict[str, Any]:
     }
 
 
-def _production_sample(argv: list[str], timeout_seconds: float) -> dict[str, Any]:
+def _classify_sampler_failure_payload(payload: dict[str, Any]) -> str:
+    declared = str(payload.get("failure_category") or "")
+    if declared in SAMPLER_FAILURE_CATEGORIES:
+        return declared
+    ordered_counts = (
+        ("http_403_count", "HTTP_403"),
+        ("http_404_count", "HTTP_404"),
+        ("unexpected_5xx_count", "HTTP_5XX"),
+        ("timeout_count", "TIMEOUT"),
+        ("json_parse_failure_count", "JSON_PARSE_FAILURE"),
+        ("auth_failure_count", "AUTH_FAILURE"),
+        ("dependency_failure_count", "DEPENDENCY_OR_SUBPROCESS_DEFECT"),
+        ("target_routing_failure_count", "TARGET_ROUTING_CONTRACT_DEFECT"),
+    )
+    for key, category in ordered_counts:
+        try:
+            if int(payload.get(key, 0)) > 0:
+                return category
+        except (TypeError, ValueError):
+            return "ARGUMENT_OR_SERIALIZATION_DEFECT"
+    for key in (
+        "ui_failure_count",
+        "flow_failure_count",
+        "evidence_missing_count",
+        "trace_missing_count",
+    ):
+        try:
+            if int(payload.get(key, 0)) > 0:
+                return "FUNCTIONAL_HTTP_FAILURE"
+        except (TypeError, ValueError):
+            return "ARGUMENT_OR_SERIALIZATION_DEFECT"
+    return "DEPENDENCY_OR_SUBPROCESS_DEFECT"
+
+
+def validate_production_sample_contract(
+    sample: dict[str, Any], *, required_target_contract: str | None
+) -> None:
+    """Fail closed on the pretraffic/stage sampler readiness contract."""
+
+    if required_target_contract is None:
+        return
+    if required_target_contract not in PRODUCTION_TARGET_CONTRACTS:
+        raise SamplerFailure(
+            "ARGUMENT_OR_SERIALIZATION_DEFECT",
+            phase="TARGET_CONTRACT_VALIDATION",
+            dependency_class="SAMPLER_CONFIGURATION",
+            exit_category="INVALID_REQUIRED_TARGET_CONTRACT",
+            source_function="validate_production_sample_contract",
+            source_line=sys._getframe().f_lineno,
+        )
+    if sample.get("target_contract") != required_target_contract:
+        raise SamplerFailure(
+            "TARGET_ROUTING_CONTRACT_DEFECT",
+            phase="TARGET_CONTRACT_VALIDATION",
+            dependency_class="TARGET_CONSTRUCTION",
+            exit_category="TARGET_CONTRACT_MISMATCH",
+            source_function="validate_production_sample_contract",
+            source_line=sys._getframe().f_lineno,
+        )
+    for key in ("target_selector_hash", "command_contract_hash"):
+        if not SHA256_HEX_PATTERN.fullmatch(str(sample.get(key) or "")):
+            raise SamplerFailure(
+                "ARGUMENT_OR_SERIALIZATION_DEFECT",
+                phase="SAMPLER_READINESS_GATE",
+                dependency_class="SANITIZED_COMMAND_CONTRACT",
+                exit_category="MISSING_OR_INVALID_CONTRACT_HASH",
+                source_function="validate_production_sample_contract",
+                source_line=sys._getframe().f_lineno,
+            )
+    for key in ("argument_name_set", "sanitized_environment_key_set"):
+        names = sample.get(key)
+        if (
+            not isinstance(names, list)
+            or not names
+            or any(
+                not isinstance(name, str)
+                or not SAFE_CONTRACT_NAME_PATTERN.fullmatch(name)
+                or any(part in name.lower() for part in SENSITIVE_KEY_PARTS)
+                for name in names
+            )
+        ):
+            raise SamplerFailure(
+                "ARGUMENT_OR_SERIALIZATION_DEFECT",
+                phase="SAMPLER_READINESS_GATE",
+                dependency_class="SANITIZED_COMMAND_CONTRACT",
+                exit_category="INVALID_SANITIZED_NAME_SET",
+                source_function="validate_production_sample_contract",
+                source_line=sys._getframe().f_lineno,
+            )
+    status_categories = {
+        "import_status": "DETACHED_ENVIRONMENT_OR_IMPORT_DEFECT",
+        "dependency_status": "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+        "auth_handoff_status": "AUTH_FAILURE",
+        "target_construction_status": "TARGET_ROUTING_CONTRACT_DEFECT",
+        "health_sample_status": "FUNCTIONAL_HTTP_FAILURE",
+        "readiness_status": "FUNCTIONAL_HTTP_FAILURE",
+    }
+    for key, category in status_categories.items():
+        if sample.get(key) != "PASS":
+            raise SamplerFailure(
+                category,
+                phase="SAMPLER_READINESS_GATE",
+                dependency_class=key.removesuffix("_status").upper(),
+                exit_category="READINESS_CONTRACT_STOP",
+                source_function="validate_production_sample_contract",
+                source_line=sys._getframe().f_lineno,
+            )
+    if sample.get("raw_response_persisted") is not False or sample.get(
+        "identity_material_persisted"
+    ) is not False:
+        raise SamplerFailure(
+            "ARGUMENT_OR_SERIALIZATION_DEFECT",
+            phase="SAMPLER_READINESS_GATE",
+            dependency_class="PRIVACY_BOUNDARY",
+            exit_category="PERSISTENCE_CONTRACT_STOP",
+            source_function="validate_production_sample_contract",
+            source_line=sys._getframe().f_lineno,
+        )
+
+
+def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str, Any]:
     try:
         completed = subprocess.run(
             argv,
@@ -922,18 +1153,94 @@ def _production_sample(argv: list[str], timeout_seconds: float) -> dict[str, Any
             timeout=timeout_seconds,
             shell=False,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise SamplerFailure(
+            "TIMEOUT",
+            phase="SAMPLER_SUBPROCESS",
+            dependency_class="SUBPROCESS",
+            exit_category="SUBPROCESS_TIMEOUT",
+            source_line=sys._getframe().f_lineno,
+        ) from exc
     except (OSError, subprocess.SubprocessError) as exc:
-        raise ObserverError("production sampler execution failed") from exc
-    if completed.returncode != 0:
-        raise ObserverError("production sampler execution failed")
+        raise SamplerFailure(
+            "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+            phase="SAMPLER_SUBPROCESS",
+            dependency_class="SUBPROCESS",
+            exit_category="SUBPROCESS_LAUNCH_OR_IO_FAILURE",
+            source_line=sys._getframe().f_lineno,
+        ) from exc
     try:
         raw_sample = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
-        raise ObserverError("production sampler returned invalid JSON") from exc
-    sanitized = _sanitize_sample_value(raw_sample)
+        raise SamplerFailure(
+            "JSON_PARSE_FAILURE",
+            phase="SAMPLER_OUTPUT_PARSE",
+            dependency_class="SAMPLER_SERIALIZATION",
+            exit_category=(
+                "SAMPLER_EXIT_NONZERO" if completed.returncode else "SAMPLER_EXIT_ZERO"
+            ),
+            source_line=sys._getframe().f_lineno,
+        ) from exc
+    try:
+        sanitized = _sanitize_sample_value(raw_sample)
+    except ObserverError as exc:
+        raise SamplerFailure(
+            "ARGUMENT_OR_SERIALIZATION_DEFECT",
+            phase="SAMPLER_OUTPUT_SANITIZATION",
+            dependency_class="SAMPLER_SERIALIZATION",
+            exit_category=(
+                "SAMPLER_EXIT_NONZERO" if completed.returncode else "SAMPLER_EXIT_ZERO"
+            ),
+            source_line=sys._getframe().f_lineno,
+        ) from exc
     if not isinstance(sanitized, dict):
-        raise ObserverError("production sampler must return a JSON object")
+        raise SamplerFailure(
+            "ARGUMENT_OR_SERIALIZATION_DEFECT",
+            phase="SAMPLER_OUTPUT_SANITIZATION",
+            dependency_class="SAMPLER_SERIALIZATION",
+            exit_category="NON_OBJECT_OUTPUT",
+            source_line=sys._getframe().f_lineno,
+        )
+    if completed.returncode != 0 or sanitized.get("sample_status") == "FAIL":
+        category = _classify_sampler_failure_payload(sanitized)
+        raise SamplerFailure(
+            category,
+            phase="SAMPLER_FUNCTIONAL_RESULT",
+            dependency_class="SAMPLER_CONTRACT",
+            exit_category=(
+                "SAMPLER_EXIT_NONZERO" if completed.returncode else "SAMPLER_EXIT_ZERO_FAIL"
+            ),
+            retryable=category == "VERIFIED_EXTERNAL_TRANSIENT",
+            source_line=sys._getframe().f_lineno,
+        )
     return sanitized
+
+
+def _production_sample(
+    argv: list[str],
+    timeout_seconds: float,
+    *,
+    required_target_contract: str | None = None,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    retries = 0
+    while True:
+        try:
+            sample = _production_sample_once(argv, timeout_seconds)
+            validate_production_sample_contract(
+                sample, required_target_contract=required_target_contract
+            )
+            return sample
+        except SamplerFailure as exc:
+            elapsed = time.monotonic() - started
+            may_retry = (
+                exc.category == "VERIFIED_EXTERNAL_TRANSIENT"
+                and retries < MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES
+                and elapsed < MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS
+            )
+            if not may_retry:
+                raise
+            retries += 1
 
 
 def _write_incomplete(
@@ -941,6 +1248,7 @@ def _write_incomplete(
     *,
     reason: str,
     process_exit_code: int,
+    failure_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     existing_final = _read_json(directory / "final.json")
     if existing_final is not None:
@@ -969,6 +1277,8 @@ def _write_incomplete(
         "process_exit_code": process_exit_code,
         "completion_marker": False,
     }
+    if failure_metadata is not None:
+        payload["first_failure"] = dict(failure_metadata)
     if not _acquire_terminal_claim(directory, "INCOMPLETE"):
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
@@ -991,6 +1301,11 @@ def _write_incomplete(
             "at_utc": payload["ended_at_utc"],
             "reason": reason,
             "process_exit_code": process_exit_code,
+            "failure_category": (
+                failure_metadata.get("failure_category")
+                if failure_metadata is not None
+                else None
+            ),
         },
     )
     state.update(
@@ -1001,6 +1316,8 @@ def _write_incomplete(
             "ended_at_utc": payload["ended_at_utc"],
         }
     )
+    if failure_metadata is not None:
+        state["first_failure"] = dict(failure_metadata)
     _atomic_write_json(directory / "state.json", state)
     _atomic_write_json(directory / "incomplete.json", payload)
     return _read_json(directory / "incomplete.json") or payload
@@ -1015,6 +1332,7 @@ def start_observation(
     max_gap_seconds: float,
     stale_after_seconds: float,
     mode: str,
+    required_target_contract: str | None = None,
 ) -> dict[str, Any]:
     _validate_configuration(
         duration_seconds=duration_seconds,
@@ -1023,6 +1341,9 @@ def start_observation(
         stale_after_seconds=stale_after_seconds,
         mode=mode,
     )
+    if required_target_contract is not None:
+        if mode != "production" or required_target_contract not in PRODUCTION_TARGET_CONTRACTS:
+            raise ObserverError("required target contract is invalid for this mode")
     production_sampler = _load_production_sampler() if mode == "production" else None
 
     directory = _artifact_dir(artifact_root, observation_id)
@@ -1042,6 +1363,7 @@ def start_observation(
         "sample_interval_seconds": sample_interval_seconds,
         "maximum_allowed_gap_seconds": max_gap_seconds,
         "stale_after_seconds": stale_after_seconds,
+        "required_target_contract": required_target_contract,
     }
     _atomic_write_json(directory / "start.json", start)
     _atomic_write_json(
@@ -1181,6 +1503,12 @@ def _run_worker(
             if mode == "production"
             else None
         )
+        required_target_contract = start.get("required_target_contract")
+        if required_target_contract is not None and (
+            mode != "production"
+            or required_target_contract not in PRODUCTION_TARGET_CONTRACTS
+        ):
+            raise ObserverError("required target contract is invalid for this mode")
     except (KeyError, TypeError, ValueError, ObserverError):
         _write_incomplete(directory, reason="INVALID_START_METADATA", process_exit_code=70)
         return 70
@@ -1230,9 +1558,35 @@ def _run_worker(
                 sample = _production_sample(
                     sampler_argv,
                     timeout_seconds=max(1.0, min(interval_seconds, 30.0)),
+                    required_target_contract=(
+                        str(required_target_contract)
+                        if required_target_contract is not None
+                        else None
+                    ),
                 )
+        except SamplerFailure as exc:
+            _write_incomplete(
+                directory,
+                reason=f"SAMPLER_{exc.category}",
+                process_exit_code=42,
+                failure_metadata=exc.metadata,
+            )
+            return 42
         except ObserverError:
-            _write_incomplete(directory, reason="SAMPLER_FAILURE", process_exit_code=42)
+            metadata = SamplerFailure(
+                "ARGUMENT_OR_SERIALIZATION_DEFECT",
+                phase="SAMPLER_CONTROLLER",
+                dependency_class="OBSERVER_CONTROLLER",
+                exit_category="OBSERVER_ERROR",
+                source_function="_run_worker",
+                source_line=sys._getframe().f_lineno,
+            ).metadata
+            _write_incomplete(
+                directory,
+                reason="SAMPLER_ARGUMENT_OR_SERIALIZATION_DEFECT",
+                process_exit_code=42,
+                failure_metadata=metadata,
+            )
             return 42
 
         sampled_at_utc = _utc_now()
@@ -1602,6 +1956,9 @@ def _build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument("--max-gap-seconds", type=float, default=8.0)
     start_parser.add_argument("--stale-after-seconds", type=float, default=20.0)
     start_parser.add_argument("--mode", choices=("local-test", "production"), required=True)
+    start_parser.add_argument(
+        "--required-target-contract", choices=PRODUCTION_TARGET_CONTRACTS
+    )
 
     poll_parser = subparsers.add_parser("poll")
     poll_parser.add_argument("--artifact-root", required=True)
@@ -1630,6 +1987,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_gap_seconds=args.max_gap_seconds,
                 stale_after_seconds=args.stale_after_seconds,
                 mode=args.mode,
+                required_target_contract=args.required_target_contract,
             )
         elif args.command == "poll":
             result = poll_observation(
