@@ -355,6 +355,299 @@ def validate_registry_final_artifact(artifact: dict[str, Any]) -> list[str]:
     return failures
 
 
+EXACT_SET_IAM_POLICY_METHOD = "google.cloud.run.v1.Services.SetIamPolicy"
+AUTHORITATIVE_IAM_REPEAT_COUNT = 3
+AUTHORITATIVE_IAM_MINIMUM_REPEAT_GAP_SECONDS = 30.0
+
+
+def _contract_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def build_authoritative_set_iam_policy_query(
+    *,
+    project_id: str,
+    service: str,
+    region: str,
+    window_start_utc: str,
+    window_end_utc: str,
+) -> dict[str, Any]:
+    """Build the exact closed-window query; callers must not persist its raw filter."""
+
+    start = datetime.fromisoformat(window_start_utc.replace("Z", "+00:00"))
+    end = datetime.fromisoformat(window_end_utc.replace("Z", "+00:00"))
+    if start.tzinfo is None or end.tzinfo is None or end <= start:
+        raise ObserverError("authoritative IAM window must be closed and increasing")
+    resource_name = f"namespaces/{project_id}/services/{service}"
+    query_filter = (
+        f'timestamp>="{window_start_utc}" AND timestamp<="{window_end_utc}" '
+        f'AND resource.type="cloud_run_revision" '
+        f'AND resource.labels.service_name="{service}" '
+        f'AND resource.labels.location="{region}" '
+        f'AND protoPayload.resourceName="{resource_name}" '
+        f'AND protoPayload.methodName="{EXACT_SET_IAM_POLICY_METHOD}"'
+    )
+    safe_contract = {
+        "project": "MASKED",
+        "resource_type": "cloud_run_revision",
+        "service": service,
+        "region": region,
+        "resource_identity_hash": _contract_sha256(resource_name),
+        "exact_method": EXACT_SET_IAM_POLICY_METHOD,
+        "window_start_utc": window_start_utc,
+        "window_end_utc": window_end_utc,
+        "deduplication": "INSERT_ID_OR_CANONICAL_EVENT_IDENTIFIER_SHA256",
+    }
+    contract_json = json.dumps(
+        safe_contract, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return {
+        "query_filter": query_filter,
+        "safe_contract": safe_contract,
+        "filter_contract_sha256": _contract_sha256(contract_json),
+        "exact_filter_sha256": _contract_sha256(query_filter),
+        "resource_name": resource_name,
+    }
+
+
+def _principal_category(entry: dict[str, Any]) -> str:
+    payload = entry.get("protoPayload") or {}
+    authentication = payload.get("authenticationInfo") or {}
+    principal = str(authentication.get("principalEmail") or "")
+    if not principal:
+        return "NONE_OR_SYSTEM"
+    if principal.endswith("gserviceaccount.com"):
+        return "SERVICE_ACCOUNT"
+    if "@" in principal:
+        return "USER_OR_WORKFORCE_IDENTITY"
+    return "OTHER_REDACTED_IDENTITY"
+
+
+def sanitize_authoritative_set_iam_policy_entries(
+    entries: list[dict[str, Any]],
+    *,
+    project_id: str,
+    service: str,
+    region: str,
+    before_iam_sha256: str,
+    after_iam_sha256: str,
+) -> dict[str, Any]:
+    """Exclude broad events, deduplicate exact events and retain hash-only identity."""
+
+    resource_name = f"namespaces/{project_id}/services/{service}"
+    unique: dict[str, dict[str, Any]] = {}
+    excluded_count = 0
+    for entry in entries:
+        payload = entry.get("protoPayload") or {}
+        resource = entry.get("resource") or {}
+        labels = resource.get("labels") or {}
+        exact = (
+            payload.get("methodName") == EXACT_SET_IAM_POLICY_METHOD
+            and payload.get("resourceName") == resource_name
+            and resource.get("type") == "cloud_run_revision"
+            and labels.get("service_name") == service
+            and labels.get("location") == region
+        )
+        if not exact:
+            excluded_count += 1
+            continue
+        canonical_id = str(entry.get("insertId") or "") or "|".join(
+            (
+                str(entry.get("timestamp") or ""),
+                str(payload.get("methodName") or ""),
+                str(payload.get("resourceName") or ""),
+            )
+        )
+        event_id_hash = _contract_sha256(canonical_id)
+        unique.setdefault(event_id_hash, entry)
+
+    sanitized = []
+    for event_id_hash in sorted(unique):
+        entry = unique[event_id_hash]
+        payload = entry.get("protoPayload") or {}
+        sanitized.append(
+            {
+                "timestamp_utc": str(entry.get("timestamp") or ""),
+                "method_name": EXACT_SET_IAM_POLICY_METHOD,
+                "resource_identity_hash": _contract_sha256(
+                    str(payload.get("resourceName") or "")
+                ),
+                "event_identifier_hash": event_id_hash,
+                "principal_category": _principal_category(entry),
+                "policy_delta": before_iam_sha256 != after_iam_sha256,
+                "before_iam_normalized_sha256": before_iam_sha256,
+                "after_iam_normalized_sha256": after_iam_sha256,
+                "raw_principal_persisted": False,
+                "raw_policy_persisted": False,
+            }
+        )
+    return {
+        "authoritative_unique_event_count": len(sanitized),
+        "event_identifier_hash_set": [
+            event["event_identifier_hash"] for event in sanitized
+        ],
+        "events": sanitized,
+        "excluded_broad_or_wrong_method_count": excluded_count,
+    }
+
+
+def evaluate_authoritative_iam_repeats(
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Require three complete, identical, sufficiently separated closed-window reads."""
+
+    if len(results) != AUTHORITATIVE_IAM_REPEAT_COUNT:
+        return {"status": "NOT_VERIFIED", "reason": "REPEAT_COUNT_MISMATCH"}
+    complete = all(
+        result.get("completion_marker") is True
+        and result.get("partial_result") is False
+        and result.get("status") == "PASS"
+        for result in results
+    )
+    contract_hashes = {str(result.get("filter_contract_sha256")) for result in results}
+    filter_hashes = {str(result.get("exact_filter_sha256")) for result in results}
+    counts = [int(result.get("authoritative_unique_event_count", -1)) for result in results]
+    event_sets = [tuple(result.get("event_identifier_hash_set") or ()) for result in results]
+    gaps = []
+    try:
+        for previous, current in zip(results, results[1:]):
+            previous_end = datetime.fromisoformat(
+                str(previous["query_completed_at_utc"]).replace("Z", "+00:00")
+            )
+            current_start = datetime.fromisoformat(
+                str(current["query_started_at_utc"]).replace("Z", "+00:00")
+            )
+            gaps.append((current_start - previous_end).total_seconds())
+    except (KeyError, TypeError, ValueError):
+        return {"status": "NOT_VERIFIED", "reason": "INVALID_QUERY_TIMESTAMPS"}
+    non_monotonic = len(set(counts)) != 1 or len(set(event_sets)) != 1
+    if (
+        not complete
+        or len(contract_hashes) != 1
+        or len(filter_hashes) != 1
+        or any(gap < AUTHORITATIVE_IAM_MINIMUM_REPEAT_GAP_SECONDS for gap in gaps)
+        or non_monotonic
+    ):
+        return {
+            "status": "NOT_VERIFIED",
+            "reason": "INCOMPLETE_OR_NON_MONOTONIC_REPEATS",
+            "repeat_counts": counts,
+            "minimum_repeat_gap_seconds": min(gaps) if gaps else None,
+            "non_monotonic_result": non_monotonic,
+        }
+    count = counts[0]
+    return {
+        "status": "PASS" if count == 0 else "STOP",
+        "authoritative_set_iam_policy_count": count,
+        "repeat_counts": counts,
+        "minimum_repeat_gap_seconds": min(gaps),
+        "non_monotonic_result": False,
+    }
+
+
+_WINDOWS_ESCAPED_DRIVE_ROOT = re.compile(r"^[A-Za-z]:\\\\+$")
+_WINDOWS_ABSOLUTE_WITH_SEGMENT = re.compile(
+    r"^[A-Za-z]:\\(?!\\)(?:[^\\/\s]+)(?:\\[^\\/\s]+)*$"
+)
+_UNC_ABSOLUTE_WITH_SHARE = re.compile(r"^\\\\[^\\/\s]+\\[^\\/\s]+")
+_UNIX_SENSITIVE_WITH_SEGMENT = re.compile(
+    r"^/(?:workspace|root|home|tmp|var)/(?:[^/\s]+)(?:/[^/\s]+)*$"
+)
+
+
+def classify_internal_path_value(value: Any) -> dict[str, str]:
+    """Classify one parsed value; field names and serialized bodies are out of scope."""
+
+    if not isinstance(value, str):
+        return {"rule_id": "NON_STRING_VALUE", "classification": "NO_MATCH"}
+    if _WINDOWS_ESCAPED_DRIVE_ROOT.fullmatch(value):
+        return {
+            "rule_id": "ESCAPED_DRIVE_ROOT_SCHEMA_LITERAL",
+            "classification": "SAFE_ROUTE_OR_SCHEMA_VALUE",
+        }
+    if _WINDOWS_ABSOLUTE_WITH_SEGMENT.match(value):
+        return {
+            "rule_id": "WINDOWS_ABSOLUTE_DRIVE_PATH",
+            "classification": "TRUE_INTERNAL_PATH",
+        }
+    if _UNC_ABSOLUTE_WITH_SHARE.match(value):
+        return {
+            "rule_id": "UNC_ABSOLUTE_PATH",
+            "classification": "TRUE_INTERNAL_PATH",
+        }
+    if _UNIX_SENSITIVE_WITH_SEGMENT.match(value):
+        return {
+            "rule_id": "UNIX_SENSITIVE_ABSOLUTE_PATH",
+            "classification": "TRUE_INTERNAL_PATH",
+        }
+    if (
+        value == "/health"
+        or value.startswith("/assets/")
+        or value.startswith("/app/")
+        or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value)
+        or value.startswith("ev-")
+        or value.strip().lower() == "ok"
+    ):
+        return {
+            "rule_id": "SAFE_ROUTE_SCHEMA_OR_IDENTIFIER_VALUE",
+            "classification": "SAFE_ROUTE_OR_SCHEMA_VALUE",
+        }
+    return {"rule_id": "NO_INTERNAL_PATH_RULE", "classification": "NO_MATCH"}
+
+
+def privacy_safe_internal_path_classification(
+    payload: Any,
+    *,
+    response_surface_category: str,
+) -> dict[str, Any]:
+    """Traverse parsed values only and return hash-only match metadata."""
+
+    classified = []
+
+    def visit(value: Any, pointer: str) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                escaped = str(key).replace("~", "~0").replace("/", "~1")
+                visit(child, f"{pointer}/{escaped}")
+            return
+        if isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{pointer}/{index}")
+            return
+        decision = classify_internal_path_value(value)
+        if decision["classification"] == "NO_MATCH":
+            return
+        text = str(value)
+        classified.append(
+            {
+                "detector_rule_id": decision["rule_id"],
+                "response_surface_category": response_surface_category,
+                "selector_sha256": _contract_sha256(
+                    f"{response_surface_category}|{pointer or '/'}"
+                ),
+                "matched_value_sha256": _contract_sha256(text),
+                "value_length": len(text),
+                "match_type": "PARSED_VALUE_CLASSIFICATION",
+                "classification": decision["classification"],
+                "raw_fragment_persisted": False,
+            }
+        )
+
+    visit(payload, "")
+    true_count = sum(
+        item["classification"] == "TRUE_INTERNAL_PATH" for item in classified
+    )
+    return {
+        "true_internal_path_count": true_count,
+        "safe_route_or_schema_value_count": sum(
+            item["classification"] == "SAFE_ROUTE_OR_SCHEMA_VALUE"
+            for item in classified
+        ),
+        "matches": classified,
+        "raw_fragment_persisted": False,
+    }
+
+
 class ObserverError(RuntimeError):
     """Base error whose message is safe to show to an operator."""
 

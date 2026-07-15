@@ -595,5 +595,201 @@ class R479DecisionContractTests(unittest.TestCase):
         self.assertEqual(observer.TOTAL_AUTHORIZED_OBSERVATION_SECONDS, 3000)
 
 
+class R481PretrafficEvidenceContractTests(unittest.TestCase):
+    def _audit_result(
+        self,
+        *,
+        start: str,
+        end: str,
+        count: int = 0,
+        event_hashes: tuple[str, ...] = (),
+        completion: bool = True,
+        partial: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "query_started_at_utc": start,
+            "query_completed_at_utc": end,
+            "filter_contract_sha256": "contract",
+            "exact_filter_sha256": "filter",
+            "completion_marker": completion,
+            "partial_result": partial,
+            "authoritative_unique_event_count": count,
+            "event_identifier_hash_set": list(event_hashes),
+            "status": "PASS",
+        }
+
+    def test_authoritative_iam_query_is_exact_closed_and_resource_scoped(self) -> None:
+        query = observer.build_authoritative_set_iam_policy_query(
+            project_id="project-under-test",
+            service="qlib-skillup-runtime",
+            region="asia-northeast1",
+            window_start_utc="2026-07-15T05:08:53.2859932Z",
+            window_end_utc="2026-07-15T05:29:58.3341407Z",
+        )
+        text = query["query_filter"]
+        self.assertIn('timestamp>="2026-07-15T05:08:53.2859932Z"', text)
+        self.assertIn('timestamp<="2026-07-15T05:29:58.3341407Z"', text)
+        self.assertIn('resource.labels.service_name="qlib-skillup-runtime"', text)
+        self.assertIn('resource.labels.location="asia-northeast1"', text)
+        self.assertIn(
+            'protoPayload.methodName="google.cloud.run.v1.Services.SetIamPolicy"',
+            text,
+        )
+        self.assertNotIn("=~", text)
+        self.assertEqual(query["safe_contract"]["project"], "MASKED")
+
+    def test_authoritative_iam_entries_exclude_broad_events_and_deduplicate(self) -> None:
+        resource_name = "namespaces/project-under-test/services/qlib-skillup-runtime"
+
+        def entry(
+            insert_id: str,
+            *,
+            method: str = observer.EXACT_SET_IAM_POLICY_METHOD,
+            resource: str = resource_name,
+            service_name: str = "qlib-skillup-runtime",
+            location: str = "asia-northeast1",
+            resource_type: str = "cloud_run_revision",
+        ) -> dict[str, object]:
+            return {
+                "insertId": insert_id,
+                "timestamp": "2026-07-15T05:20:00Z",
+                "resource": {
+                    "type": resource_type,
+                    "labels": {"service_name": service_name, "location": location},
+                },
+                "protoPayload": {
+                    "methodName": method,
+                    "resourceName": resource,
+                    "authenticationInfo": {"principalEmail": "masked@example.invalid"},
+                },
+            }
+
+        result = observer.sanitize_authoritative_set_iam_policy_entries(
+            [
+                entry("one"),
+                entry("one"),
+                entry("traffic", method="google.cloud.run.v1.Services.UpdateTraffic"),
+                entry("registry", method="artifactregistry.tags.create"),
+                entry("other", service_name="other-service"),
+            ],
+            project_id="project-under-test",
+            service="qlib-skillup-runtime",
+            region="asia-northeast1",
+            before_iam_sha256="same",
+            after_iam_sha256="same",
+        )
+        self.assertEqual(result["authoritative_unique_event_count"], 1)
+        self.assertEqual(result["excluded_broad_or_wrong_method_count"], 3)
+        serialized = json.dumps(result)
+        self.assertNotIn("masked@example.invalid", serialized)
+        self.assertIn("USER_OR_WORKFORCE_IDENTITY", serialized)
+
+    def test_authoritative_repeats_reject_partial_incomplete_and_010(self) -> None:
+        zero_results = [
+            self._audit_result(
+                start="2026-07-15T06:00:00Z",
+                end="2026-07-15T06:00:01Z",
+            ),
+            self._audit_result(
+                start="2026-07-15T06:00:31Z",
+                end="2026-07-15T06:00:32Z",
+            ),
+            self._audit_result(
+                start="2026-07-15T06:01:02Z",
+                end="2026-07-15T06:01:03Z",
+            ),
+        ]
+        self.assertEqual(
+            observer.evaluate_authoritative_iam_repeats(zero_results)["status"],
+            "PASS",
+        )
+
+        partial = [dict(result) for result in zero_results]
+        partial[1]["partial_result"] = True
+        self.assertEqual(
+            observer.evaluate_authoritative_iam_repeats(partial)["status"],
+            "NOT_VERIFIED",
+        )
+        incomplete = [dict(result) for result in zero_results]
+        incomplete[2]["completion_marker"] = False
+        self.assertEqual(
+            observer.evaluate_authoritative_iam_repeats(incomplete)["status"],
+            "NOT_VERIFIED",
+        )
+        non_monotonic = [dict(result) for result in zero_results]
+        non_monotonic[1]["authoritative_unique_event_count"] = 1
+        non_monotonic[1]["event_identifier_hash_set"] = ["event"]
+        decision = observer.evaluate_authoritative_iam_repeats(non_monotonic)
+        self.assertEqual(decision["status"], "NOT_VERIFIED")
+        self.assertTrue(decision["non_monotonic_result"])
+
+    def test_internal_path_true_fixtures_and_safe_values(self) -> None:
+        true_values = (
+            r"C:\internal\file",
+            r"H:\private\file",
+            r"\\server\share\file",
+            "/workspace/internal",
+            "/root/internal",
+            "/home/internal",
+            "/tmp/internal",
+            "/var/internal",
+        )
+        safe_values = (
+            "/health",
+            "/assets/app.js",
+            "/app/route",
+            "https://example.invalid/route",
+            "/items/0",
+            "schema.selector",
+            "ev-soldering-safe-summary-v1",
+            "field_name",
+            "ok",
+            r"C:\\",
+            r"H:\\",
+        )
+        for value in true_values:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    observer.classify_internal_path_value(value)["classification"],
+                    "TRUE_INTERNAL_PATH",
+                )
+        for value in safe_values:
+            with self.subTest(value=value):
+                self.assertNotEqual(
+                    observer.classify_internal_path_value(value)["classification"],
+                    "TRUE_INTERNAL_PATH",
+                )
+
+    def test_internal_path_scans_values_not_field_names_and_redacts_matches(self) -> None:
+        payload = {
+            r"C:\field\name": "ok",
+            "route": "/assets/app.js",
+            "nested": {"location": r"H:\private\file"},
+        }
+        result = observer.privacy_safe_internal_path_classification(
+            payload,
+            response_surface_category="FIXTURE_JSON",
+        )
+        self.assertEqual(result["true_internal_path_count"], 1)
+        serialized = json.dumps(result)
+        self.assertNotIn(r"C:\field\name", serialized)
+        self.assertNotIn(r"H:\private\file", serialized)
+        self.assertIn("matched_value_sha256", serialized)
+        self.assertFalse(result["raw_fragment_persisted"])
+
+    def test_runbook_contains_r481_evidence_contract(self) -> None:
+        text = RUNBOOK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+            "google.cloud.run.v1.Services.SetIamPolicy",
+            "insertId",
+            "closed start/end window",
+            "parsed response values only",
+            "escaped drive-root schema literals",
+            "raw response fragments must remain memory-only",
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment.lower(), text.lower())
+
+
 if __name__ == "__main__":
     unittest.main()

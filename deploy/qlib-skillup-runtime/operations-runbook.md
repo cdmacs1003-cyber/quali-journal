@@ -205,6 +205,16 @@ active candidate instances<=2
 
 Every proxy condition is required for `COST_PROXY=PASS_WITH_LIMITS`; any excess is STOP. Real-time Cloud Billing amount remains `NOT_VERIFIED` unless authoritative billing data is actually available, and proxy compliance must never be reported as an amount PASS.
 
+### Pretraffic audit and internal-path evidence contract
+
+SetIamPolicy evidence must use one immutable query contract. Resolve the active project in memory, target the exact Cloud Run service resource and `asia-northeast1`, use exact method equality for `google.cloud.run.v1.Services.SetIamPolicy`, and use the exact closed start/end window of the deployment task. Deduplicate by `insertId`, or by a SHA256 canonical event identifier only when `insertId` is absent. Project-wide events, registry/tag/service updates and regex method matches are excluded.
+
+Run the identical closed-window query three times with at least 30 seconds between completed and next-start timestamps. Every result requires `completion_marker=true`, `partial_result=false`, one identical filter-contract hash and one identical event-id hash set. A partial result, missing marker, filter drift or a non-monotonic sequence such as 0/1/0 is `NOT_VERIFIED`; it can never be promoted to IAM PASS. Sanitized event evidence may retain only timestamp, exact method, resource and event-id hashes, principal category, policy-delta status and normalized IAM hashes. Raw principals and policies are forbidden.
+
+Internal-path detection operates on parsed response values only. It must not scan serialized field names or count a slash merely because it appears in a route, JSON pointer or schema selector. True filesystem matches require a path segment after a Windows drive root, a UNC server/share, or one of `/workspace/`, `/root/`, `/home/`, `/tmp/` and `/var/`. Escaped drive-root schema literals without a path segment, `/health`, `/assets/...`, application routes, URL paths, JSON pointers, Evidence identifiers, field names and normalized health values are safe unless separate filesystem evidence exists.
+
+Privacy-safe match artifacts contain only detector rule id, response-surface category, selector SHA256, matched-value SHA256, value length, match type, classification and `raw_fragment_persisted=false`. Identity material and raw response fragments must remain memory-only. A repaired detector must prove all required true fixtures are detected, all safe route/schema fixtures have zero true-path false positives, and a 0-percent candidate diagnostic has `true_internal_path_count=0` before any traffic decision. R480 candidate `qlib-skillup-runtime-00013-mad` is diagnostic-only and must not be reused for deployment. R482 deployment remains not granted without a separate exact owner decision.
+
 ## 6. Mandatory stop and rollback
 
 Stop on any functional/authentication failure, Evidence/Trace failure, raw/internal-path/secret exposure, Production write, synthetic timeout, unexpected synthetic 5xx, two consecutive qualifying latency or aggregate-5xx windows above the exact limits, a failed low-volume fallback, fresh-candidate capacity failure, cost-proxy excess, observer incomplete/final-marker failure, rollback-target loss, IAM/public-member/SetIamPolicy drift, traffic mismatch, or owner stop instruction.
