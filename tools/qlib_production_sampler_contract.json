@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "contract_id": "QLIB_PRODUCTION_SAMPLER_V1",
+  "canonical_source": "tools/qlib_production_sampler.py",
+  "source_recovery": {
+    "classification": "CLEAN_IMPLEMENTATION_FROM_VERIFIED_CONTRACT",
+    "proofpacked_candidate": "H:/tmp/R9ZNW-485/production_sampler.py",
+    "proofpacked_candidate_sha256": "8f5a878eea4205acc7c5b272c18e9d53e918dacde8c9aa976c4451fe55ed1496",
+    "actual_r487_bootstrap": "H:/tmp/R9ZNW-487/_working_sampler_bootstrap.py",
+    "working_file_promoted_directly": false
+  },
+  "input": {
+    "required_arguments": [
+      "target_contract",
+      "candidate",
+      "tag",
+      "expected_candidate",
+      "expected_stable"
+    ],
+    "target_contract_values": ["REVISION_FUNCTIONAL"],
+    "progress_environment_key": "QLIB_SAMPLER_PROGRESS_FILE",
+    "total_deadline_environment_key": "QLIB_SAMPLER_TOTAL_DEADLINE_SECONDS"
+  },
+  "output": {
+    "encoding": "UTF-8 JSON object on stdout",
+    "required_fields": [
+      "sample_status",
+      "target_contract",
+      "target_selector_hash",
+      "command_contract_hash",
+      "argument_name_set",
+      "sanitized_environment_key_set",
+      "import_status",
+      "dependency_status",
+      "auth_handoff_status",
+      "target_construction_status",
+      "health_sample_status",
+      "readiness_status",
+      "latency_ms",
+      "max_latency_ms",
+      "evidence_trace_safe_summary",
+      "phase_timings",
+      "current_phase",
+      "last_completed_phase",
+      "read_only_command_count",
+      "mutation_command_count",
+      "valid_sample_count",
+      "child_exit_state",
+      "child_cancellation_state",
+      "orphan_child_count",
+      "raw_response_persisted",
+      "identity_material_persisted",
+      "production_write_count"
+    ],
+    "valid_sample_definition": "sample_status PASS, readiness_status PASS, valid_sample_count 1, mutation_command_count 0, privacy flags false",
+    "partial_output": "FAIL_CLOSED",
+    "malformed_output": "FAIL_CLOSED",
+    "sample_zero": "FAIL_CLOSED"
+  },
+  "target": {
+    "class": "REVISION_FUNCTIONAL",
+    "resolution": "one Cloud Run service describe must bind the requested private tag to the requested candidate",
+    "service_aggregate_functional_probe": false
+  },
+  "authentication": {
+    "boundary": "identity material exists in child memory only",
+    "persistence": "FORBIDDEN"
+  },
+  "deadline": {
+    "clock": "monotonic",
+    "total_seconds": 30,
+    "increase_forbidden": true,
+    "per_operation_budget": "remaining total deadline"
+  },
+  "phases": [
+    "AUTHENTICATION",
+    "TARGET_RESOLUTION",
+    "REQUEST_PREPARATION",
+    "HTTP_REQUEST",
+    "NORMALIZATION",
+    "EVIDENCE_TRACE_SAFE_EXTRACTION",
+    "SERIALIZATION",
+    "PARENT_CHILD_IPC",
+    "CHILD_CLEANUP",
+    "OBSERVER_COLLECTION"
+  ],
+  "evidence_trace": {
+    "safe_summary_values": ["PASS", "NOT_VERIFIED"],
+    "raw_question_answer_persistence": "FORBIDDEN",
+    "raw_response_persistence": "FORBIDDEN"
+  },
+  "exit_codes": {
+    "0": "VALID_SAMPLE_PASS",
+    "42": "SANITIZED_FAIL_CLOSED_RESULT",
+    "70": "INVALID_LOCAL_INVOCATION"
+  },
+  "timeout": {
+    "reason": "TOTAL_DEADLINE_EXCEEDED",
+    "progress_marker_required": true,
+    "child_process_tree_cancellation_required": true,
+    "orphan_child_limit": 0
+  },
+  "counters": {
+    "read_only_command_count": "increments before every external read-only command or request and is emitted through progress IPC",
+    "mutation_command_count": "separate counter fixed at zero for the sampler"
+  },
+  "privacy": {
+    "raw_url_persistence": "FORBIDDEN",
+    "raw_response_persistence": "FORBIDDEN",
+    "token_persistence": "FORBIDDEN",
+    "identity_persistence": "FORBIDDEN",
+    "production_data_access": "FORBIDDEN",
+    "production_write_count": 0
+  }
+}

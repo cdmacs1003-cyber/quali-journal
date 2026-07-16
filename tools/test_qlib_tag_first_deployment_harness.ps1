@@ -113,6 +113,37 @@ $afterJson = [ordered]@{
     }
 } | ConvertTo-Json -Depth 8 -Compress
 
+$rollbackBeforeJson = [ordered]@{
+    status = [ordered]@{
+        latestCreatedRevisionName = $candidateRevision
+        traffic = @(
+            [ordered]@{
+                revisionName = $beforeRevision
+                percent = 100
+            },
+            [ordered]@{
+                revisionName = $candidateRevision
+                tag = $tag
+            }
+        )
+    }
+} | ConvertTo-Json -Depth 8 -Compress
+
+$rollbackAfterJson = [ordered]@{
+    status = [ordered]@{
+        latestCreatedRevisionName = $candidateRevision
+        traffic = @(
+            [ordered]@{
+                revisionName = $beforeRevision
+                percent = 100
+            },
+            [ordered]@{
+                revisionName = $candidateRevision
+            }
+        )
+    }
+} | ConvertTo-Json -Depth 8 -Compress
+
 Invoke-HarnessTestCase -Name 'success_branch_and_argument_contract' -Body {
     $state = [ordered]@{
         invocation_count = 0
@@ -428,14 +459,136 @@ Invoke-HarnessTestCase -Name 'partial_readback_is_not_success' -Body {
     $script:Evidence.partial_readback = [ordered]@{ deploy_invocation_count = $state.deploy_invocation_count; partial_readback_count = $state.partial_readback_count; status = 'FAIL_CLOSED_NOT_PASS' }
 }
 
+Invoke-HarnessTestCase -Name 'rollback_postprocessing_success' -Body {
+    $state = [ordered]@{
+        mutation_invocation_count = 0
+        readback_invocation_count = 0
+        mutation_arguments = @()
+    }
+    $runner = {
+        param([string[]]$Arguments, [string]$Operation)
+        switch ($Operation) {
+            'describe service before tag rollback' {
+                $state.readback_invocation_count++
+                return New-MockCommandResult -StdOut $rollbackBeforeJson
+            }
+            'remove private tag' {
+                $state.mutation_invocation_count++
+                $state.mutation_arguments = @($Arguments)
+                return New-MockCommandResult
+            }
+            'describe service after tag rollback' {
+                $state.readback_invocation_count++
+                return New-MockCommandResult -StdOut $rollbackAfterJson
+            }
+            default { return New-MockCommandResult -ExitCode 99 }
+        }
+    }
+
+    $result = Invoke-QlibTagRollback `
+        -Project $project `
+        -Region $region `
+        -Service $service `
+        -Tag $tag `
+        -CandidateRevision $candidateRevision `
+        -StableRevision $beforeRevision `
+        -CommandRunner $runner `
+        -RunnerKind 'MOCK'
+
+    Assert-TestEqual -Expected 'PASS' -Actual $result.status -Message 'Rollback wrapper final status mismatch.'
+    Assert-TestEqual -Expected 'PASS' -Actual $result.mutation_status -Message 'Rollback mutation status mismatch.'
+    Assert-TestEqual -Expected 'PASS' -Actual $result.independent_readback_status -Message 'Rollback readback status mismatch.'
+    Assert-TestEqual -Expected 'PASS' -Actual $result.postprocessing_status -Message 'Rollback postprocessing status mismatch.'
+    Assert-TestEqual -Expected 1 -Actual $state.mutation_invocation_count -Message 'Rollback mutation invocation count mismatch.'
+    Assert-TestEqual -Expected 2 -Actual $state.readback_invocation_count -Message 'Rollback read-only invocation count mismatch.'
+    Assert-TestEqual -Expected 1 -Actual $result.mutation_command_count -Message 'Rollback mutation counter mismatch.'
+    Assert-TestEqual -Expected 2 -Actual $result.read_only_command_count -Message 'Rollback read-only counter mismatch.'
+    Assert-TestEqual -Expected 0 -Actual $result.mutation_retry_count -Message 'Rollback mutation retry count mismatch.'
+    Assert-TestEqual -Expected 0 -Actual $result.tag_target_count -Message 'Rollback tag readback mismatch.'
+    Assert-TestCondition -Condition ($state.mutation_arguments -contains '--remove-tags') -Message 'Rollback remove-tags argument is absent.'
+
+    $script:Evidence.rollback_success = [ordered]@{
+        status = $result.status
+        mutation_invocation_count = $state.mutation_invocation_count
+        read_only_command_count = $result.read_only_command_count
+        mutation_command_count = $result.mutation_command_count
+        mutation_retry_count = $result.mutation_retry_count
+        independent_readback_status = $result.independent_readback_status
+        postprocessing_status = $result.postprocessing_status
+    }
+}
+
+Invoke-HarnessTestCase -Name 'rollback_postprocessing_failure_does_not_retry_mutation' -Body {
+    $state = [ordered]@{
+        mutation_invocation_count = 0
+        readback_invocation_count = 0
+    }
+    $runner = {
+        param([string[]]$Arguments, [string]$Operation)
+        switch ($Operation) {
+            'describe service before tag rollback' {
+                $state.readback_invocation_count++
+                return New-MockCommandResult -StdOut $rollbackBeforeJson
+            }
+            'remove private tag' {
+                $state.mutation_invocation_count++
+                return New-MockCommandResult
+            }
+            'describe service after tag rollback' {
+                $state.readback_invocation_count++
+                return New-MockCommandResult -StdOut $rollbackAfterJson
+            }
+            default { return New-MockCommandResult -ExitCode 99 }
+        }
+    }
+    $failingPostprocessor = {
+        param($Facts)
+        throw [System.FormatException]::new('synthetic local postprocessing failure')
+    }
+
+    $result = Invoke-QlibTagRollback `
+        -Project $project `
+        -Region $region `
+        -Service $service `
+        -Tag $tag `
+        -CandidateRevision $candidateRevision `
+        -StableRevision $beforeRevision `
+        -CommandRunner $runner `
+        -RunnerKind 'MOCK' `
+        -Postprocessor $failingPostprocessor
+
+    Assert-TestEqual -Expected 'FAIL_POSTPROCESSING' -Actual $result.status -Message 'Postprocessing failure final status mismatch.'
+    Assert-TestEqual -Expected 'PASS' -Actual $result.mutation_status -Message 'Postprocessing failure lost mutation success.'
+    Assert-TestEqual -Expected 'PASS' -Actual $result.independent_readback_status -Message 'Postprocessing failure lost readback success.'
+    Assert-TestEqual -Expected 'FAIL' -Actual $result.postprocessing_status -Message 'Postprocessing failure status mismatch.'
+    Assert-TestEqual -Expected 'FormatException' -Actual $result.sanitized_postprocessing_error_class -Message 'Postprocessing error class mismatch.'
+    Assert-TestEqual -Expected 1 -Actual $state.mutation_invocation_count -Message 'Postprocessing failure retried mutation.'
+    Assert-TestEqual -Expected 1 -Actual $result.mutation_command_count -Message 'Postprocessing failure mutation counter mismatch.'
+    Assert-TestEqual -Expected 2 -Actual $result.read_only_command_count -Message 'Postprocessing failure read-only counter mismatch.'
+    Assert-TestEqual -Expected 0 -Actual $result.mutation_retry_count -Message 'Postprocessing failure mutation retry mismatch.'
+
+    $script:Evidence.rollback_postprocessing_failure = [ordered]@{
+        status = $result.status
+        mutation_invocation_count = $state.mutation_invocation_count
+        read_only_command_count = $result.read_only_command_count
+        mutation_command_count = $result.mutation_command_count
+        mutation_retry_count = $result.mutation_retry_count
+        independent_readback_status = $result.independent_readback_status
+        postprocessing_status = $result.postprocessing_status
+        sanitized_postprocessing_error_class = $result.sanitized_postprocessing_error_class
+    }
+}
+
 $failedTests = @($script:TestResults | Where-Object { $_.status -cne 'PASS' })
 $summary = [ordered]@{
-    task_id = 'R9ZNW-486'
+    task_id = 'R9ZNW-487A'
     test_kind = 'LOCAL_SEMANTIC_MOCK_ONLY'
     status = if ($failedTests.Count -eq 0) { 'PASS' } else { 'FAIL' }
     test_count = $script:TestResults.Count
     failure_count = $failedTests.Count
     mock_deploy_invocation_count_success_path = if ($script:Evidence.Contains('success')) { $script:Evidence.success.mock_deploy_invocation_count } else { 0 }
+    mock_rollback_mutation_invocation_count_success_path = if ($script:Evidence.Contains('rollback_success')) { $script:Evidence.rollback_success.mutation_invocation_count } else { 0 }
+    mock_rollback_mutation_retry_count_postprocessing_failure = if ($script:Evidence.Contains('rollback_postprocessing_failure')) { $script:Evidence.rollback_postprocessing_failure.mutation_retry_count } else { -1 }
     real_cloud_command_count = 0
     cloud_mutation_count = 0
     existing_candidate_reuse_count = 0

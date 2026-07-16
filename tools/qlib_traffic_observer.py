@@ -17,8 +17,10 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +73,21 @@ SAMPLER_FAILURE_CATEGORIES = (
 )
 MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES = 1
 MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS = 10.0
+SAMPLER_TOTAL_DEADLINE_SECONDS = 30.0
+SAMPLER_PROGRESS_FILE_ENV = "QLIB_SAMPLER_PROGRESS_FILE"
+SAMPLER_DEADLINE_ENV = "QLIB_SAMPLER_TOTAL_DEADLINE_SECONDS"
+SAMPLER_PHASES = (
+    "AUTHENTICATION",
+    "TARGET_RESOLUTION",
+    "REQUEST_PREPARATION",
+    "HTTP_REQUEST",
+    "NORMALIZATION",
+    "EVIDENCE_TRACE_SAFE_EXTRACTION",
+    "SERIALIZATION",
+    "PARENT_CHILD_IPC",
+    "CHILD_CLEANUP",
+    "OBSERVER_COLLECTION",
+)
 
 # R479 staged-traffic decision contract.  These values are deliberately kept
 # in the observer module so the runbook and focused tests share one executable
@@ -747,6 +764,7 @@ class SamplerFailure(ObserverError):
         retryable: bool = False,
         source_function: str = "_production_sample",
         source_line: int = 0,
+        diagnostics: dict[str, Any] | None = None,
     ) -> None:
         if category not in SAMPLER_FAILURE_CATEGORIES:
             category = "ARGUMENT_OR_SERIALIZATION_DEFECT"
@@ -764,6 +782,8 @@ class SamplerFailure(ObserverError):
             "raw_exception_message_persisted": False,
             "raw_sampler_output_persisted": False,
         }
+        if diagnostics:
+            self.metadata.update(_sanitize_sampler_diagnostics(diagnostics))
         super().__init__(f"production sampler failed: {category}")
 
 
@@ -1130,6 +1150,36 @@ def validate_production_sample_contract(
                 source_function="validate_production_sample_contract",
                 source_line=sys._getframe().f_lineno,
             )
+    try:
+        valid_sample_count = int(sample.get("valid_sample_count", 0))
+        read_only_command_count = int(sample.get("read_only_command_count", 0))
+        mutation_command_count = int(sample.get("mutation_command_count", -1))
+        production_write_count = int(sample.get("production_write_count", -1))
+    except (TypeError, ValueError) as exc:
+        raise SamplerFailure(
+            "ARGUMENT_OR_SERIALIZATION_DEFECT",
+            phase="SAMPLER_READINESS_GATE",
+            dependency_class="VALID_SAMPLE_CONTRACT",
+            exit_category="INVALID_COUNTER_CONTRACT",
+            source_function="validate_production_sample_contract",
+            source_line=sys._getframe().f_lineno,
+        ) from exc
+    if (
+        sample.get("sample_status") != "PASS"
+        or valid_sample_count != 1
+        or read_only_command_count < 1
+        or mutation_command_count != 0
+        or production_write_count != 0
+        or sample.get("evidence_trace_safe_summary") != "PASS"
+    ):
+        raise SamplerFailure(
+            "ARGUMENT_OR_SERIALIZATION_DEFECT",
+            phase="SAMPLER_READINESS_GATE",
+            dependency_class="VALID_SAMPLE_CONTRACT",
+            exit_category="INVALID_VALID_SAMPLE_CONTRACT",
+            source_function="validate_production_sample_contract",
+            source_line=sys._getframe().f_lineno,
+        )
     if sample.get("raw_response_persisted") is not False or sample.get(
         "identity_material_persisted"
     ) is not False:
@@ -1143,77 +1193,326 @@ def validate_production_sample_contract(
         )
 
 
-def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str, Any]:
+def _sanitize_sampler_diagnostics(value: dict[str, Any]) -> dict[str, Any]:
+    allowed_current = set(SAMPLER_PHASES) | {"NOT_STARTED", "BETWEEN_PHASES"}
+    allowed_last = set(SAMPLER_PHASES) | {"NONE"}
+    current = str(value.get("current_phase") or "NOT_STARTED")
+    last = str(value.get("last_completed_phase") or "NONE")
+    timings: list[dict[str, Any]] = []
+    raw_timings = value.get("phase_timings")
+    if isinstance(raw_timings, list):
+        for item in raw_timings[: len(SAMPLER_PHASES)]:
+            if not isinstance(item, dict):
+                continue
+            phase = str(item.get("phase") or "")
+            status = str(item.get("status") or "")
+            try:
+                elapsed_ms = float(item.get("elapsed_ms", 0.0))
+            except (TypeError, ValueError):
+                continue
+            if (
+                phase in SAMPLER_PHASES
+                and status in {"PASS", "FAIL", "TIMEOUT"}
+                and math.isfinite(elapsed_ms)
+                and 0.0 <= elapsed_ms <= SAMPLER_TOTAL_DEADLINE_SECONDS * 1000.0
+            ):
+                timings.append(
+                    {
+                        "phase": phase,
+                        "elapsed_ms": round(elapsed_ms, 3),
+                        "status": status,
+                    }
+                )
+
+    def bounded_count(key: str, maximum: int = 1000) -> int:
+        try:
+            result = int(value.get(key, 0))
+        except (TypeError, ValueError):
+            return 0
+        return result if 0 <= result <= maximum else 0
+
+    timeout_reason = str(value.get("timeout_reason") or "NONE")
+    if timeout_reason not in {"NONE", "TOTAL_DEADLINE_EXCEEDED"}:
+        timeout_reason = "NONE"
+    exit_state = str(value.get("child_exit_state") or "UNKNOWN")
+    if exit_state not in {
+        "UNKNOWN",
+        "RUNNING",
+        "EXITED",
+        "EXITING_ZERO",
+        "EXITING_NONZERO",
+        "TERMINATED",
+    }:
+        exit_state = "UNKNOWN"
+    cancellation_state = str(value.get("child_cancellation_state") or "NOT_REQUIRED")
+    if cancellation_state not in {"NOT_REQUIRED", "COMPLETED", "FAILED"}:
+        cancellation_state = "FAILED"
+    return {
+        "current_phase": current if current in allowed_current else "NOT_STARTED",
+        "last_completed_phase": last if last in allowed_last else "NONE",
+        "phase_timings": timings,
+        "timeout_reason": timeout_reason,
+        "read_only_command_count": bounded_count("read_only_command_count"),
+        "mutation_command_count": bounded_count("mutation_command_count"),
+        "valid_sample_count": min(1, bounded_count("valid_sample_count", 1)),
+        "child_exit_state": exit_state,
+        "child_cancellation_state": cancellation_state,
+        "orphan_child_count": min(1, bounded_count("orphan_child_count", 1)),
+    }
+
+
+def _read_sampler_progress(path: Path) -> dict[str, Any]:
     try:
-        completed = subprocess.run(
-            argv,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            shell=False,
-        )
-    except subprocess.TimeoutExpired as exc:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError, UnicodeError):
+        return _sanitize_sampler_diagnostics({})
+    return _sanitize_sampler_diagnostics(value if isinstance(value, dict) else {})
+
+
+def _terminate_sampler_process(process: subprocess.Popen[str]) -> dict[str, Any]:
+    if process.poll() is not None:
+        return {
+            "child_exit_state": "EXITED",
+            "child_cancellation_state": "NOT_REQUIRED",
+            "orphan_child_count": 0,
+        }
+
+    cancellation_completed = False
+    if os.name == "nt":
+        try:
+            killed = subprocess.run(
+                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+                shell=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            )
+            cancellation_completed = killed.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            cancellation_completed = False
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            cancellation_completed = True
+        except (OSError, ProcessLookupError):
+            cancellation_completed = process.poll() is not None
+
+    if not cancellation_completed and process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=2.0)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    exited = process.poll() is not None
+    return {
+        "child_exit_state": "TERMINATED" if exited else "RUNNING",
+        "child_cancellation_state": "COMPLETED" if exited else "FAILED",
+        "orphan_child_count": 0 if exited and cancellation_completed else 1,
+    }
+
+
+def _bounded_sampler_elapsed_ms(started: float) -> float:
+    return round(
+        min(
+            SAMPLER_TOTAL_DEADLINE_SECONDS * 1000.0,
+            max(0.0, (time.monotonic() - started) * 1000.0),
+        ),
+        3,
+    )
+
+
+def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str, Any]:
+    timeout_seconds = min(float(timeout_seconds), SAMPLER_TOTAL_DEADLINE_SECONDS)
+    if timeout_seconds <= 0:
         raise SamplerFailure(
             "TIMEOUT",
             phase="SAMPLER_SUBPROCESS",
             dependency_class="SUBPROCESS",
-            exit_category="SUBPROCESS_TIMEOUT",
+            exit_category="TOTAL_DEADLINE_EXCEEDED",
             source_line=sys._getframe().f_lineno,
-        ) from exc
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SamplerFailure(
-            "DEPENDENCY_OR_SUBPROCESS_DEFECT",
-            phase="SAMPLER_SUBPROCESS",
-            dependency_class="SUBPROCESS",
-            exit_category="SUBPROCESS_LAUNCH_OR_IO_FAILURE",
-            source_line=sys._getframe().f_lineno,
-        ) from exc
-    try:
-        raw_sample = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise SamplerFailure(
-            "JSON_PARSE_FAILURE",
-            phase="SAMPLER_OUTPUT_PARSE",
-            dependency_class="SAMPLER_SERIALIZATION",
-            exit_category=(
-                "SAMPLER_EXIT_NONZERO" if completed.returncode else "SAMPLER_EXIT_ZERO"
-            ),
-            source_line=sys._getframe().f_lineno,
-        ) from exc
-    try:
-        sanitized = _sanitize_sample_value(raw_sample)
-    except ObserverError as exc:
-        raise SamplerFailure(
-            "ARGUMENT_OR_SERIALIZATION_DEFECT",
-            phase="SAMPLER_OUTPUT_SANITIZATION",
-            dependency_class="SAMPLER_SERIALIZATION",
-            exit_category=(
-                "SAMPLER_EXIT_NONZERO" if completed.returncode else "SAMPLER_EXIT_ZERO"
-            ),
-            source_line=sys._getframe().f_lineno,
-        ) from exc
-    if not isinstance(sanitized, dict):
-        raise SamplerFailure(
-            "ARGUMENT_OR_SERIALIZATION_DEFECT",
-            phase="SAMPLER_OUTPUT_SANITIZATION",
-            dependency_class="SAMPLER_SERIALIZATION",
-            exit_category="NON_OBJECT_OUTPUT",
-            source_line=sys._getframe().f_lineno,
+            diagnostics={"timeout_reason": "TOTAL_DEADLINE_EXCEEDED"},
         )
-    if completed.returncode != 0 or sanitized.get("sample_status") == "FAIL":
-        category = _classify_sampler_failure_payload(sanitized)
-        raise SamplerFailure(
-            category,
-            phase="SAMPLER_FUNCTIONAL_RESULT",
-            dependency_class="SAMPLER_CONTRACT",
-            exit_category=(
-                "SAMPLER_EXIT_NONZERO" if completed.returncode else "SAMPLER_EXIT_ZERO_FAIL"
-            ),
-            retryable=category == "VERIFIED_EXTERNAL_TRANSIENT",
-            source_line=sys._getframe().f_lineno,
+    with tempfile.TemporaryDirectory(prefix="qlib-sampler-") as temporary:
+        progress_path = Path(temporary) / "progress.json"
+        environment = dict(os.environ)
+        environment[SAMPLER_PROGRESS_FILE_ENV] = str(progress_path)
+        environment[SAMPLER_DEADLINE_ENV] = str(timeout_seconds)
+        popen_options: dict[str, Any] = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "shell": False,
+            "env": environment,
+        }
+        if os.name == "nt":
+            popen_options["creationflags"] = (
+                getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            )
+        else:
+            popen_options["start_new_session"] = True
+        ipc_started = time.monotonic()
+        try:
+            process = subprocess.Popen(argv, **popen_options)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SamplerFailure(
+                "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                phase="SAMPLER_SUBPROCESS",
+                dependency_class="SUBPROCESS",
+                exit_category="SUBPROCESS_LAUNCH_OR_IO_FAILURE",
+                source_line=sys._getframe().f_lineno,
+            ) from exc
+        try:
+            stdout, _stderr = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            ipc_elapsed_ms = _bounded_sampler_elapsed_ms(ipc_started)
+            cleanup_started = time.monotonic()
+            cancellation = _terminate_sampler_process(process)
+            try:
+                process.communicate(timeout=2.0)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            cleanup_elapsed_ms = _bounded_sampler_elapsed_ms(cleanup_started)
+            collection_started = time.monotonic()
+            diagnostics = _read_sampler_progress(progress_path)
+            parent_timings = [
+                {
+                    "phase": "PARENT_CHILD_IPC",
+                    "elapsed_ms": ipc_elapsed_ms,
+                    "status": "TIMEOUT",
+                },
+                {
+                    "phase": "CHILD_CLEANUP",
+                    "elapsed_ms": cleanup_elapsed_ms,
+                    "status": (
+                        "PASS"
+                        if cancellation["child_cancellation_state"] == "COMPLETED"
+                        else "FAIL"
+                    ),
+                },
+                {
+                    "phase": "OBSERVER_COLLECTION",
+                    "elapsed_ms": _bounded_sampler_elapsed_ms(collection_started),
+                    "status": "PASS",
+                },
+            ]
+            diagnostics["phase_timings"] = [
+                *diagnostics.get("phase_timings", []),
+                *parent_timings,
+            ]
+            diagnostics.update(cancellation)
+            diagnostics["timeout_reason"] = "TOTAL_DEADLINE_EXCEEDED"
+            diagnostics["valid_sample_count"] = 0
+            raise SamplerFailure(
+                "TIMEOUT",
+                phase="SAMPLER_SUBPROCESS",
+                dependency_class="SUBPROCESS",
+                exit_category="SUBPROCESS_TIMEOUT",
+                source_line=sys._getframe().f_lineno,
+                diagnostics=diagnostics,
+            ) from exc
+
+        ipc_elapsed_ms = _bounded_sampler_elapsed_ms(ipc_started)
+        collection_started = time.monotonic()
+        diagnostics = _read_sampler_progress(progress_path)
+        diagnostics.update(
+            {
+                "child_exit_state": "EXITED",
+                "child_cancellation_state": "NOT_REQUIRED",
+                "orphan_child_count": 0,
+            }
         )
-    return sanitized
+        try:
+            raw_sample = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise SamplerFailure(
+                "JSON_PARSE_FAILURE",
+                phase="SAMPLER_OUTPUT_PARSE",
+                dependency_class="SAMPLER_SERIALIZATION",
+                exit_category=(
+                    "SAMPLER_EXIT_NONZERO" if process.returncode else "SAMPLER_EXIT_ZERO"
+                ),
+                source_line=sys._getframe().f_lineno,
+                diagnostics=diagnostics,
+            ) from exc
+        try:
+            sanitized = _sanitize_sample_value(raw_sample)
+        except ObserverError as exc:
+            raise SamplerFailure(
+                "ARGUMENT_OR_SERIALIZATION_DEFECT",
+                phase="SAMPLER_OUTPUT_SANITIZATION",
+                dependency_class="SAMPLER_SERIALIZATION",
+                exit_category=(
+                    "SAMPLER_EXIT_NONZERO" if process.returncode else "SAMPLER_EXIT_ZERO"
+                ),
+                source_line=sys._getframe().f_lineno,
+                diagnostics=diagnostics,
+            ) from exc
+        if not isinstance(sanitized, dict):
+            raise SamplerFailure(
+                "ARGUMENT_OR_SERIALIZATION_DEFECT",
+                phase="SAMPLER_OUTPUT_SANITIZATION",
+                dependency_class="SAMPLER_SERIALIZATION",
+                exit_category="NON_OBJECT_OUTPUT",
+                source_line=sys._getframe().f_lineno,
+                diagnostics=diagnostics,
+            )
+        sample_diagnostics = _sanitize_sampler_diagnostics(sanitized)
+        sample_diagnostics["phase_timings"] = [
+            *sample_diagnostics.get("phase_timings", []),
+            {
+                "phase": "PARENT_CHILD_IPC",
+                "elapsed_ms": ipc_elapsed_ms,
+                "status": "PASS",
+            },
+            {
+                "phase": "CHILD_CLEANUP",
+                "elapsed_ms": 0.0,
+                "status": "PASS",
+            },
+            {
+                "phase": "OBSERVER_COLLECTION",
+                "elapsed_ms": _bounded_sampler_elapsed_ms(collection_started),
+                "status": "PASS",
+            },
+        ]
+        sample_diagnostics.update(
+            {
+                "current_phase": "BETWEEN_PHASES",
+                "last_completed_phase": "OBSERVER_COLLECTION",
+                "child_exit_state": "EXITED",
+                "child_cancellation_state": "NOT_REQUIRED",
+                "orphan_child_count": 0,
+            }
+        )
+        if process.returncode != 0 or sanitized.get("sample_status") == "FAIL":
+            category = _classify_sampler_failure_payload(sanitized)
+            raise SamplerFailure(
+                category,
+                phase="SAMPLER_FUNCTIONAL_RESULT",
+                dependency_class="SAMPLER_CONTRACT",
+                exit_category=(
+                    "SAMPLER_EXIT_NONZERO"
+                    if process.returncode
+                    else "SAMPLER_EXIT_ZERO_FAIL"
+                ),
+                retryable=category == "VERIFIED_EXTERNAL_TRANSIENT",
+                source_line=sys._getframe().f_lineno,
+                diagnostics=sample_diagnostics,
+            )
+        sanitized.update(sample_diagnostics)
+        return sanitized
 
 
 def _production_sample(
@@ -1223,10 +1522,27 @@ def _production_sample(
     required_target_contract: str | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
+    total_deadline_seconds = min(
+        float(timeout_seconds), SAMPLER_TOTAL_DEADLINE_SECONDS
+    )
     retries = 0
     while True:
+        elapsed = time.monotonic() - started
+        remaining = total_deadline_seconds - elapsed
+        if remaining <= 0:
+            raise SamplerFailure(
+                "TIMEOUT",
+                phase="SAMPLER_SUBPROCESS",
+                dependency_class="SUBPROCESS",
+                exit_category="TOTAL_DEADLINE_EXCEEDED",
+                source_line=sys._getframe().f_lineno,
+                diagnostics={
+                    "timeout_reason": "TOTAL_DEADLINE_EXCEEDED",
+                    "valid_sample_count": 0,
+                },
+            )
         try:
-            sample = _production_sample_once(argv, timeout_seconds)
+            sample = _production_sample_once(argv, remaining)
             validate_production_sample_contract(
                 sample, required_target_contract=required_target_contract
             )
@@ -1237,6 +1553,7 @@ def _production_sample(
                 exc.category == "VERIFIED_EXTERNAL_TRANSIENT"
                 and retries < MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES
                 and elapsed < MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS
+                and elapsed < total_deadline_seconds
             )
             if not may_retry:
                 raise

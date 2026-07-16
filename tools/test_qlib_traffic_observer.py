@@ -801,6 +801,17 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
         )
 
     @staticmethod
+    def _popen_result(payload: dict[str, object] | str, returncode: int = 42) -> mock.Mock:
+        process = mock.Mock(pid=424242, returncode=returncode)
+        stdout = payload if isinstance(payload, str) else json.dumps(payload)
+        process.communicate.return_value = (
+            stdout,
+            "raw dependency detail must not persist",
+        )
+        process.poll.return_value = returncode
+        return process
+
+    @staticmethod
     def _readiness_sample(target_contract: str) -> dict[str, object]:
         return {
             "sample_status": "PASS",
@@ -815,6 +826,11 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
             "target_construction_status": "PASS",
             "health_sample_status": "PASS",
             "readiness_status": "PASS",
+            "evidence_trace_safe_summary": "PASS",
+            "read_only_command_count": 1,
+            "mutation_command_count": 0,
+            "valid_sample_count": 1,
+            "production_write_count": 0,
             "raw_response_persisted": False,
             "identity_material_persisted": False,
         }
@@ -833,7 +849,7 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
             "identity_material_persisted": False,
         }
         with mock.patch.object(
-            observer.subprocess, "run", return_value=self._completed(r482_failure)
+            observer.subprocess, "Popen", return_value=self._popen_result(r482_failure)
         ):
             with self.assertRaises(observer.SamplerFailure) as caught:
                 observer._production_sample(["sampler"], 10)
@@ -849,46 +865,85 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
             with self.subTest(category=category):
                 payload = {"sample_status": "FAIL", "failure_category": category}
                 with mock.patch.object(
-                    observer.subprocess, "run", return_value=self._completed(payload)
+                    observer.subprocess, "Popen", return_value=self._popen_result(payload)
                 ):
                     with self.assertRaises(observer.SamplerFailure) as caught:
                         observer._production_sample(["sampler"], 10)
                 self.assertEqual(caught.exception.category, category)
 
-        with mock.patch.object(
-            observer.subprocess,
-            "run",
-            side_effect=observer.subprocess.TimeoutExpired("sampler", 10),
+        timeout_process = mock.Mock(pid=424242, returncode=None)
+        timeout_process.communicate.side_effect = [
+            observer.subprocess.TimeoutExpired("sampler", 10),
+            ("", ""),
+        ]
+        with mock.patch.object(observer.subprocess, "Popen", return_value=timeout_process), mock.patch.object(
+            observer,
+            "_terminate_sampler_process",
+            return_value={
+                "child_exit_state": "TERMINATED",
+                "child_cancellation_state": "COMPLETED",
+                "orphan_child_count": 0,
+            },
         ):
             with self.assertRaises(observer.SamplerFailure) as timeout:
                 observer._production_sample(["sampler"], 10)
         self.assertEqual(timeout.exception.category, "TIMEOUT")
 
-        invalid = mock.Mock(returncode=0, stdout="not-json", stderr="private detail")
-        with mock.patch.object(observer.subprocess, "run", return_value=invalid):
+        invalid = self._popen_result("not-json", returncode=0)
+        with mock.patch.object(observer.subprocess, "Popen", return_value=invalid):
             with self.assertRaises(observer.SamplerFailure) as parse:
                 observer._production_sample(["sampler"], 10)
         self.assertEqual(parse.exception.category, "JSON_PARSE_FAILURE")
 
-        with mock.patch.object(observer.subprocess, "run", side_effect=OSError("raw")):
+        with mock.patch.object(observer.subprocess, "Popen", side_effect=OSError("raw")):
             with self.assertRaises(observer.SamplerFailure) as dependency:
                 observer._production_sample(["sampler"], 10)
         self.assertEqual(
             dependency.exception.category, "DEPENDENCY_OR_SUBPROCESS_DEFECT"
         )
 
+    def test_partial_output_and_sample_zero_fail_closed(self) -> None:
+        partial = self._popen_result('{"sample_status":', returncode=0)
+        with mock.patch.object(observer.subprocess, "Popen", return_value=partial):
+            with self.assertRaises(observer.SamplerFailure) as caught_partial:
+                observer._production_sample(
+                    ["sampler"],
+                    10,
+                    required_target_contract="REVISION_FUNCTIONAL",
+                )
+        self.assertEqual(caught_partial.exception.category, "JSON_PARSE_FAILURE")
+
+        sample_zero = self._readiness_sample("REVISION_FUNCTIONAL")
+        sample_zero["valid_sample_count"] = 0
+        completed = self._popen_result(sample_zero, returncode=0)
+        with mock.patch.object(observer.subprocess, "Popen", return_value=completed):
+            with self.assertRaises(observer.SamplerFailure) as caught_zero:
+                observer._production_sample(
+                    ["sampler"],
+                    10,
+                    required_target_contract="REVISION_FUNCTIONAL",
+                )
+        self.assertEqual(
+            caught_zero.exception.category,
+            "ARGUMENT_OR_SERIALIZATION_DEFECT",
+        )
+        self.assertEqual(
+            caught_zero.exception.metadata["exit_category"],
+            "INVALID_VALID_SAMPLE_CONTRACT",
+        )
+
     def test_stable_candidate_only_surface_404_is_non_retryable_stop(self) -> None:
-        completed = self._completed(
+        completed = self._popen_result(
             {"sample_status": "FAIL", "failure_category": "HTTP_404"}
         )
         with mock.patch.object(
-            observer.subprocess, "run", return_value=completed
-        ) as run:
+            observer.subprocess, "Popen", return_value=completed
+        ) as popen:
             with self.assertRaises(observer.SamplerFailure) as caught:
                 observer._production_sample(["sampler"], 10)
         self.assertEqual(caught.exception.category, "HTTP_404")
         self.assertFalse(caught.exception.metadata["retryable"])
-        self.assertEqual(run.call_count, 1)
+        self.assertEqual(popen.call_count, 1)
 
     def test_incomplete_artifact_has_structured_failure_without_raw_message(self) -> None:
         with tempfile.TemporaryDirectory(prefix="r483-incomplete-") as temporary:
@@ -1033,21 +1088,83 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
             self.assertEqual(result["status"], "STARTED")
 
     def test_verified_external_transient_retry_is_bounded(self) -> None:
-        transient = self._completed(
-            {
-                "sample_status": "FAIL",
-                "failure_category": "VERIFIED_EXTERNAL_TRANSIENT",
-            }
+        transient = observer.SamplerFailure(
+            "VERIFIED_EXTERNAL_TRANSIENT",
+            phase="SAMPLER_FUNCTIONAL_RESULT",
+            dependency_class="SAMPLER_CONTRACT",
+            exit_category="SAMPLER_EXIT_NONZERO",
+            retryable=True,
         )
-        passed = self._completed({"sample_status": "PASS"}, returncode=0)
+        passed = {"sample_status": "PASS"}
         with mock.patch.object(
-            observer.subprocess, "run", side_effect=[transient, passed]
-        ) as run:
+            observer, "_production_sample_once", side_effect=[transient, passed]
+        ) as run_once:
             result = observer._production_sample(["sampler"], 10)
         self.assertEqual(result["sample_status"], "PASS")
-        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run_once.call_count, 2)
         self.assertEqual(observer.MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES, 1)
         self.assertLessEqual(observer.MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS, 10)
+
+    def test_retry_uses_one_monotonic_total_deadline(self) -> None:
+        transient = observer.SamplerFailure(
+            "VERIFIED_EXTERNAL_TRANSIENT",
+            phase="SAMPLER_FUNCTIONAL_RESULT",
+            dependency_class="SAMPLER_CONTRACT",
+            exit_category="SAMPLER_EXIT_NONZERO",
+            retryable=True,
+        )
+        observed_budgets: list[float] = []
+
+        def run_once(_argv: list[str], timeout_seconds: float) -> dict[str, object]:
+            observed_budgets.append(timeout_seconds)
+            if len(observed_budgets) == 1:
+                raise transient
+            return {"sample_status": "PASS"}
+
+        with mock.patch.object(
+            observer.time, "monotonic", side_effect=[0.0, 0.0, 5.0, 5.0]
+        ), mock.patch.object(observer, "_production_sample_once", side_effect=run_once):
+            result = observer._production_sample(["sampler"], 30)
+        self.assertEqual(result["sample_status"], "PASS")
+        self.assertEqual(observed_budgets, [30.0, 25.0])
+
+    def test_timeout_preserves_phase_counter_and_cancels_process_tree(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="r487a-cancel-") as temporary:
+            marker = Path(temporary) / "grandchild.txt"
+            script = "\n".join(
+                (
+                    "import json, os, pathlib, subprocess, sys, time",
+                    "grandchild = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])",
+                    "pathlib.Path(os.environ['QLIB_TEST_GRANDCHILD_PID_FILE']).write_text(str(grandchild.pid), encoding='utf-8')",
+                    "progress = {'current_phase':'HTTP_REQUEST','last_completed_phase':'REQUEST_PREPARATION','phase_timings':[{'phase':'AUTHENTICATION','elapsed_ms':1.0,'status':'PASS'}],'timeout_reason':'NONE','read_only_command_count':2,'mutation_command_count':0,'valid_sample_count':0,'child_exit_state':'RUNNING','child_cancellation_state':'NOT_REQUIRED','orphan_child_count':0}",
+                    "pathlib.Path(os.environ['QLIB_SAMPLER_PROGRESS_FILE']).write_text(json.dumps(progress), encoding='utf-8')",
+                    "print('{\"sample_status\":', flush=True)",
+                    "time.sleep(60)",
+                )
+            )
+            with mock.patch.dict(
+                os.environ,
+                {"QLIB_TEST_GRANDCHILD_PID_FILE": str(marker)},
+                clear=False,
+            ):
+                with self.assertRaises(observer.SamplerFailure) as caught:
+                    observer._production_sample_once(
+                        [sys.executable, "-c", script], timeout_seconds=0.75
+                    )
+            self.assertEqual(caught.exception.category, "TIMEOUT")
+            metadata = caught.exception.metadata
+            self.assertEqual(metadata["current_phase"], "HTTP_REQUEST")
+            self.assertEqual(metadata["last_completed_phase"], "REQUEST_PREPARATION")
+            self.assertEqual(metadata["read_only_command_count"], 2)
+            self.assertEqual(metadata["mutation_command_count"], 0)
+            self.assertEqual(metadata["valid_sample_count"], 0)
+            self.assertEqual(metadata["child_cancellation_state"], "COMPLETED")
+            self.assertEqual(metadata["orphan_child_count"], 0)
+            grandchild_pid = int(marker.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 3.0
+            while observer._pid_exists(grandchild_pid) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertFalse(observer._pid_exists(grandchild_pid))
 
     def test_rollback_command_and_post_verification_are_deterministic(self) -> None:
         command = observer.build_stable_rollback_command(
