@@ -232,7 +232,6 @@ AGENTS.md
 COMMON_DEVELOPMENT_WORKFLOW.md
 COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md
 PROJECT_DEVELOPMENT_MEMORY.md
-PROJECT_DEVELOPMENT_MEMORY_PROMPT_CODEX_FINAL.md
 QLIB_TA1_06S5CW_TO_TRACK_A_HANDOVER_REPORT_20260527.md
 QLIB_FINAL_DEVELOPMENT_SCHEDULE_REPORT_20260522_FINAL.md
 QLIB_COMPLETE_DEVELOPMENT_GUIDEBOOK_20260511_v1_2.md
@@ -240,6 +239,14 @@ ONTOLOGY_SEMANTIC_WORKFLOW_ENHANCEMENT_GUIDEBOOK_20260516_v1_0_FINAL.md
 WAREHOUSE_DEVELOPMENT_COMPLETION_REPORT_창고 연동.md
 PROJECT_DEVELOPMENT_GUIDEBOOK_창고_v1_0_FINAL.md
 ```
+
+### 7.1 Legacy required-document contract reconciliation
+
+| Legacy document | Status | Exact tracked replacement |
+|---|---|---|
+| `PROJECT_DEVELOPMENT_MEMORY_PROMPT_CODEX_FINAL.md` | `SUPERSEDED` | 생성 절차와 기본 템플릿: `COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md` §§32–33; 현재 프로젝트별 기억과 가드레일: `PROJECT_DEVELOPMENT_MEMORY.md` |
+
+이 매핑은 누락 문서를 무시하는 예외가 아니라 required-document contract의 정합성 복구다. 기존 secret, runtime, deployment, security, evidence, clean-worktree gate는 모두 그대로 유지한다. Historical report 또는 handover에 남은 legacy 파일명은 당시 상태의 증거이며 현재 required-document 입력이 아니다.
 
 문서가 없으면:
 

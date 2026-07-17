@@ -101,7 +101,7 @@ ProofPack = 시험 채점지와 증거 파일
 |---:|---|---|
 | 1 | 사용자 최신 명시 요청 | 작업 방향, 중단, 범위 변경 |
 | 2 | `COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md` | 최상위 개발 헌법 |
-| 3 | `PROJECT_DEVELOPMENT_MEMORY_PROMPT_CODEX_FINAL.md` | 프로젝트별 기억/가드레일 생성 기준 |
+| 3 | `PROJECT_DEVELOPMENT_MEMORY.md` | 현재 프로젝트별 기억/가드레일 |
 | 4 | `AGENTS.md` | Codex 실행 규칙 |
 | 5 | `QLIB_COMPLETE_DEVELOPMENT_GUIDEBOOK_20260511_v1_2.md` | QLIB 제품군 통합 기준 |
 | 6 | `PROJECT_DEVELOPMENT_GUIDEBOOK_창고_v1_0_FINAL.md` | Warehouse 실행 기준 |
@@ -129,40 +129,43 @@ ProofPack = 시험 채점지와 증거 파일
 ```yaml
 reference_manifest:
   - doc_id: COMMON_DEV_WORKFLOW
-    expected_path: docs/COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md
+    expected_path: COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md
     required: true
-    status: NOT_VERIFIED
+    status: TRACKED
 
-  - doc_id: PROJECT_MEMORY_PROMPT
-    expected_path: docs/PROJECT_DEVELOPMENT_MEMORY_PROMPT_CODEX_FINAL.md
+  - doc_id: PROJECT_MEMORY
+    expected_path: PROJECT_DEVELOPMENT_MEMORY.md
     required: true
-    status: NOT_VERIFIED
+    status: TRACKED
+    replaces_legacy_reference: PROJECT_DEVELOPMENT_MEMORY_PROMPT_CODEX_FINAL.md
 
   - doc_id: AGENTS
     expected_path: AGENTS.md
     required: true
-    status: NOT_VERIFIED
+    status: TRACKED
 
   - doc_id: QLIB_COMPLETE_GUIDEBOOK
-    expected_path: docs/QLIB_COMPLETE_DEVELOPMENT_GUIDEBOOK_20260511_v1_2.md
+    expected_path: QLIB_COMPLETE_DEVELOPMENT_GUIDEBOOK_20260511_v1_2.md
     required: true
-    status: NOT_VERIFIED
+    status: TRACKED
 
   - doc_id: WAREHOUSE_GUIDEBOOK
-    expected_path: docs/PROJECT_DEVELOPMENT_GUIDEBOOK_창고_v1_0_FINAL.md
+    expected_path: PROJECT_DEVELOPMENT_GUIDEBOOK_창고_v1_0_FINAL.md
     required: true
-    status: NOT_VERIFIED
+    status: TRACKED
 
   - doc_id: ONTOLOGY_SEMANTIC_GUIDEBOOK_FINAL
-    expected_path: docs/ontology/ONTOLOGY_SEMANTIC_WORKFLOW_ENHANCEMENT_GUIDEBOOK_20260516_v1_0_FINAL.md
+    expected_path: ONTOLOGY_SEMANTIC_WORKFLOW_ENHANCEMENT_GUIDEBOOK_20260516_v1_0_FINAL.md
     required: true
     status: THIS_DOCUMENT
 
   - doc_id: F13_SPEC
     expected_path: docs/feature_specs/F13_library_auto_intake_and_curation_v0.1.md
     required: true
-    status: TO_BE_CREATED
+    status: TRACKED
 ```
+
+Legacy reference `PROJECT_DEVELOPMENT_MEMORY_PROMPT_CODEX_FINAL.md`의 상태는 `SUPERSEDED`다. 프로젝트 기억 생성 절차와 기본 템플릿은 `COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md` §§32–33이, 현재 프로젝트별 기억과 가드레일은 `PROJECT_DEVELOPMENT_MEMORY.md`가 각각 승계한다. 이는 required-document contract 정합성 복구이며 기존 governance, runtime, deployment, security gate를 약화하지 않는다.
 
 운영 규칙:
 
@@ -1718,7 +1721,7 @@ F13 시맨틱 계약/검증 게이트를 QLIB 현재 구현에 최소 삽입한�
 
 ## 4. 읽어야 할 문서
 - COMMON_DEVELOPMENT_WORKFLOW_CODEX_FINAL.md
-- PROJECT_DEVELOPMENT_MEMORY_PROMPT_CODEX_FINAL.md
+- PROJECT_DEVELOPMENT_MEMORY.md
 - AGENTS.md
 - QLIB_COMPLETE_DEVELOPMENT_GUIDEBOOK_20260511_v1_2.md
 - PROJECT_DEVELOPMENT_GUIDEBOOK_창고_v1_0_FINAL.md
