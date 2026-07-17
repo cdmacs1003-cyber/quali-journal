@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -76,6 +77,42 @@ MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS = 10.0
 SAMPLER_TOTAL_DEADLINE_SECONDS = 30.0
 SAMPLER_PROGRESS_FILE_ENV = "QLIB_SAMPLER_PROGRESS_FILE"
 SAMPLER_DEADLINE_ENV = "QLIB_SAMPLER_TOTAL_DEADLINE_SECONDS"
+
+# Windows process-tree cleanup constants are kept local and dependency-free.  The
+# API wrapper below is injectable so every fail-closed decision can be exercised
+# without changing the host's process or security policy.
+_WIN32_TH32CS_SNAPPROCESS = 0x00000002
+_WIN32_PROCESS_TERMINATE = 0x0001
+_WIN32_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_WIN32_SYNCHRONIZE = 0x00100000
+_WIN32_ERROR_NO_MORE_FILES = 18
+_WIN32_WAIT_OBJECT_0 = 0x00000000
+_WIN32_WAIT_TIMEOUT = 0x00000102
+_WIN32_WAIT_FAILED = 0xFFFFFFFF
+_WIN32_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+_WIN32_PROCESS_TREE_WAIT_MS = 5000
+_WIN32_PROCESS_TREE_MAX_PASSES = 3
+
+
+class _Win32FileTime(ctypes.Structure):
+    _fields_ = (("dwLowDateTime", ctypes.c_uint32), ("dwHighDateTime", ctypes.c_uint32))
+
+
+class _Win32ProcessEntry(ctypes.Structure):
+    _fields_ = (
+        ("dwSize", ctypes.c_uint32),
+        ("cntUsage", ctypes.c_uint32),
+        ("th32ProcessID", ctypes.c_uint32),
+        ("th32DefaultHeapID", ctypes.c_size_t),
+        ("th32ModuleID", ctypes.c_uint32),
+        ("cntThreads", ctypes.c_uint32),
+        ("th32ParentProcessID", ctypes.c_uint32),
+        ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", ctypes.c_uint32),
+        ("szExeFile", ctypes.c_wchar * 260),
+    )
+
+
 SAMPLER_PHASES = (
     "AUTHENTICATION",
     "TARGET_RESOLUTION",
@@ -787,6 +824,163 @@ class SamplerFailure(ObserverError):
         super().__init__(f"production sampler failed: {category}")
 
 
+class _Win32ApiFailure(RuntimeError):
+    """A Win32 failure containing only allowlisted, non-sensitive fields."""
+
+    def __init__(self, api_name: str, error_code: int, phase: str) -> None:
+        self.api_name = api_name
+        self.error_code = max(0, min(0xFFFFFFFF, int(error_code)))
+        self.phase = phase
+        super().__init__("sanitized Win32 process-tree operation failed")
+
+
+class _Win32ProcessApi:
+    """Small injectable wrapper around the Win32 process APIs used here."""
+
+    def __init__(self) -> None:
+        if os.name != "nt":
+            raise _Win32ApiFailure("Win32ProcessApi", 0, "API_INITIALIZATION")
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        except Exception as exc:
+            raise _Win32ApiFailure(
+                "Win32ProcessApi", _win32_exception_code(exc), "API_INITIALIZATION"
+            ) from None
+        self._kernel32 = kernel32
+        handle_type = ctypes.c_void_p
+        bool_type = ctypes.c_int
+        dword_type = ctypes.c_uint32
+
+        kernel32.CreateToolhelp32Snapshot.argtypes = (dword_type, dword_type)
+        kernel32.CreateToolhelp32Snapshot.restype = handle_type
+        kernel32.Process32FirstW.argtypes = (
+            handle_type,
+            ctypes.POINTER(_Win32ProcessEntry),
+        )
+        kernel32.Process32FirstW.restype = bool_type
+        kernel32.Process32NextW.argtypes = (
+            handle_type,
+            ctypes.POINTER(_Win32ProcessEntry),
+        )
+        kernel32.Process32NextW.restype = bool_type
+        kernel32.OpenProcess.argtypes = (dword_type, bool_type, dword_type)
+        kernel32.OpenProcess.restype = handle_type
+        kernel32.GetProcessTimes.argtypes = (
+            handle_type,
+            ctypes.POINTER(_Win32FileTime),
+            ctypes.POINTER(_Win32FileTime),
+            ctypes.POINTER(_Win32FileTime),
+            ctypes.POINTER(_Win32FileTime),
+        )
+        kernel32.GetProcessTimes.restype = bool_type
+        kernel32.WaitForSingleObject.argtypes = (handle_type, dword_type)
+        kernel32.WaitForSingleObject.restype = dword_type
+        kernel32.TerminateProcess.argtypes = (handle_type, dword_type)
+        kernel32.TerminateProcess.restype = bool_type
+        kernel32.CloseHandle.argtypes = (handle_type,)
+        kernel32.CloseHandle.restype = bool_type
+
+    @staticmethod
+    def _last_error() -> int:
+        return max(0, min(0xFFFFFFFF, int(ctypes.get_last_error())))
+
+    def create_snapshot(self) -> int:
+        ctypes.set_last_error(0)
+        handle = self._kernel32.CreateToolhelp32Snapshot(
+            _WIN32_TH32CS_SNAPPROCESS, 0
+        )
+        numeric = int(handle or 0)
+        if numeric == int(_WIN32_INVALID_HANDLE_VALUE or -1):
+            raise _Win32ApiFailure(
+                "CreateToolhelp32Snapshot", self._last_error(), "SNAPSHOT_CREATE"
+            )
+        if numeric == 0:
+            raise _Win32ApiFailure(
+                "CreateToolhelp32Snapshot", self._last_error(), "SNAPSHOT_CREATE"
+            )
+        return numeric
+
+    def process_first(self, snapshot_handle: int) -> tuple[tuple[int, int] | None, int]:
+        entry = _Win32ProcessEntry()
+        entry.dwSize = ctypes.sizeof(_Win32ProcessEntry)
+        ctypes.set_last_error(0)
+        succeeded = bool(
+            self._kernel32.Process32FirstW(
+                ctypes.c_void_p(snapshot_handle), ctypes.byref(entry)
+            )
+        )
+        error_code = self._last_error()
+        if not succeeded:
+            return None, error_code
+        return (int(entry.th32ProcessID), int(entry.th32ParentProcessID)), 0
+
+    def process_next(self, snapshot_handle: int) -> tuple[tuple[int, int] | None, int]:
+        entry = _Win32ProcessEntry()
+        entry.dwSize = ctypes.sizeof(_Win32ProcessEntry)
+        ctypes.set_last_error(0)
+        succeeded = bool(
+            self._kernel32.Process32NextW(
+                ctypes.c_void_p(snapshot_handle), ctypes.byref(entry)
+            )
+        )
+        error_code = self._last_error()
+        if not succeeded:
+            return None, error_code
+        return (int(entry.th32ProcessID), int(entry.th32ParentProcessID)), 0
+
+    def open_process(self, process_id: int) -> int:
+        access = (
+            _WIN32_PROCESS_TERMINATE
+            | _WIN32_PROCESS_QUERY_LIMITED_INFORMATION
+            | _WIN32_SYNCHRONIZE
+        )
+        ctypes.set_last_error(0)
+        handle = self._kernel32.OpenProcess(access, False, int(process_id))
+        numeric = int(handle or 0)
+        if numeric == 0:
+            raise _Win32ApiFailure("OpenProcess", self._last_error(), "OPEN_PROCESS")
+        return numeric
+
+    def creation_identity(self, process_handle: int) -> int:
+        created = _Win32FileTime()
+        exited = _Win32FileTime()
+        kernel = _Win32FileTime()
+        user = _Win32FileTime()
+        ctypes.set_last_error(0)
+        if not self._kernel32.GetProcessTimes(
+            ctypes.c_void_p(process_handle),
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            raise _Win32ApiFailure(
+                "GetProcessTimes", self._last_error(), "IDENTITY_QUERY"
+            )
+        return (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
+
+    def wait(self, process_handle: int, timeout_ms: int) -> tuple[int, int]:
+        ctypes.set_last_error(0)
+        result = int(
+            self._kernel32.WaitForSingleObject(
+                ctypes.c_void_p(process_handle), max(0, int(timeout_ms))
+            )
+        )
+        return result, self._last_error()
+
+    def terminate(self, process_handle: int) -> None:
+        ctypes.set_last_error(0)
+        if not self._kernel32.TerminateProcess(ctypes.c_void_p(process_handle), 1):
+            raise _Win32ApiFailure(
+                "TerminateProcess", self._last_error(), "PROCESS_TERMINATION"
+            )
+
+    def close_handle(self, handle: int) -> None:
+        ctypes.set_last_error(0)
+        if not self._kernel32.CloseHandle(ctypes.c_void_p(handle)):
+            raise _Win32ApiFailure("CloseHandle", self._last_error(), "HANDLE_CLOSE")
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -912,49 +1106,6 @@ def _acquire_terminal_claim(directory: Path, outcome: str) -> bool:
             os.fsync(handle.fileno())
         return True
     return False
-
-
-def _launch_via_wmi(command: list[str]) -> int:
-    command_line = subprocess.list2cmdline(command)
-    encoded_command_line = base64.b64encode(command_line.encode("utf-8")).decode("ascii")
-    powershell_source = (
-        "$c=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
-        + encoded_command_line
-        + "'));"
-        + "$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
-        + "-Arguments @{CommandLine=$c};"
-        + "if($null-eq$r-or[int]$r.ReturnValue-ne0){exit 41};"
-        + "[Console]::Out.Write([string]$r.ProcessId)"
-    )
-    encoded_powershell = base64.b64encode(
-        powershell_source.encode("utf-16le")
-    ).decode("ascii")
-    try:
-        completed = subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-EncodedCommand",
-                encoded_powershell,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            shell=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-        )
-    except OSError as exc:
-        raise ObserverError("WMI observer launch is unavailable") from exc
-    process_ids = re.findall(r"\b\d+\b", completed.stdout)
-    if completed.returncode != 0 or not process_ids:
-        raise ObserverError("WMI observer launch is unavailable")
-    process_id = int(process_ids[-1])
-    if process_id <= 0:
-        raise ObserverError("WMI observer launch is unavailable")
-    return process_id
 
 
 def _validate_configuration(
@@ -1224,12 +1375,12 @@ def _sanitize_sampler_diagnostics(value: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
 
-    def bounded_count(key: str, maximum: int = 1000) -> int:
+    def bounded_count(key: str, maximum: int = 1000, default: int = 0) -> int:
         try:
-            result = int(value.get(key, 0))
+            result = int(value.get(key, default))
         except (TypeError, ValueError):
-            return 0
-        return result if 0 <= result <= maximum else 0
+            return default
+        return result if 0 <= result <= maximum else default
 
     timeout_reason = str(value.get("timeout_reason") or "NONE")
     if timeout_reason not in {"NONE", "TOTAL_DEADLINE_EXCEEDED"}:
@@ -1247,6 +1398,78 @@ def _sanitize_sampler_diagnostics(value: dict[str, Any]) -> dict[str, Any]:
     cancellation_state = str(value.get("child_cancellation_state") or "NOT_REQUIRED")
     if cancellation_state not in {"NOT_REQUIRED", "COMPLETED", "FAILED"}:
         cancellation_state = "FAILED"
+    verification_status = str(
+        value.get("orphan_verification_status") or "NOT_VERIFIED"
+    )
+    if verification_status not in {"PASS", "NOT_VERIFIED"}:
+        verification_status = "NOT_VERIFIED"
+    orphan_count = min(1, bounded_count("orphan_child_count", 1, 1))
+    if verification_status != "PASS":
+        orphan_count = 1
+    cleanup_status = str(value.get("process_tree_cleanup_status") or "NOT_STARTED")
+    if cleanup_status not in {
+        "NOT_STARTED",
+        "NOT_REQUIRED",
+        "CLEANUP_COMPLETED",
+        "CLEANUP_FAILED",
+        "CLEANUP_FAILED_UNEXPECTED_WAIT_RESULT",
+        "SPAWN_FAILED_BEFORE_PID",
+    }:
+        cleanup_status = "CLEANUP_FAILED"
+    snapshot_status = str(
+        value.get("process_tree_snapshot_status") or "NOT_STARTED"
+    )
+    if snapshot_status not in {"NOT_STARTED", "COMPLETE", "INCOMPLETE_SNAPSHOT"}:
+        snapshot_status = "INCOMPLETE_SNAPSHOT"
+    failure_api = str(value.get("cleanup_failure_api") or "NONE")
+    allowed_failure_apis = {
+        "NONE",
+        "Win32ProcessApi",
+        "CreateToolhelp32Snapshot",
+        "Process32FirstW",
+        "Process32NextW",
+        "OpenProcess",
+        "GetProcessTimes",
+        "WaitForSingleObject",
+        "TerminateProcess",
+        "CloseHandle",
+        "PopenHandle",
+    }
+    if failure_api not in allowed_failure_apis:
+        failure_api = "Win32ProcessApi"
+    failure_phase = str(value.get("cleanup_failure_phase") or "NONE")
+    allowed_failure_phases = {
+        "NONE",
+        "API_INITIALIZATION",
+        "ROOT_IDENTITY",
+        "SNAPSHOT_CREATE",
+        "SNAPSHOT_FIRST",
+        "SNAPSHOT_NEXT",
+        "OPEN_PROCESS",
+        "IDENTITY_QUERY",
+        "IDENTITY_VERIFICATION",
+        "PROCESS_WAIT",
+        "PROCESS_TERMINATION",
+        "FINAL_VERIFICATION",
+        "HANDLE_CLOSE",
+        "SPAWN_BEFORE_PID",
+    }
+    if failure_phase not in allowed_failure_phases:
+        failure_phase = "API_INITIALIZATION"
+    failure_reason = str(value.get("cleanup_failure_reason") or "NONE")
+    allowed_failure_reasons = {
+        "NONE",
+        "API_FAILURE",
+        "INCOMPLETE_SNAPSHOT",
+        "IDENTITY_MISMATCH",
+        "WAIT_FAILED",
+        "UNEXPECTED_WAIT_RESULT",
+        "RESIDUAL_OWNED_PROCESS",
+        "HANDLE_CLOSE_FAILED",
+        "ROOT_HANDLE_UNAVAILABLE",
+    }
+    if failure_reason not in allowed_failure_reasons:
+        failure_reason = "API_FAILURE"
     return {
         "current_phase": current if current in allowed_current else "NOT_STARTED",
         "last_completed_phase": last if last in allowed_last else "NONE",
@@ -1257,7 +1480,19 @@ def _sanitize_sampler_diagnostics(value: dict[str, Any]) -> dict[str, Any]:
         "valid_sample_count": min(1, bounded_count("valid_sample_count", 1)),
         "child_exit_state": exit_state,
         "child_cancellation_state": cancellation_state,
-        "orphan_child_count": min(1, bounded_count("orphan_child_count", 1)),
+        "orphan_child_count": orphan_count,
+        "orphan_verification_status": verification_status,
+        "process_tree_cleanup_status": cleanup_status,
+        "process_tree_snapshot_status": snapshot_status,
+        "owned_process_count": bounded_count("owned_process_count"),
+        "terminated_process_count": bounded_count("terminated_process_count"),
+        "identity_mismatch_count": bounded_count("identity_mismatch_count"),
+        "cleanup_failure_api": failure_api,
+        "cleanup_failure_code": bounded_count(
+            "cleanup_failure_code", 0xFFFFFFFF
+        ),
+        "cleanup_failure_phase": failure_phase,
+        "cleanup_failure_reason": failure_reason,
     }
 
 
@@ -1269,55 +1504,563 @@ def _read_sampler_progress(path: Path) -> dict[str, Any]:
     return _sanitize_sampler_diagnostics(value if isinstance(value, dict) else {})
 
 
-def _terminate_sampler_process(process: subprocess.Popen[str]) -> dict[str, Any]:
-    if process.poll() is not None:
+def _win32_exception_code(exc: BaseException) -> int:
+    for attribute in ("winerror", "errno"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, int):
+            return max(0, min(0xFFFFFFFF, value))
+    return 1
+
+
+def _win32_failure_fields(
+    exc: BaseException,
+    *,
+    api_name: str,
+    phase: str,
+    reason: str = "API_FAILURE",
+) -> dict[str, Any]:
+    if isinstance(exc, _Win32ApiFailure):
+        api_name = exc.api_name
+        error_code = exc.error_code
+    else:
+        error_code = _win32_exception_code(exc)
+    return {
+        "cleanup_failure_api": api_name,
+        "cleanup_failure_code": error_code,
+        "cleanup_failure_phase": phase,
+        "cleanup_failure_reason": reason,
+    }
+
+
+def _enumerate_windows_processes(
+    api: Any | None = None,
+    *,
+    phase: str = "SNAPSHOT_FIRST",
+) -> dict[str, Any]:
+    """Return a complete Toolhelp snapshot or a sanitized incomplete result."""
+
+    try:
+        process_api = api if api is not None else _Win32ProcessApi()
+    except Exception as exc:
         return {
-            "child_exit_state": "EXITED",
-            "child_cancellation_state": "NOT_REQUIRED",
-            "orphan_child_count": 0,
+            "complete": False,
+            "entries": [],
+            **_win32_failure_fields(
+                exc,
+                api_name="Win32ProcessApi",
+                phase="API_INITIALIZATION",
+            ),
         }
 
-    cancellation_completed = False
-    if os.name == "nt":
+    snapshot_handle: int | None = None
+    entries: list[tuple[int, int]] = []
+    failure: dict[str, Any] | None = None
+    current_api = "CreateToolhelp32Snapshot"
+    current_phase = "SNAPSHOT_CREATE"
+    try:
+        snapshot_handle = process_api.create_snapshot()
+        current_api = "Process32FirstW"
+        current_phase = phase
+        first, error_code = process_api.process_first(snapshot_handle)
+        if first is None:
+            if int(error_code) != _WIN32_ERROR_NO_MORE_FILES:
+                failure = {
+                    "cleanup_failure_api": "Process32FirstW",
+                    "cleanup_failure_code": max(0, int(error_code)),
+                    "cleanup_failure_phase": phase,
+                    "cleanup_failure_reason": "INCOMPLETE_SNAPSHOT",
+                }
+        else:
+            entries.append(first)
+            while failure is None:
+                current_api = "Process32NextW"
+                current_phase = (
+                    phase
+                    if phase in {"FINAL_VERIFICATION", "IDENTITY_VERIFICATION"}
+                    else "SNAPSHOT_NEXT"
+                )
+                item, error_code = process_api.process_next(snapshot_handle)
+                if item is None:
+                    if int(error_code) != _WIN32_ERROR_NO_MORE_FILES:
+                        failure = {
+                            "cleanup_failure_api": "Process32NextW",
+                            "cleanup_failure_code": max(0, int(error_code)),
+                            "cleanup_failure_phase": current_phase,
+                            "cleanup_failure_reason": "INCOMPLETE_SNAPSHOT",
+                        }
+                    break
+                entries.append(item)
+    except Exception as exc:
+        failure = _win32_failure_fields(
+            exc,
+            api_name=current_api,
+            phase=current_phase,
+            reason="INCOMPLETE_SNAPSHOT",
+        )
+    finally:
+        if snapshot_handle is not None:
+            try:
+                process_api.close_handle(snapshot_handle)
+            except Exception as exc:
+                failure = _win32_failure_fields(
+                    exc,
+                    api_name="CloseHandle",
+                    phase="HANDLE_CLOSE",
+                    reason="HANDLE_CLOSE_FAILED",
+                )
+
+    if failure is not None:
+        return {"complete": False, "entries": [], **failure}
+    return {"complete": True, "entries": entries}
+
+
+def _wait_windows_process(
+    api: Any,
+    process_handle: int,
+    timeout_ms: int,
+    *,
+    phase: str = "PROCESS_WAIT",
+) -> dict[str, Any]:
+    try:
+        result, error_code = api.wait(process_handle, timeout_ms)
+    except Exception as exc:
+        return {
+            "state": "FAILED",
+            **_win32_failure_fields(
+                exc,
+                api_name="WaitForSingleObject",
+                phase=phase,
+            ),
+        }
+    numeric = int(result) & 0xFFFFFFFF
+    if numeric == _WIN32_WAIT_OBJECT_0:
+        return {"state": "EXITED"}
+    if numeric == _WIN32_WAIT_TIMEOUT:
+        return {"state": "RUNNING"}
+    if numeric == _WIN32_WAIT_FAILED:
+        return {
+            "state": "FAILED",
+            "cleanup_failure_api": "WaitForSingleObject",
+            "cleanup_failure_code": max(0, int(error_code)),
+            "cleanup_failure_phase": phase,
+            "cleanup_failure_reason": "WAIT_FAILED",
+        }
+    return {
+        "state": "FAILED_UNEXPECTED_WAIT_RESULT",
+        "cleanup_failure_api": "WaitForSingleObject",
+        "cleanup_failure_code": 0,
+        "cleanup_failure_phase": phase,
+        "cleanup_failure_reason": "UNEXPECTED_WAIT_RESULT",
+    }
+
+
+def _windows_descendant_depths(
+    entries: list[tuple[int, int]],
+    historical_depths: dict[int, int],
+) -> dict[int, tuple[int, int]]:
+    parent_by_pid = {
+        int(process_id): int(parent_id)
+        for process_id, parent_id in entries
+        if int(process_id) > 0
+    }
+    depths = dict(historical_depths)
+    discovered: dict[int, tuple[int, int]] = {}
+    changed = True
+    while changed:
+        changed = False
+        for process_id, parent_id in parent_by_pid.items():
+            if process_id in depths or parent_id not in depths:
+                continue
+            depth = depths[parent_id] + 1
+            depths[process_id] = depth
+            discovered[process_id] = (parent_id, depth)
+            changed = True
+    return discovered
+
+
+def _windows_cleanup_failure(
+    failure: dict[str, Any],
+    *,
+    owned_process_count: int,
+    terminated_process_count: int,
+    identity_mismatch_count: int,
+    snapshot_status: str,
+) -> dict[str, Any]:
+    return {
+        "child_exit_state": "UNKNOWN",
+        "child_cancellation_state": "FAILED",
+        "orphan_child_count": 1,
+        "orphan_verification_status": "NOT_VERIFIED",
+        "process_tree_cleanup_status": (
+            "CLEANUP_FAILED_UNEXPECTED_WAIT_RESULT"
+            if failure.get("cleanup_failure_reason") == "UNEXPECTED_WAIT_RESULT"
+            else "CLEANUP_FAILED"
+        ),
+        "process_tree_snapshot_status": snapshot_status,
+        "owned_process_count": owned_process_count,
+        "terminated_process_count": terminated_process_count,
+        "identity_mismatch_count": identity_mismatch_count,
+        **failure,
+    }
+
+
+def _terminate_windows_owned_tree(
+    process: subprocess.Popen[str],
+    *,
+    api: Any | None = None,
+    nonce: str | None = None,
+) -> dict[str, Any]:
+    """Terminate only the exact creation identities descended from ``process``."""
+
+    ownership_nonce = nonce or uuid.uuid4().hex
+    owned_handles: list[int] = []
+    records: dict[int, dict[str, Any]] = {}
+    terminated_count = 0
+    identity_mismatch_count = 0
+    snapshot_status = "NOT_STARTED"
+    failure: dict[str, Any] | None = None
+    closure_proved = False
+
+    try:
+        process_api = api if api is not None else _Win32ProcessApi()
+        root_pid = int(process.pid)
+        raw_root_handle = getattr(process, "_handle", None)
         try:
-            killed = subprocess.run(
-                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5.0,
-                shell=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            root_handle = int(raw_root_handle)
+        except (TypeError, ValueError):
+            root_handle = 0
+        if root_pid <= 0 or root_handle <= 0:
+            failure = {
+                "cleanup_failure_api": "PopenHandle",
+                "cleanup_failure_code": 0,
+                "cleanup_failure_phase": "ROOT_IDENTITY",
+                "cleanup_failure_reason": "ROOT_HANDLE_UNAVAILABLE",
+            }
+        else:
+            try:
+                root_identity = int(process_api.creation_identity(root_handle))
+            except Exception as exc:
+                failure = _win32_failure_fields(
+                    exc,
+                    api_name="GetProcessTimes",
+                    phase="ROOT_IDENTITY",
+                )
+            else:
+                records[root_pid] = {
+                    "pid": root_pid,
+                    "parent_pid": 0,
+                    "depth": 0,
+                    "creation_identity": root_identity,
+                    "handle": root_handle,
+                    "handle_owned": False,
+                    "relation": "ROOT",
+                    "nonce": ownership_nonce,
+                    "first_observed_phase": "SAMPLER_SPAWN",
+                }
+
+        for pass_index in range(_WIN32_PROCESS_TREE_MAX_PASSES):
+            if failure is not None:
+                break
+            snapshot = _enumerate_windows_processes(
+                process_api,
+                phase=("FINAL_VERIFICATION" if pass_index else "SNAPSHOT_FIRST"),
             )
-            cancellation_completed = killed.returncode == 0
-        except (OSError, subprocess.SubprocessError):
-            cancellation_completed = False
-    else:
+            if not snapshot["complete"]:
+                snapshot_status = "INCOMPLETE_SNAPSHOT"
+                failure = {
+                    key: snapshot[key]
+                    for key in (
+                        "cleanup_failure_api",
+                        "cleanup_failure_code",
+                        "cleanup_failure_phase",
+                        "cleanup_failure_reason",
+                    )
+                }
+                break
+            snapshot_status = "COMPLETE"
+            historical_depths = {
+                process_id: int(record["depth"])
+                for process_id, record in records.items()
+            }
+            discovered = _windows_descendant_depths(
+                list(snapshot["entries"]), historical_depths
+            )
+            new_record_count = 0
+            for process_id, (parent_id, depth) in discovered.items():
+                if process_id in records:
+                    continue
+                try:
+                    handle = int(process_api.open_process(process_id))
+                    owned_handles.append(handle)
+                except Exception as exc:
+                    failure = _win32_failure_fields(
+                        exc,
+                        api_name="OpenProcess",
+                        phase="OPEN_PROCESS",
+                    )
+                    break
+                try:
+                    creation_identity = int(process_api.creation_identity(handle))
+                except Exception as exc:
+                    failure = _win32_failure_fields(
+                        exc,
+                        api_name="GetProcessTimes",
+                        phase="IDENTITY_QUERY",
+                    )
+                    break
+                parent_record = records.get(parent_id)
+                parent_identity = (
+                    int(parent_record["creation_identity"])
+                    if parent_record is not None
+                    else root_identity
+                )
+                if creation_identity < root_identity or creation_identity < parent_identity:
+                    identity_mismatch_count += 1
+                    failure = {
+                        "cleanup_failure_api": "GetProcessTimes",
+                        "cleanup_failure_code": 0,
+                        "cleanup_failure_phase": "IDENTITY_VERIFICATION",
+                        "cleanup_failure_reason": "IDENTITY_MISMATCH",
+                    }
+                    break
+                revalidation = _enumerate_windows_processes(
+                    process_api, phase="IDENTITY_VERIFICATION"
+                )
+                if not revalidation["complete"]:
+                    snapshot_status = "INCOMPLETE_SNAPSHOT"
+                    failure = {
+                        key: revalidation[key]
+                        for key in (
+                            "cleanup_failure_api",
+                            "cleanup_failure_code",
+                            "cleanup_failure_phase",
+                            "cleanup_failure_reason",
+                        )
+                    }
+                    break
+                revalidated_parents = {
+                    int(candidate_pid): int(candidate_parent)
+                    for candidate_pid, candidate_parent in revalidation["entries"]
+                }
+                if revalidated_parents.get(process_id) != parent_id:
+                    identity_mismatch_count += 1
+                    failure = {
+                        "cleanup_failure_api": "GetProcessTimes",
+                        "cleanup_failure_code": 0,
+                        "cleanup_failure_phase": "IDENTITY_VERIFICATION",
+                        "cleanup_failure_reason": "IDENTITY_MISMATCH",
+                    }
+                    break
+                records[process_id] = {
+                    "pid": process_id,
+                    "parent_pid": parent_id,
+                    "depth": depth,
+                    "creation_identity": creation_identity,
+                    "handle": handle,
+                    "handle_owned": True,
+                    "relation": "DESCENDANT",
+                    "nonce": ownership_nonce,
+                    "first_observed_phase": (
+                        "FINAL_VERIFICATION" if pass_index else "INITIAL_SNAPSHOT"
+                    ),
+                }
+                new_record_count += 1
+            if failure is not None:
+                break
+
+            ordered_records = sorted(
+                records.values(), key=lambda item: int(item["depth"]), reverse=True
+            )
+            for record in ordered_records:
+                handle = int(record["handle"])
+                try:
+                    current_identity = int(process_api.creation_identity(handle))
+                except Exception as exc:
+                    failure = _win32_failure_fields(
+                        exc,
+                        api_name="GetProcessTimes",
+                        phase="IDENTITY_VERIFICATION",
+                    )
+                    break
+                if current_identity != int(record["creation_identity"]):
+                    identity_mismatch_count += 1
+                    failure = {
+                        "cleanup_failure_api": "GetProcessTimes",
+                        "cleanup_failure_code": 0,
+                        "cleanup_failure_phase": "IDENTITY_VERIFICATION",
+                        "cleanup_failure_reason": "IDENTITY_MISMATCH",
+                    }
+                    break
+                wait_result = _wait_windows_process(
+                    process_api, handle, 0, phase="PROCESS_WAIT"
+                )
+                if wait_result["state"] == "EXITED":
+                    continue
+                if wait_result["state"] != "RUNNING":
+                    failure = {
+                        key: wait_result[key]
+                        for key in (
+                            "cleanup_failure_api",
+                            "cleanup_failure_code",
+                            "cleanup_failure_phase",
+                            "cleanup_failure_reason",
+                        )
+                    }
+                    break
+                try:
+                    process_api.terminate(handle)
+                except Exception as exc:
+                    failure = _win32_failure_fields(
+                        exc,
+                        api_name="TerminateProcess",
+                        phase="PROCESS_TERMINATION",
+                    )
+                    break
+                terminated_count += 1
+                confirmed = _wait_windows_process(
+                    process_api,
+                    handle,
+                    _WIN32_PROCESS_TREE_WAIT_MS,
+                    phase="PROCESS_WAIT",
+                )
+                if confirmed["state"] != "EXITED":
+                    if confirmed["state"] == "RUNNING":
+                        failure = {
+                            "cleanup_failure_api": "WaitForSingleObject",
+                            "cleanup_failure_code": 0,
+                            "cleanup_failure_phase": "PROCESS_WAIT",
+                            "cleanup_failure_reason": "RESIDUAL_OWNED_PROCESS",
+                        }
+                    else:
+                        failure = {
+                            key: confirmed[key]
+                            for key in (
+                                "cleanup_failure_api",
+                                "cleanup_failure_code",
+                                "cleanup_failure_phase",
+                                "cleanup_failure_reason",
+                            )
+                        }
+                    break
+            if failure is not None:
+                break
+
+            if pass_index > 0 and new_record_count == 0:
+                closure_proved = True
+                break
+
+        if failure is None and not closure_proved:
+            failure = {
+                "cleanup_failure_api": "WaitForSingleObject",
+                "cleanup_failure_code": 0,
+                "cleanup_failure_phase": "FINAL_VERIFICATION",
+                "cleanup_failure_reason": "RESIDUAL_OWNED_PROCESS",
+            }
+    except Exception as exc:
+        failure = _win32_failure_fields(
+            exc,
+            api_name="Win32ProcessApi",
+            phase="API_INITIALIZATION",
+        )
+        process_api = api
+    finally:
+        if "process_api" in locals() and process_api is not None:
+            for handle in reversed(owned_handles):
+                try:
+                    process_api.close_handle(handle)
+                except Exception as exc:
+                    if failure is None:
+                        failure = _win32_failure_fields(
+                            exc,
+                            api_name="CloseHandle",
+                            phase="HANDLE_CLOSE",
+                            reason="HANDLE_CLOSE_FAILED",
+                        )
+
+    if failure is not None:
+        return _windows_cleanup_failure(
+            failure,
+            owned_process_count=len(records),
+            terminated_process_count=terminated_count,
+            identity_mismatch_count=identity_mismatch_count,
+            snapshot_status=snapshot_status,
+        )
+    return {
+        "child_exit_state": "TERMINATED" if terminated_count else "EXITED",
+        "child_cancellation_state": "COMPLETED" if terminated_count else "NOT_REQUIRED",
+        "orphan_child_count": 0,
+        "orphan_verification_status": "PASS",
+        "process_tree_cleanup_status": (
+            "CLEANUP_COMPLETED" if terminated_count else "NOT_REQUIRED"
+        ),
+        "process_tree_snapshot_status": "COMPLETE",
+        "owned_process_count": len(records),
+        "terminated_process_count": terminated_count,
+        "identity_mismatch_count": 0,
+        "cleanup_failure_api": "NONE",
+        "cleanup_failure_code": 0,
+        "cleanup_failure_phase": "NONE",
+        "cleanup_failure_reason": "NONE",
+    }
+
+
+def _terminate_posix_sampler_process(process: subprocess.Popen[str]) -> dict[str, Any]:
+    cancellation_completed = False
+    if process.poll() is None:
         try:
             os.killpg(process.pid, signal.SIGTERM)
             cancellation_completed = True
         except (OSError, ProcessLookupError):
             cancellation_completed = process.poll() is not None
-
-    if not cancellation_completed and process.poll() is None:
-        try:
-            process.kill()
-        except OSError:
-            pass
     try:
         process.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
         try:
-            process.kill()
+            os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=2.0)
+            cancellation_completed = True
         except (OSError, subprocess.SubprocessError):
-            pass
+            cancellation_completed = False
     exited = process.poll() is not None
+    verified = exited and (cancellation_completed or process.returncode is not None)
     return {
-        "child_exit_state": "TERMINATED" if exited else "RUNNING",
-        "child_cancellation_state": "COMPLETED" if exited else "FAILED",
-        "orphan_child_count": 0 if exited and cancellation_completed else 1,
+        "child_exit_state": "TERMINATED" if cancellation_completed else "EXITED",
+        "child_cancellation_state": (
+            "COMPLETED" if cancellation_completed else "NOT_REQUIRED" if verified else "FAILED"
+        ),
+        "orphan_child_count": 0 if verified else 1,
+        "orphan_verification_status": "PASS" if verified else "NOT_VERIFIED",
+        "process_tree_cleanup_status": (
+            "CLEANUP_COMPLETED"
+            if cancellation_completed
+            else "NOT_REQUIRED"
+            if verified
+            else "CLEANUP_FAILED"
+        ),
+        "process_tree_snapshot_status": "COMPLETE" if verified else "INCOMPLETE_SNAPSHOT",
+        "owned_process_count": 1,
+        "terminated_process_count": 1 if cancellation_completed else 0,
+        "identity_mismatch_count": 0,
+        "cleanup_failure_api": "NONE",
+        "cleanup_failure_code": 0,
+        "cleanup_failure_phase": "NONE",
+        "cleanup_failure_reason": "NONE" if verified else "API_FAILURE",
     }
+
+
+def _terminate_sampler_process(
+    process: subprocess.Popen[str],
+    *,
+    api: Any | None = None,
+    nonce: str | None = None,
+) -> dict[str, Any]:
+    if os.name == "nt":
+        return _terminate_windows_owned_tree(
+            process,
+            api=api,
+            nonce=nonce or uuid.uuid4().hex,
+        )
+    return _terminate_posix_sampler_process(process)
 
 
 def _bounded_sampler_elapsed_ms(started: float) -> float:
@@ -1363,6 +2106,7 @@ def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str
         else:
             popen_options["start_new_session"] = True
         ipc_started = time.monotonic()
+        ownership_nonce = uuid.uuid4().hex
         try:
             process = subprocess.Popen(argv, **popen_options)
         except (OSError, subprocess.SubprocessError) as exc:
@@ -1370,15 +2114,29 @@ def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str
                 "DEPENDENCY_OR_SUBPROCESS_DEFECT",
                 phase="SAMPLER_SUBPROCESS",
                 dependency_class="SUBPROCESS",
-                exit_category="SUBPROCESS_LAUNCH_OR_IO_FAILURE",
+                exit_category="SUBPROCESS_LAUNCH_BEFORE_PID",
                 source_line=sys._getframe().f_lineno,
+                diagnostics={
+                    "child_exit_state": "UNKNOWN",
+                    "child_cancellation_state": "FAILED",
+                    "orphan_child_count": 1,
+                    "orphan_verification_status": "NOT_VERIFIED",
+                    "process_tree_cleanup_status": "SPAWN_FAILED_BEFORE_PID",
+                    "process_tree_snapshot_status": "NOT_STARTED",
+                    "cleanup_failure_api": "PopenHandle",
+                    "cleanup_failure_code": _win32_exception_code(exc),
+                    "cleanup_failure_phase": "SPAWN_BEFORE_PID",
+                    "cleanup_failure_reason": "ROOT_HANDLE_UNAVAILABLE",
+                },
             ) from exc
         try:
             stdout, _stderr = process.communicate(timeout=timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             ipc_elapsed_ms = _bounded_sampler_elapsed_ms(ipc_started)
             cleanup_started = time.monotonic()
-            cancellation = _terminate_sampler_process(process)
+            cancellation = _terminate_sampler_process(
+                process, nonce=ownership_nonce
+            )
             try:
                 process.communicate(timeout=2.0)
             except (OSError, subprocess.SubprocessError):
@@ -1397,7 +2155,7 @@ def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str
                     "elapsed_ms": cleanup_elapsed_ms,
                     "status": (
                         "PASS"
-                        if cancellation["child_cancellation_state"] == "COMPLETED"
+                        if cancellation["child_cancellation_state"] != "FAILED"
                         else "FAIL"
                     ),
                 },
@@ -1422,17 +2180,57 @@ def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str
                 source_line=sys._getframe().f_lineno,
                 diagnostics=diagnostics,
             ) from exc
+        except (OSError, subprocess.SubprocessError) as exc:
+            ipc_elapsed_ms = _bounded_sampler_elapsed_ms(ipc_started)
+            cleanup_started = time.monotonic()
+            cleanup = _terminate_sampler_process(
+                process, nonce=ownership_nonce
+            )
+            diagnostics = _read_sampler_progress(progress_path)
+            diagnostics.update(cleanup)
+            diagnostics["phase_timings"] = [
+                *diagnostics.get("phase_timings", []),
+                {
+                    "phase": "PARENT_CHILD_IPC",
+                    "elapsed_ms": ipc_elapsed_ms,
+                    "status": "FAIL",
+                },
+                {
+                    "phase": "CHILD_CLEANUP",
+                    "elapsed_ms": _bounded_sampler_elapsed_ms(cleanup_started),
+                    "status": (
+                        "PASS"
+                        if cleanup["child_cancellation_state"] != "FAILED"
+                        else "FAIL"
+                    ),
+                },
+            ]
+            diagnostics["valid_sample_count"] = 0
+            raise SamplerFailure(
+                "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                phase="PARENT_CHILD_IPC",
+                dependency_class="SUBPROCESS",
+                exit_category="SUBPROCESS_POST_SPAWN_IO_FAILURE",
+                source_line=sys._getframe().f_lineno,
+                diagnostics=diagnostics,
+            ) from exc
 
         ipc_elapsed_ms = _bounded_sampler_elapsed_ms(ipc_started)
+        cleanup_started = time.monotonic()
+        closure = _terminate_sampler_process(process, nonce=ownership_nonce)
+        cleanup_elapsed_ms = _bounded_sampler_elapsed_ms(cleanup_started)
         collection_started = time.monotonic()
         diagnostics = _read_sampler_progress(progress_path)
-        diagnostics.update(
-            {
-                "child_exit_state": "EXITED",
-                "child_cancellation_state": "NOT_REQUIRED",
-                "orphan_child_count": 0,
-            }
-        )
+        diagnostics.update(closure)
+        if closure["child_cancellation_state"] == "FAILED":
+            raise SamplerFailure(
+                "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                phase="CHILD_CLEANUP",
+                dependency_class="SUBPROCESS",
+                exit_category="PROCESS_TREE_CLEANUP_FAILED",
+                source_line=sys._getframe().f_lineno,
+                diagnostics=diagnostics,
+            )
         try:
             raw_sample = json.loads(stdout)
         except json.JSONDecodeError as exc:
@@ -1478,7 +2276,7 @@ def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str
             },
             {
                 "phase": "CHILD_CLEANUP",
-                "elapsed_ms": 0.0,
+                "elapsed_ms": cleanup_elapsed_ms,
                 "status": "PASS",
             },
             {
@@ -1487,13 +2285,11 @@ def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str
                 "status": "PASS",
             },
         ]
+        sample_diagnostics.update(closure)
         sample_diagnostics.update(
             {
                 "current_phase": "BETWEEN_PHASES",
                 "last_completed_phase": "OBSERVER_COLLECTION",
-                "child_exit_state": "EXITED",
-                "child_cancellation_state": "NOT_REQUIRED",
-                "orphan_child_count": 0,
             }
         )
         if process.returncode != 0 or sanitized.get("sample_status") == "FAIL":
@@ -1728,22 +2524,35 @@ def start_observation(
         popen_options["creationflags"] = (
             getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
         )
     else:
         popen_options["start_new_session"] = True
 
     try:
         child = subprocess.Popen(command, **popen_options)
-    except PermissionError as exc:
-        if os.name != "nt" or getattr(exc, "winerror", None) != 5:
-            _write_incomplete(directory, reason="LAUNCH_FAILED", process_exit_code=70)
-            raise ObserverError("detached observer launch failed") from exc
-        try:
-            child_pid = _launch_via_wmi(command)
-        except ObserverError:
-            _write_incomplete(directory, reason="LAUNCH_FAILED", process_exit_code=70)
-            raise
+    except OSError as exc:
+        _write_incomplete(
+            directory,
+            reason="LAUNCH_FAILED",
+            process_exit_code=70,
+            failure_metadata={
+                "first_failure_phase": "OBSERVER_SPAWN_BEFORE_PID",
+                "failure_category": "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                "source_file": "tools/qlib_traffic_observer.py",
+                "source_function": "start_observation",
+                "source_line": int(sys._getframe().f_lineno),
+                "exception_class": "ObserverError",
+                "dependency_class": "SUBPROCESS",
+                "exit_category": "SUBPROCESS_LAUNCH_BEFORE_PID",
+                "retryable": False,
+                "raw_exception_message_persisted": False,
+                "raw_sampler_output_persisted": False,
+            },
+        )
+        raise ObserverError("detached observer launch failed") from exc
+
+    child_pid = child.pid
+    try:
         _atomic_write_json(
             directory / "process.json",
             {
@@ -1751,35 +2560,37 @@ def start_observation(
                 "observation_id": observation_id,
                 "pid": child_pid,
                 "launched_at_utc": launched_at,
-                "launcher_backend": "WINDOWS_WMI",
             },
         )
-        return {
-            "observation_id": observation_id,
-            "mode": mode,
-            "status": "STARTED",
-            "pid": child_pid,
-            "launcher_backend": "WINDOWS_WMI",
-            "artifact_path": str(directory),
-        }
     except OSError as exc:
-        _write_incomplete(directory, reason="LAUNCH_FAILED", process_exit_code=70)
-        raise ObserverError("detached observer launch failed") from exc
-
-    child_pid = child.pid
+        cleanup = _terminate_sampler_process(child, nonce=uuid.uuid4().hex)
+        try:
+            _write_incomplete(
+                directory,
+                reason="LAUNCH_BOOKKEEPING_FAILED",
+                process_exit_code=70,
+                failure_metadata={
+                    "first_failure_phase": "OBSERVER_SPAWN_AFTER_PID",
+                    "failure_category": "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                    "source_file": "tools/qlib_traffic_observer.py",
+                    "source_function": "start_observation",
+                    "source_line": int(sys._getframe().f_lineno),
+                    "exception_class": "ObserverError",
+                    "dependency_class": "SUBPROCESS",
+                    "exit_category": "SUBPROCESS_POST_SPAWN_BOOKKEEPING_FAILURE",
+                    "retryable": False,
+                    "raw_exception_message_persisted": False,
+                    "raw_sampler_output_persisted": False,
+                    **_sanitize_sampler_diagnostics(cleanup),
+                },
+            )
+        except OSError:
+            pass
+        raise ObserverError("detached observer post-spawn bookkeeping failed") from exc
     # The detached worker is intentionally not waitable by this short-lived
     # launcher.  Mark only the local Popen wrapper as released so its destructor
     # does not report the still-running, independently owned worker as a leak.
     child.returncode = 0
-    _atomic_write_json(
-        directory / "process.json",
-        {
-            "schema_version": SCHEMA_VERSION,
-            "observation_id": observation_id,
-            "pid": child_pid,
-            "launched_at_utc": launched_at,
-        },
-    )
     return {
         "observation_id": observation_id,
         "mode": mode,

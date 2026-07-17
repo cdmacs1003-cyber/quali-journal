@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import inspect
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -18,6 +20,115 @@ from tools import qlib_traffic_observer as observer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNBOOK_PATH = REPO_ROOT / "deploy" / "qlib-skillup-runtime" / "operations-runbook.md"
+
+
+class _ScriptedWin32Api:
+    """Deterministic Win32 fault injector; it never touches the host OS."""
+
+    def __init__(
+        self,
+        snapshots: list[dict[str, object]] | None = None,
+        *,
+        root_pid: int = 10,
+        root_handle: int = 7000,
+    ) -> None:
+        self.snapshots = snapshots or [{"entries": []}, {"entries": []}]
+        self.snapshot_exception: BaseException | None = None
+        self.open_fail_pids: set[int] = set()
+        self.terminate_fail_pids: set[int] = set()
+        self.identity_fail_pids: set[int] = set()
+        self.identity_sequences: dict[int, list[int]] = {}
+        self.wait_sequences: dict[int, list[tuple[int, int]]] = {}
+        self.handle_to_pid = {root_handle: root_pid}
+        self.snapshot_state: dict[int, dict[str, object]] = {}
+        self.snapshot_index = 0
+        self.opened_handles: list[int] = []
+        self.closed_handles: list[int] = []
+        self.terminate_calls: list[int] = []
+        self.close_exception_handles: set[int] = set()
+
+    def create_snapshot(self) -> int:
+        if self.snapshot_exception is not None:
+            raise self.snapshot_exception
+        index = min(self.snapshot_index, len(self.snapshots) - 1)
+        script = dict(self.snapshots[index])
+        self.snapshot_index += 1
+        handle = 1000 + self.snapshot_index
+        script["cursor"] = 0
+        self.snapshot_state[handle] = script
+        return handle
+
+    def process_first(self, snapshot_handle: int) -> tuple[tuple[int, int] | None, int]:
+        script = self.snapshot_state[snapshot_handle]
+        exception = script.get("first_exception")
+        if isinstance(exception, BaseException):
+            raise exception
+        first_error = script.get("first_error")
+        if isinstance(first_error, int):
+            return None, first_error
+        entries = list(script.get("entries", []))
+        if not entries:
+            return None, observer._WIN32_ERROR_NO_MORE_FILES
+        script["cursor"] = 1
+        return tuple(entries[0]), 0  # type: ignore[arg-type,return-value]
+
+    def process_next(self, snapshot_handle: int) -> tuple[tuple[int, int] | None, int]:
+        script = self.snapshot_state[snapshot_handle]
+        exception = script.get("next_exception")
+        if isinstance(exception, BaseException):
+            raise exception
+        next_error = script.get("next_error")
+        if isinstance(next_error, int):
+            return None, next_error
+        entries = list(script.get("entries", []))
+        cursor = int(script.get("cursor", 0))
+        if cursor >= len(entries):
+            return None, observer._WIN32_ERROR_NO_MORE_FILES
+        script["cursor"] = cursor + 1
+        return tuple(entries[cursor]), 0  # type: ignore[arg-type,return-value]
+
+    def open_process(self, process_id: int) -> int:
+        if process_id in self.open_fail_pids:
+            raise observer._Win32ApiFailure("OpenProcess", 5, "OPEN_PROCESS")
+        handle = 20000 + int(process_id)
+        self.handle_to_pid[handle] = int(process_id)
+        self.opened_handles.append(handle)
+        return handle
+
+    def creation_identity(self, process_handle: int) -> int:
+        process_id = self.handle_to_pid[int(process_handle)]
+        if process_id in self.identity_fail_pids:
+            raise observer._Win32ApiFailure(
+                "GetProcessTimes", 5, "IDENTITY_QUERY"
+            )
+        sequence = self.identity_sequences.get(process_id)
+        if sequence:
+            if len(sequence) > 1:
+                return sequence.pop(0)
+            return sequence[0]
+        return 100000 + process_id
+
+    def wait(self, process_handle: int, _timeout_ms: int) -> tuple[int, int]:
+        process_id = self.handle_to_pid[int(process_handle)]
+        sequence = self.wait_sequences.get(process_id)
+        if sequence:
+            if len(sequence) > 1:
+                return sequence.pop(0)
+            return sequence[0]
+        return observer._WIN32_WAIT_OBJECT_0, 0
+
+    def terminate(self, process_handle: int) -> None:
+        process_id = self.handle_to_pid[int(process_handle)]
+        self.terminate_calls.append(process_id)
+        if process_id in self.terminate_fail_pids:
+            raise observer._Win32ApiFailure(
+                "TerminateProcess", 5, "PROCESS_TERMINATION"
+            )
+
+    def close_handle(self, handle: int) -> None:
+        self.closed_handles.append(int(handle))
+        if int(handle) in self.close_exception_handles:
+            raise observer._Win32ApiFailure("CloseHandle", 6, "HANDLE_CLOSE")
 
 
 def _utc_offset(seconds: float = 0.0) -> str:
@@ -792,6 +903,35 @@ class R481PretrafficEvidenceContractTests(unittest.TestCase):
 
 
 class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._cleanup_patch_active = True
+        self._cleanup_patcher = mock.patch.object(
+            observer,
+            "_terminate_sampler_process",
+            return_value={
+                "child_exit_state": "EXITED",
+                "child_cancellation_state": "NOT_REQUIRED",
+                "orphan_child_count": 0,
+                "orphan_verification_status": "PASS",
+                "process_tree_cleanup_status": "NOT_REQUIRED",
+                "process_tree_snapshot_status": "COMPLETE",
+                "owned_process_count": 1,
+                "terminated_process_count": 0,
+                "identity_mismatch_count": 0,
+                "cleanup_failure_api": "NONE",
+                "cleanup_failure_code": 0,
+                "cleanup_failure_phase": "NONE",
+                "cleanup_failure_reason": "NONE",
+            },
+        )
+        self._cleanup_patcher.start()
+        self.addCleanup(self._stop_cleanup_patch)
+
+    def _stop_cleanup_patch(self) -> None:
+        if self._cleanup_patch_active:
+            self._cleanup_patcher.stop()
+            self._cleanup_patch_active = False
+
     @staticmethod
     def _completed(payload: dict[str, object], returncode: int = 42) -> mock.Mock:
         return mock.Mock(
@@ -1129,6 +1269,7 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
         self.assertEqual(observed_budgets, [30.0, 25.0])
 
     def test_timeout_preserves_phase_counter_and_cancels_process_tree(self) -> None:
+        self._stop_cleanup_patch()
         with tempfile.TemporaryDirectory(prefix="r487a-cancel-") as temporary:
             marker = Path(temporary) / "grandchild.txt"
             script = "\n".join(
@@ -1216,6 +1357,584 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
         ):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, text)
+
+
+class R488C2Win32ProcessTreeFailClosedTests(unittest.TestCase):
+    @staticmethod
+    def _fake_process(pid: int = 10, handle: int = 7000) -> mock.Mock:
+        process = mock.Mock(pid=pid, returncode=None)
+        process._handle = handle
+        return process
+
+    @staticmethod
+    def _sampler_flags() -> int:
+        return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+        )
+
+    @staticmethod
+    def _terminate_exact_handle(
+        api: object, handle: int, creation_identity: int
+    ) -> None:
+        try:
+            if int(api.creation_identity(handle)) != creation_identity:  # type: ignore[attr-defined]
+                return
+            state = observer._wait_windows_process(api, handle, 0)
+            if state["state"] == "RUNNING":
+                api.terminate(handle)  # type: ignore[attr-defined]
+                observer._wait_windows_process(
+                    api, handle, observer._WIN32_PROCESS_TREE_WAIT_MS
+                )
+        except Exception:
+            return
+
+    @staticmethod
+    def _wait_for_marker(path: Path, timeout_seconds: float = 3.0) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        while not path.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if not path.exists():
+            raise AssertionError("synthetic process marker was not created")
+
+    def test_root_exited_grandchild_alive_with_inherited_pipe(self) -> None:
+        nonce = uuid.uuid4().hex
+        with tempfile.TemporaryDirectory(prefix="r488c2-root-exited-") as temporary:
+            marker = Path(temporary) / f"{nonce}.pid"
+            child_source = "import time; time.sleep(60)"
+            root_source = "\n".join(
+                (
+                    "import os, pathlib, subprocess, sys",
+                    f"child = subprocess.Popen([sys.executable, '-c', {child_source!r}])",
+                    "pathlib.Path(os.environ['R488C2_MARKER']).write_text(str(child.pid), encoding='utf-8')",
+                )
+            )
+            environment = dict(os.environ)
+            environment["R488C2_MARKER"] = str(marker)
+            root = subprocess.Popen(
+                [sys.executable, "-c", root_source],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=environment,
+                shell=False,
+                creationflags=self._sampler_flags(),
+            )
+            api = observer._Win32ProcessApi()
+            child_handle: int | None = None
+            child_identity = 0
+            root_identity = int(api.creation_identity(int(root._handle)))
+            try:
+                self._wait_for_marker(marker)
+                child_pid = int(marker.read_text(encoding="utf-8"))
+                child_handle = int(api.open_process(child_pid))
+                child_identity = int(api.creation_identity(child_handle))
+                deadline = time.monotonic() + 3.0
+                while root.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertIsNotNone(root.poll())
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    root.communicate(timeout=0.2)
+
+                result = observer._terminate_sampler_process(
+                    root, api=api, nonce=nonce
+                )
+                root.communicate(timeout=2.0)
+                self.assertEqual(result["child_cancellation_state"], "COMPLETED")
+                self.assertEqual(result["orphan_verification_status"], "PASS")
+                self.assertEqual(result["orphan_child_count"], 0)
+                self.assertEqual(
+                    observer._wait_windows_process(api, child_handle, 0)["state"],
+                    "EXITED",
+                )
+            finally:
+                self._terminate_exact_handle(api, int(root._handle), root_identity)
+                if child_handle is not None:
+                    self._terminate_exact_handle(api, child_handle, child_identity)
+                    api.close_handle(child_handle)
+                try:
+                    root.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    pass
+
+    def test_detached_fixture_inside_current_job_object_without_breakaway(self) -> None:
+        kernel32 = observer.ctypes.WinDLL(  # type: ignore[attr-defined]
+            "kernel32", use_last_error=True
+        )
+        kernel32.IsProcessInJob.argtypes = (
+            observer.ctypes.c_void_p,
+            observer.ctypes.c_void_p,
+            observer.ctypes.POINTER(observer.ctypes.c_int),
+        )
+        kernel32.IsProcessInJob.restype = observer.ctypes.c_int
+        in_job = observer.ctypes.c_int()
+        self.assertTrue(
+            kernel32.IsProcessInJob(
+                observer.ctypes.c_void_p(-1), None, observer.ctypes.byref(in_job)
+            )
+        )
+        self.assertEqual(in_job.value, 1)
+
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+        )
+        self.assertEqual(
+            flags & getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000), 0
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-c", "pass"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            shell=False,
+            creationflags=flags,
+        )
+        self.assertEqual(child.wait(timeout=5.0), 0)
+        source = inspect.getsource(observer.start_observation)
+        self.assertNotIn("CREATE_BREAKAWAY_FROM_JOB", source)
+        self.assertNotIn("_launch_via_wmi", source)
+
+    def test_unrelated_sibling_survives_owned_tree_cleanup(self) -> None:
+        command = [sys.executable, "-c", "import time; time.sleep(60)"]
+        root = subprocess.Popen(command, creationflags=self._sampler_flags())
+        sibling = subprocess.Popen(command, creationflags=self._sampler_flags())
+        api = observer._Win32ProcessApi()
+        root_identity = int(api.creation_identity(int(root._handle)))
+        sibling_identity = int(api.creation_identity(int(sibling._handle)))
+        try:
+            result = observer._terminate_sampler_process(
+                root, api=api, nonce=uuid.uuid4().hex
+            )
+            self.assertEqual(result["orphan_child_count"], 0)
+            self.assertEqual(result["orphan_verification_status"], "PASS")
+            self.assertEqual(
+                observer._wait_windows_process(api, int(sibling._handle), 0)["state"],
+                "RUNNING",
+            )
+            self.assertEqual(
+                int(api.creation_identity(int(sibling._handle))), sibling_identity
+            )
+        finally:
+            self._terminate_exact_handle(api, int(root._handle), root_identity)
+            self._terminate_exact_handle(api, int(sibling._handle), sibling_identity)
+            for process in (root, sibling):
+                try:
+                    process.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    pass
+
+    def test_pid_creation_identity_mismatch_is_not_terminated(self) -> None:
+        api = _ScriptedWin32Api(
+            [
+                {"entries": [(10, 1), (11, 10)]},
+                {"entries": [(10, 1), (11, 10)]},
+            ]
+        )
+        api.identity_sequences[11] = [100011, 200011]
+        result = observer._terminate_sampler_process(
+            self._fake_process(), api=api, nonce="fixture-nonce"
+        )
+        self.assertEqual(result["child_cancellation_state"], "FAILED")
+        self.assertEqual(result["orphan_verification_status"], "NOT_VERIFIED")
+        self.assertEqual(result["identity_mismatch_count"], 1)
+        self.assertEqual(api.terminate_calls, [])
+
+        query_failure = _ScriptedWin32Api(
+            [{"entries": [(10, 1), (11, 10)]}, {"entries": []}]
+        )
+        query_failure.identity_fail_pids.add(11)
+        failed = observer._terminate_sampler_process(
+            self._fake_process(), api=query_failure, nonce="fixture-nonce"
+        )
+        self.assertEqual(failed["cleanup_failure_api"], "GetProcessTimes")
+        self.assertEqual(failed["cleanup_failure_phase"], "IDENTITY_QUERY")
+        self.assertEqual(failed["orphan_verification_status"], "NOT_VERIFIED")
+        self.assertEqual(query_failure.terminate_calls, [])
+
+        root_query_failure = _ScriptedWin32Api()
+        root_query_failure.identity_fail_pids.add(10)
+        root_failed = observer._terminate_sampler_process(
+            self._fake_process(), api=root_query_failure, nonce="fixture-nonce"
+        )
+        self.assertEqual(root_failed["cleanup_failure_api"], "GetProcessTimes")
+        self.assertEqual(root_failed["cleanup_failure_phase"], "ROOT_IDENTITY")
+        self.assertEqual(root_failed["process_tree_snapshot_status"], "NOT_STARTED")
+
+        reused_pid = _ScriptedWin32Api(
+            [
+                {"entries": [(10, 1), (11, 10)]},
+                {"entries": [(10, 1), (11, 99)]},
+            ]
+        )
+        reused_pid.identity_sequences[11] = [200011]
+        reused = observer._terminate_sampler_process(
+            self._fake_process(), api=reused_pid, nonce="fixture-nonce"
+        )
+        self.assertEqual(reused["cleanup_failure_reason"], "IDENTITY_MISMATCH")
+        self.assertEqual(reused["cleanup_failure_phase"], "IDENTITY_VERIFICATION")
+        self.assertEqual(reused["orphan_verification_status"], "NOT_VERIFIED")
+        self.assertEqual(reused_pid.terminate_calls, [])
+
+    def test_create_toolhelp_snapshot_failure_is_incomplete(self) -> None:
+        api = _ScriptedWin32Api()
+        api.snapshot_exception = observer._Win32ApiFailure(
+            "CreateToolhelp32Snapshot", 5, "SNAPSHOT_CREATE"
+        )
+        result = observer._enumerate_windows_processes(api)
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["cleanup_failure_api"], "CreateToolhelp32Snapshot")
+        self.assertEqual(result["cleanup_failure_reason"], "INCOMPLETE_SNAPSHOT")
+        self.assertEqual(api.closed_handles, [])
+
+    def test_process_first_no_more_files_is_complete_empty(self) -> None:
+        api = _ScriptedWin32Api(
+            [{"entries": [], "first_error": observer._WIN32_ERROR_NO_MORE_FILES}]
+        )
+        result = observer._enumerate_windows_processes(api)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["entries"], [])
+        self.assertEqual(len(api.closed_handles), 1)
+
+    def test_process_first_unexpected_error_is_incomplete(self) -> None:
+        api = _ScriptedWin32Api([{"entries": [], "first_error": 5}])
+        result = observer._enumerate_windows_processes(api)
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["cleanup_failure_api"], "Process32FirstW")
+        self.assertEqual(result["cleanup_failure_code"], 5)
+
+        raised = _ScriptedWin32Api(
+            [{"entries": [], "first_exception": RuntimeError("raw first detail") }]
+        )
+        raised_result = observer._enumerate_windows_processes(
+            raised, phase="FINAL_VERIFICATION"
+        )
+        self.assertFalse(raised_result["complete"])
+        self.assertEqual(raised_result["cleanup_failure_api"], "Process32FirstW")
+        self.assertEqual(
+            raised_result["cleanup_failure_phase"], "FINAL_VERIFICATION"
+        )
+        self.assertNotIn("raw first detail", json.dumps(raised_result))
+
+    def test_process_next_no_more_files_is_complete(self) -> None:
+        api = _ScriptedWin32Api([{"entries": [(10, 1)]}])
+        result = observer._enumerate_windows_processes(api)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["entries"], [(10, 1)])
+        self.assertEqual(len(api.closed_handles), 1)
+
+        close_failure = _ScriptedWin32Api([{"entries": [(10, 1)]}])
+        close_failure.close_exception_handles.add(1001)
+        failed = observer._enumerate_windows_processes(close_failure)
+        self.assertFalse(failed["complete"])
+        self.assertEqual(failed["cleanup_failure_api"], "CloseHandle")
+        self.assertEqual(failed["cleanup_failure_reason"], "HANDLE_CLOSE_FAILED")
+
+        owned_handle_close_failure = _ScriptedWin32Api(
+            [
+                {"entries": [(10, 1), (11, 10)]},
+                {"entries": [(10, 1), (11, 10)]},
+                {"entries": [(10, 1)]},
+            ]
+        )
+        owned_handle_close_failure.close_exception_handles.add(20011)
+        cleanup_failed = observer._terminate_sampler_process(
+            self._fake_process(),
+            api=owned_handle_close_failure,
+            nonce="fixture-nonce",
+        )
+        self.assertEqual(cleanup_failed["cleanup_failure_api"], "CloseHandle")
+        self.assertEqual(
+            cleanup_failed["cleanup_failure_reason"], "HANDLE_CLOSE_FAILED"
+        )
+        self.assertEqual(
+            cleanup_failed["orphan_verification_status"], "NOT_VERIFIED"
+        )
+
+    def test_process_next_unexpected_error_is_incomplete(self) -> None:
+        api = _ScriptedWin32Api([{"entries": [(10, 1)], "next_error": 5}])
+        result = observer._enumerate_windows_processes(api)
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["cleanup_failure_api"], "Process32NextW")
+        self.assertEqual(result["cleanup_failure_reason"], "INCOMPLETE_SNAPSHOT")
+
+        raised = _ScriptedWin32Api(
+            [{"entries": [(10, 1)], "next_exception": RuntimeError("raw next detail")}]
+        )
+        raised_result = observer._enumerate_windows_processes(
+            raised, phase="FINAL_VERIFICATION"
+        )
+        self.assertFalse(raised_result["complete"])
+        self.assertEqual(raised_result["cleanup_failure_api"], "Process32NextW")
+        self.assertEqual(
+            raised_result["cleanup_failure_phase"], "FINAL_VERIFICATION"
+        )
+        self.assertNotIn("raw next detail", json.dumps(raised_result))
+
+    def test_wait_object_zero_is_exited(self) -> None:
+        api = _ScriptedWin32Api()
+        api.wait_sequences[10] = [(observer._WIN32_WAIT_OBJECT_0, 0)]
+        self.assertEqual(
+            observer._wait_windows_process(api, 7000, 0)["state"], "EXITED"
+        )
+
+    def test_wait_timeout_is_running(self) -> None:
+        api = _ScriptedWin32Api()
+        api.wait_sequences[10] = [(observer._WIN32_WAIT_TIMEOUT, 0)]
+        self.assertEqual(
+            observer._wait_windows_process(api, 7000, 0)["state"], "RUNNING"
+        )
+
+    def test_wait_failed_is_cleanup_failed(self) -> None:
+        api = _ScriptedWin32Api()
+        api.wait_sequences[10] = [(observer._WIN32_WAIT_FAILED, 6)]
+        result = observer._wait_windows_process(api, 7000, 0)
+        self.assertEqual(result["state"], "FAILED")
+        self.assertEqual(result["cleanup_failure_reason"], "WAIT_FAILED")
+        self.assertEqual(result["cleanup_failure_code"], 6)
+
+    def test_unexpected_wait_result_is_cleanup_failed(self) -> None:
+        api = _ScriptedWin32Api()
+        api.wait_sequences[10] = [(17, 0)]
+        result = observer._wait_windows_process(api, 7000, 0)
+        self.assertEqual(result["state"], "FAILED_UNEXPECTED_WAIT_RESULT")
+        self.assertEqual(result["cleanup_failure_reason"], "UNEXPECTED_WAIT_RESULT")
+
+    def test_open_process_failure_is_not_verified(self) -> None:
+        api = _ScriptedWin32Api(
+            [{"entries": [(10, 1), (11, 10)]}, {"entries": []}]
+        )
+        api.open_fail_pids.add(11)
+        result = observer._terminate_sampler_process(
+            self._fake_process(), api=api, nonce="fixture-nonce"
+        )
+        self.assertEqual(result["child_cancellation_state"], "FAILED")
+        self.assertEqual(result["cleanup_failure_api"], "OpenProcess")
+        self.assertEqual(result["orphan_child_count"], 1)
+        self.assertEqual(api.terminate_calls, [])
+
+    def test_terminate_process_failure_is_not_verified(self) -> None:
+        api = _ScriptedWin32Api(
+            [{"entries": [(10, 1)]}, {"entries": [(10, 1)]}]
+        )
+        api.wait_sequences[10] = [(observer._WIN32_WAIT_TIMEOUT, 0)]
+        api.terminate_fail_pids.add(10)
+        result = observer._terminate_sampler_process(
+            self._fake_process(), api=api, nonce="fixture-nonce"
+        )
+        self.assertEqual(result["child_cancellation_state"], "FAILED")
+        self.assertEqual(result["cleanup_failure_api"], "TerminateProcess")
+        self.assertEqual(result["orphan_verification_status"], "NOT_VERIFIED")
+
+    def test_win32_exception_is_sanitized(self) -> None:
+        api = _ScriptedWin32Api()
+        api.snapshot_exception = OSError(
+            5, "raw https://forbidden.example Authorization token C:\\private"
+        )
+        result = observer._enumerate_windows_processes(api)
+        serialized = json.dumps(result, sort_keys=True)
+        self.assertFalse(result["complete"])
+        self.assertNotIn("forbidden.example", serialized)
+        self.assertNotIn("Authorization", serialized)
+        self.assertNotIn("private", serialized)
+        self.assertEqual(result["cleanup_failure_reason"], "INCOMPLETE_SNAPSHOT")
+
+    def test_incomplete_enumeration_cannot_produce_orphan_zero(self) -> None:
+        api = _ScriptedWin32Api([{"entries": [], "first_error": 5}])
+        result = observer._terminate_sampler_process(
+            self._fake_process(), api=api, nonce="fixture-nonce"
+        )
+        self.assertEqual(result["process_tree_snapshot_status"], "INCOMPLETE_SNAPSHOT")
+        self.assertEqual(result["orphan_verification_status"], "NOT_VERIFIED")
+        self.assertNotEqual(result["orphan_child_count"], 0)
+
+        final_incomplete = _ScriptedWin32Api(
+            [
+                {"entries": [(10, 1)]},
+                {"entries": [], "first_error": 5},
+            ]
+        )
+        late_failure = observer._terminate_sampler_process(
+            self._fake_process(), api=final_incomplete, nonce="fixture-nonce"
+        )
+        self.assertEqual(
+            late_failure["process_tree_snapshot_status"], "INCOMPLETE_SNAPSHOT"
+        )
+        self.assertEqual(
+            late_failure["cleanup_failure_phase"], "FINAL_VERIFICATION"
+        )
+        self.assertEqual(late_failure["orphan_child_count"], 1)
+
+    def test_cleanup_failure_cannot_be_promoted_to_observer_pass(self) -> None:
+        process = mock.Mock(pid=10, returncode=None)
+        process.communicate.side_effect = [
+            subprocess.TimeoutExpired("sampler", 0.1),
+            ("", ""),
+        ]
+        failed_cleanup = {
+            "child_exit_state": "UNKNOWN",
+            "child_cancellation_state": "FAILED",
+            "orphan_child_count": 1,
+            "orphan_verification_status": "NOT_VERIFIED",
+            "process_tree_cleanup_status": "CLEANUP_FAILED",
+            "process_tree_snapshot_status": "INCOMPLETE_SNAPSHOT",
+            "owned_process_count": 1,
+            "terminated_process_count": 0,
+            "identity_mismatch_count": 0,
+            "cleanup_failure_api": "Process32NextW",
+            "cleanup_failure_code": 5,
+            "cleanup_failure_phase": "SNAPSHOT_NEXT",
+            "cleanup_failure_reason": "INCOMPLETE_SNAPSHOT",
+        }
+        with mock.patch.object(observer.subprocess, "Popen", return_value=process), mock.patch.object(
+            observer, "_terminate_sampler_process", return_value=failed_cleanup
+        ):
+            with self.assertRaises(observer.SamplerFailure) as caught:
+                observer._production_sample_once(["sampler"], timeout_seconds=0.1)
+        self.assertEqual(caught.exception.metadata["child_cancellation_state"], "FAILED")
+        self.assertEqual(caught.exception.metadata["orphan_child_count"], 1)
+        self.assertEqual(
+            caught.exception.metadata["orphan_verification_status"], "NOT_VERIFIED"
+        )
+
+        valid_sample = R483SamplerAndRollbackReliabilityTests._readiness_sample(
+            "REVISION_FUNCTIONAL"
+        )
+        successful_process = mock.Mock(pid=10, returncode=0)
+        successful_process.communicate.return_value = (
+            json.dumps(valid_sample),
+            "",
+        )
+        with mock.patch.object(
+            observer.subprocess, "Popen", return_value=successful_process
+        ), mock.patch.object(
+            observer, "_terminate_sampler_process", return_value=failed_cleanup
+        ):
+            with self.assertRaises(observer.SamplerFailure) as cleanup_only_failure:
+                observer._production_sample_once(["sampler"], timeout_seconds=1.0)
+        self.assertEqual(
+            cleanup_only_failure.exception.metadata["exit_category"],
+            "PROCESS_TREE_CLEANUP_FAILED",
+        )
+        self.assertEqual(
+            cleanup_only_failure.exception.metadata["orphan_verification_status"],
+            "NOT_VERIFIED",
+        )
+
+        io_process = mock.Mock(pid=10, returncode=None)
+        io_process.communicate.side_effect = OSError(
+            5, "raw post-spawn https://forbidden.example token"
+        )
+        completed_cleanup = dict(failed_cleanup)
+        completed_cleanup.update(
+            {
+                "child_exit_state": "TERMINATED",
+                "child_cancellation_state": "COMPLETED",
+                "orphan_child_count": 0,
+                "orphan_verification_status": "PASS",
+                "process_tree_cleanup_status": "CLEANUP_COMPLETED",
+                "process_tree_snapshot_status": "COMPLETE",
+                "terminated_process_count": 1,
+                "cleanup_failure_api": "NONE",
+                "cleanup_failure_code": 0,
+                "cleanup_failure_phase": "NONE",
+                "cleanup_failure_reason": "NONE",
+            }
+        )
+        with mock.patch.object(
+            observer.subprocess, "Popen", return_value=io_process
+        ), mock.patch.object(
+            observer,
+            "_terminate_sampler_process",
+            return_value=completed_cleanup,
+        ) as cleanup_call:
+            with self.assertRaises(observer.SamplerFailure) as io_failure:
+                observer._production_sample_once(["sampler"], timeout_seconds=1.0)
+        self.assertEqual(cleanup_call.call_count, 1)
+        self.assertEqual(
+            io_failure.exception.metadata["exit_category"],
+            "SUBPROCESS_POST_SPAWN_IO_FAILURE",
+        )
+        self.assertNotIn("forbidden.example", json.dumps(io_failure.exception.metadata))
+
+    def test_marker_owned_residual_process_count_is_zero(self) -> None:
+        nonce = uuid.uuid4().hex
+        with tempfile.TemporaryDirectory(prefix="r488c2-marker-") as temporary:
+            marker = Path(temporary) / f"{nonce}.pid"
+            child_source = "import time; time.sleep(60)"
+            root_source = "\n".join(
+                (
+                    "import os, pathlib, subprocess, sys, time",
+                    f"child = subprocess.Popen([sys.executable, '-c', {child_source!r}])",
+                    "pathlib.Path(os.environ['R488C2_MARKER']).write_text(str(child.pid), encoding='utf-8')",
+                    "time.sleep(60)",
+                )
+            )
+            environment = dict(os.environ)
+            environment["R488C2_MARKER"] = str(marker)
+            root = subprocess.Popen(
+                [sys.executable, "-c", root_source],
+                env=environment,
+                creationflags=self._sampler_flags(),
+            )
+            api = observer._Win32ProcessApi()
+            child_handle: int | None = None
+            child_identity = 0
+            root_identity = int(api.creation_identity(int(root._handle)))
+            try:
+                self._wait_for_marker(marker)
+                child_pid = int(marker.read_text(encoding="utf-8"))
+                child_handle = int(api.open_process(child_pid))
+                child_identity = int(api.creation_identity(child_handle))
+                result = observer._terminate_sampler_process(
+                    root, api=api, nonce=nonce
+                )
+                self.assertEqual(result["orphan_child_count"], 0)
+                self.assertEqual(result["orphan_verification_status"], "PASS")
+                self.assertEqual(
+                    observer._wait_windows_process(api, int(root._handle), 0)["state"],
+                    "EXITED",
+                )
+                self.assertEqual(
+                    observer._wait_windows_process(api, child_handle, 0)["state"],
+                    "EXITED",
+                )
+            finally:
+                self._terminate_exact_handle(api, int(root._handle), root_identity)
+                if child_handle is not None:
+                    self._terminate_exact_handle(api, child_handle, child_identity)
+                    api.close_handle(child_handle)
+                try:
+                    root.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    pass
+
+        suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
+        test_ids: list[str] = []
+
+        def collect(item: unittest.TestSuite | unittest.TestCase) -> None:
+            if isinstance(item, unittest.TestCase):
+                test_ids.append(item.id())
+                return
+            for child in item:
+                collect(child)
+
+        collect(suite)
+        legacy_ids = sorted(
+            test_id
+            for test_id in test_ids
+            if ".R488C2Win32ProcessTreeFailClosedTests." not in test_id
+        )
+        new_ids = [
+            test_id
+            for test_id in test_ids
+            if ".R488C2Win32ProcessTreeFailClosedTests." in test_id
+        ]
+        self.assertEqual(len(legacy_ids), 38)
+        self.assertEqual(
+            hashlib.sha256(("\n".join(legacy_ids) + "\n").encode("utf-8")).hexdigest(),
+            "cf17b582f731652e97f8a94493d56e764b3a6e60e0acf7f9f9cf47427c78fb2c",
+        )
+        self.assertEqual(len(new_ids), 19)
 
 
 if __name__ == "__main__":
