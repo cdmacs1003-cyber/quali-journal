@@ -9,6 +9,8 @@ location, response body, identity material, question, or answer.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -19,8 +21,10 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
+from urllib.parse import urlsplit
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -72,6 +76,16 @@ class SafeFailure(RuntimeError):
 class TotalDeadlineExceeded(SafeFailure):
     def __init__(self) -> None:
         super().__init__("TIMEOUT")
+
+
+@dataclass(frozen=True)
+class RequestContract:
+    """Validated in-memory routing and audience values."""
+
+    audience: str
+    stable_health: str
+    tagged_health: str
+    tagged_origin: str
 
 
 class Deadline:
@@ -226,6 +240,94 @@ HttpRunner = Callable[
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _validated_run_app_origin(value: Any) -> str:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise SafeFailure("TARGET_ROUTING_CONTRACT_DEFECT")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise SafeFailure("TARGET_ROUTING_CONTRACT_DEFECT") from exc
+    hostname = parsed.hostname or ""
+    if (
+        parsed.scheme != "https"
+        or not hostname.endswith(".run.app")
+        or hostname == "run.app"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.netloc != hostname
+        or value != f"https://{hostname}"
+    ):
+        raise SafeFailure("TARGET_ROUTING_CONTRACT_DEFECT")
+    return value
+
+
+def _request_contract(service: dict[str, Any], routes: list[dict[str, Any]]) -> RequestContract:
+    if len(routes) != 1 or not routes[0].get("url"):
+        raise SafeFailure("TARGET_ROUTING_CONTRACT_DEFECT")
+    stable_origin = _validated_run_app_origin(
+        (service.get("status") or {}).get("url")
+    )
+    tagged_origin = _validated_run_app_origin(routes[0].get("url"))
+    return RequestContract(
+        audience=stable_origin,
+        stable_health=stable_origin + "/health",
+        tagged_health=tagged_origin + "/health",
+        tagged_origin=tagged_origin,
+    )
+
+
+def _identity_token_arguments(audience: str) -> list[str]:
+    arguments = [
+        "auth",
+        "print-identity-token",
+        f"--audiences={audience}",
+        "--quiet",
+    ]
+    _validate_identity_token_arguments(arguments, audience)
+    return arguments
+
+
+def _validate_identity_token_arguments(arguments: list[str], audience: str) -> None:
+    audience_arguments = [item for item in arguments if item.startswith("--audiences=")]
+    if (
+        arguments
+        != [
+            "auth",
+            "print-identity-token",
+            f"--audiences={audience}",
+            "--quiet",
+        ]
+        or audience_arguments != [f"--audiences={audience}"]
+    ):
+        raise SafeFailure("AUTH_FAILURE")
+
+
+def _token_audience_matches(identity: str, audience: str) -> bool:
+    try:
+        sections = identity.split(".")
+        if len(sections) != 3 or not sections[1]:
+            raise ValueError("invalid JWT shape")
+        payload_segment = sections[1]
+        padding = "=" * (-len(payload_segment) % 4)
+        payload = base64.urlsafe_b64decode((payload_segment + padding).encode("ascii"))
+        claims = json.loads(payload.decode("utf-8"))
+    except (
+        UnicodeError,
+        ValueError,
+        binascii.Error,
+        json.JSONDecodeError,
+    ) as exc:
+        raise SafeFailure("AUTH_FAILURE") from exc
+    if not isinstance(claims, dict) or not isinstance(claims.get("aud"), str):
+        raise SafeFailure("AUTH_FAILURE")
+    return claims["aud"] == audience
 
 
 def _deadline_from_environment(environment: dict[str, str] | None = None) -> float:
@@ -462,20 +564,13 @@ def collect(
         counters=counters, progress_path=progress_path, clock=clock
     )
     identity = ""
-    service_base = ""
-    tagged_base = ""
+    active_project = ""
+    identity_arguments: list[str] = []
+    request_contract: RequestContract | None = None
     responses: dict[str, tuple[int, bytes, float]] = {}
     normalized: dict[str, Any] = {}
 
     try:
-        with recorder.phase("AUTHENTICATION"):
-            identity = gcloud_runner(
-                ["auth", "print-identity-token", "--quiet"], deadline, counters
-            )
-            deadline.remaining_seconds()
-            if not identity:
-                raise SafeFailure("AUTH_FAILURE")
-
         with recorder.phase("TARGET_RESOLUTION"):
             active_project = gcloud_runner(
                 ["config", "get-value", "project", "--quiet"], deadline, counters
@@ -505,16 +600,22 @@ def collect(
                 for item in service.get("status", {}).get("traffic", [])
                 if item.get("tag") == tag
             ]
-            service_base = str(service.get("status", {}).get("url") or "").rstrip("/")
             if (
-                not service_base
-                or len(routes) != 1
+                len(routes) != 1
                 or routes[0].get("revisionName") != candidate
-                or not routes[0].get("url")
             ):
                 raise SafeFailure("TARGET_ROUTING_CONTRACT_DEFECT")
-            tagged_base = str(routes[0]["url"]).rstrip("/")
+            request_contract = _request_contract(service, routes)
             deadline.remaining_seconds()
+
+        with recorder.phase("AUTHENTICATION"):
+            identity_arguments = _identity_token_arguments(request_contract.audience)
+            identity = gcloud_runner(identity_arguments, deadline, counters)
+            deadline.remaining_seconds()
+            if not identity or not _token_audience_matches(
+                identity, request_contract.audience
+            ):
+                raise SafeFailure("AUTH_FAILURE")
 
         with recorder.phase("REQUEST_PREPARATION"):
             answered_payload, held_payload = _fixed_payloads()
@@ -522,26 +623,26 @@ def collect(
 
         with recorder.phase("HTTP_REQUEST"):
             responses["unauth_health"] = http_runner(
-                tagged_base + "/health", deadline, counters, "", "GET", None
+                request_contract.tagged_health, deadline, counters, "", "GET", None
             )
             responses["auth_health"] = http_runner(
-                tagged_base + "/health", deadline, counters, identity, "GET", None
+                request_contract.tagged_health, deadline, counters, identity, "GET", None
             )
             responses["ui"] = http_runner(
-                tagged_base + "/", deadline, counters, identity, "GET", None
+                request_contract.tagged_origin + "/", deadline, counters, identity, "GET", None
             )
             ui_text = responses["ui"][1].decode("utf-8", errors="replace")
             assets = sorted(set(ASSET_PATTERN.findall(ui_text)))
             for index, asset in enumerate(assets):
                 responses[f"asset_{index}"] = http_runner(
-                    tagged_base + "/" + asset,
+                    request_contract.tagged_origin + "/" + asset,
                     deadline,
                     counters,
                     identity,
                     "GET",
                     None,
                 )
-            endpoint = tagged_base + "/api/f13/bridge/skillup/bridge-answer"
+            endpoint = request_contract.tagged_origin + "/api/f13/bridge/skillup/bridge-answer"
             responses["answered"] = http_runner(
                 endpoint, deadline, counters, identity, "POST", answered_payload
             )
@@ -565,7 +666,8 @@ def collect(
                 "unauth_status": unauth_status,
                 "auth_status": auth_status,
                 "ui_status": ui_status,
-                "health": str(health.get("status") or "").strip().lower(),
+                "health": health.get("status"),
+                "health_service": health.get("service"),
                 "answered": answered,
                 "held": held,
                 "latencies": latencies,
@@ -619,7 +721,10 @@ def collect(
                 (
                     normalized["unauth_status"] != 403,
                     normalized["auth_status"] != 200,
+                    type(normalized["health"]) is not str,
                     normalized["health"] != "ok",
+                    type(normalized["health_service"]) is not str,
+                    normalized["health_service"] != SERVICE,
                     normalized["ui_status"] != 200,
                     not normalized["ui_marker"],
                     normalized["asset_count"] != 5,
@@ -651,6 +756,9 @@ def collect(
                     "unauth_http": int(normalized["unauth_status"]),
                     "auth_http": int(normalized["auth_status"]),
                     "normalized_health": str(normalized["health"]),
+                    "audience_match": True,
+                    "audience_sha256": _sha256_text(request_contract.audience),
+                    "health_schema_match": True,
                     "latency_ms": round(float(normalized["latencies"][1]), 3),
                     "max_latency_ms": round(max(normalized["latencies"] or [0.0]), 3),
                     "evidence_missing_count": 0,
@@ -667,7 +775,9 @@ def collect(
         return summary
     finally:
         identity = ""
-        service_base = tagged_base = ""
+        active_project = ""
+        identity_arguments = []
+        request_contract = None
         responses = {}
 
 

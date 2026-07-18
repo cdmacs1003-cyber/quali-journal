@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import base64
 import json
 import tempfile
 import unittest
@@ -9,6 +10,18 @@ from pathlib import Path
 
 from tools import qlib_production_sampler as sampler
 from tools import qlib_traffic_observer as observer
+
+
+STABLE_ORIGIN = "https:" + "//qlib-skillup-runtime-stable.asia-northeast1.run.app"
+TAGGED_ORIGIN = "https:" + "//r488-beta---qlib-skillup-runtime.asia-northeast1.run.app"
+
+
+def synthetic_token(audience: str) -> str:
+    def encoded(value: dict[str, str]) -> str:
+        raw = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    return encoded({"alg": "none"}) + "." + encoded({"aud": audience}) + ".signature"
 
 
 class FakeClock:
@@ -27,25 +40,34 @@ class SamplerFixture:
         self.http_calls = 0
         self.malformed_answer = malformed_answer
         self.missing_evidence = missing_evidence
+        self.gcloud_calls: list[list[str]] = []
+        self.http_locations: list[str] = []
 
-    @staticmethod
-    def gcloud(arguments: list[str], deadline: sampler.Deadline, counters: sampler.CommandCounters) -> str:
+    def gcloud(self, arguments: list[str], deadline: sampler.Deadline, counters: sampler.CommandCounters) -> str:
         counters.record_read_only()
         deadline.remaining_seconds()
+        self.gcloud_calls.append(list(arguments))
         if arguments[:2] == ["auth", "print-identity-token"]:
-            return "synthetic-identity"
+            if arguments != [
+                "auth",
+                "print-identity-token",
+                f"--audiences={STABLE_ORIGIN}",
+                "--quiet",
+            ]:
+                raise sampler.SafeFailure("AUTH_FAILURE")
+            return synthetic_token(STABLE_ORIGIN)
         if arguments[:3] == ["config", "get-value", "project"]:
             return "synthetic-project"
         if arguments[:3] == ["run", "services", "describe"]:
             return json.dumps(
                 {
                     "status": {
-                        "url": "memory-service",
+                        "url": STABLE_ORIGIN,
                         "traffic": [
                             {
                                 "tag": "r487a-test",
                                 "revisionName": "qlib-skillup-runtime-00099-abc",
-                                "url": "memory-tag",
+                                "url": TAGGED_ORIGIN,
                             }
                         ],
                     }
@@ -65,11 +87,12 @@ class SamplerFixture:
         counters.record_read_only()
         deadline.remaining_seconds()
         self.http_calls += 1
+        self.http_locations.append(location)
         if location.endswith("/health") and not identity:
             return 403, b"{}", 1.0
         if location.endswith("/health"):
-            return 200, b'{"status":"ok"}', 2.0
-        if location == "memory-tag/":
+            return 200, b'{"status":"ok","service":"qlib-skillup-runtime"}', 2.0
+        if location == TAGGED_ORIGIN + "/":
             assets = "".join(f'<script src="assets/a{index}.js"></script>' for index in range(5))
             return 200, ("beta-minimal-form" + assets).encode("utf-8"), 3.0
         if "assets/" in location:
@@ -163,8 +186,138 @@ class QlibProductionSamplerTests(unittest.TestCase):
         persisted = json.loads(progress.read_text(encoding="utf-8"))
         self.assertEqual(persisted["read_only_command_count"], 13)
         encoded = json.dumps([result, persisted], ensure_ascii=True)
-        for forbidden in ("synthetic-identity", "memory-tag", "Authorization", "Bearer "):
+        for forbidden in (
+            STABLE_ORIGIN,
+            TAGGED_ORIGIN,
+            synthetic_token(STABLE_ORIGIN),
+            "Authorization",
+            "Bearer ",
+        ):
             self.assertNotIn(forbidden, encoded)
+
+    def test_audience_stable_endpoint_uses_stable_status_origin(self) -> None:
+        fixture = SamplerFixture()
+        result, _ = self._fast_result_with_fixture(fixture)
+        contract = sampler._request_contract(
+            {
+                "status": {
+                    "url": STABLE_ORIGIN,
+                }
+            },
+            [{"url": TAGGED_ORIGIN}],
+        )
+        self.assertTrue(result["audience_match"])
+        self.assertEqual(contract.stable_health, STABLE_ORIGIN + "/health")
+        self.assertEqual(contract.audience, STABLE_ORIGIN)
+        self.assertEqual(
+            fixture.gcloud_calls[2][2], f"--audiences={STABLE_ORIGIN}"
+        )
+
+    def test_audience_tagged_endpoint_still_uses_stable_origin(self) -> None:
+        fixture = SamplerFixture()
+        self._fast_result_with_fixture(fixture)
+        self.assertTrue(all(location.startswith(TAGGED_ORIGIN) for location in fixture.http_locations))
+        self.assertEqual(fixture.gcloud_calls[2][2], f"--audiences={STABLE_ORIGIN}")
+
+    def test_audience_tag_origin_is_not_used(self) -> None:
+        fixture = SamplerFixture()
+        self._fast_result_with_fixture(fixture)
+        auth_arguments = fixture.gcloud_calls[2]
+        self.assertNotIn(f"--audiences={TAGGED_ORIGIN}", auth_arguments)
+
+    def test_audience_does_not_include_health_path(self) -> None:
+        arguments = sampler._identity_token_arguments(STABLE_ORIGIN)
+        self.assertNotIn("/health", arguments[2])
+
+    def test_audience_argument_omission_fails_closed(self) -> None:
+        arguments = sampler._identity_token_arguments(STABLE_ORIGIN)
+        without_audience = [item for item in arguments if not item.startswith("--audiences=")]
+        with self.assertRaises(sampler.SafeFailure):
+            sampler._validate_identity_token_arguments(without_audience, STABLE_ORIGIN)
+
+    def test_audience_exactly_one_argument(self) -> None:
+        arguments = sampler._identity_token_arguments(STABLE_ORIGIN)
+        self.assertEqual(sum(item.startswith("--audiences=") for item in arguments), 1)
+        self.assertEqual(arguments[2], f"--audiences={STABLE_ORIGIN}")
+        with self.assertRaises(sampler.SafeFailure):
+            sampler._validate_identity_token_arguments(
+                [*arguments, f"--audiences={STABLE_ORIGIN}"], STABLE_ORIGIN
+            )
+
+    def test_audience_missing_status_origin_fails_before_auth_and_http(self) -> None:
+        fixture = SamplerFixture()
+
+        def missing_status(arguments, deadline, counters):
+            if arguments[:3] == ["run", "services", "describe"]:
+                counters.record_read_only()
+                return json.dumps({"status": {"traffic": [{"tag": "r487a-test", "revisionName": "qlib-skillup-runtime-00099-abc", "url": TAGGED_ORIGIN}]}})
+            return fixture.gcloud(arguments, deadline, counters)
+
+        result, exit_code = sampler.execute(
+            self.args(), gcloud_runner=missing_status, http_runner=fixture.http, clock=FakeClock()
+        )
+        self.assertEqual((exit_code, result["failure_category"]), (42, "TARGET_ROUTING_CONTRACT_DEFECT"))
+        self.assertEqual(fixture.http_calls, 0)
+        self.assertFalse(any(call[:2] == ["auth", "print-identity-token"] for call in fixture.gcloud_calls))
+
+    def test_audience_non_https_status_origin_fails(self) -> None:
+        with self.assertRaises(sampler.SafeFailure):
+            sampler._validated_run_app_origin(STABLE_ORIGIN.replace("https:", "http:"))
+
+    def test_audience_custom_domain_fails(self) -> None:
+        with self.assertRaises(sampler.SafeFailure):
+            sampler._validated_run_app_origin("https:" + "//example.invalid")
+
+    def test_audience_token_claim_mismatch_fails_before_http(self) -> None:
+        fixture = SamplerFixture()
+
+        def mismatch(arguments, deadline, counters):
+            if arguments[:2] == ["auth", "print-identity-token"]:
+                counters.record_read_only()
+                return synthetic_token(TAGGED_ORIGIN)
+            return fixture.gcloud(arguments, deadline, counters)
+
+        result, exit_code = sampler.execute(
+            self.args(), gcloud_runner=mismatch, http_runner=fixture.http, clock=FakeClock()
+        )
+        self.assertEqual((exit_code, result["failure_category"]), (42, "AUTH_FAILURE"))
+        self.assertEqual(fixture.http_calls, 0)
+
+    def test_audience_raw_material_is_not_persisted(self) -> None:
+        result, progress = self._fast_result()
+        encoded = json.dumps([result, json.loads(progress.read_text(encoding="utf-8"))], sort_keys=True)
+        for forbidden in (STABLE_ORIGIN, TAGGED_ORIGIN, synthetic_token(STABLE_ORIGIN)):
+            self.assertNotIn(forbidden, encoded)
+        observer._sanitize_sample_value(result)
+
+    def test_audience_unauthenticated_health_requires_403(self) -> None:
+        fixture = SamplerFixture()
+        result, _ = self._fast_result_with_fixture(fixture)
+        self.assertEqual(result["unauth_http"], 403)
+        self.assertEqual(fixture.http_locations[0], TAGGED_ORIGIN + "/health")
+
+    def test_audience_authenticated_exact_schema_and_legacy_contract_coexist(self) -> None:
+        result, _ = self._fast_result()
+        self.assertEqual(result["auth_http"], 200)
+        self.assertTrue(result["health_schema_match"])
+        runbook = (Path(sampler.__file__).parents[1] / "deploy" / "qlib-skillup-runtime" / "operations-runbook.md").read_text(encoding="utf-8")
+        self.assertIn("case-insensitive, surrounding-whitespace-trimmed normalization", runbook)
+        self.assertIn("string field `status` equals `ok`", runbook)
+        self.assertIn("string field `service`", runbook)
+
+    def _fast_result_with_fixture(self, fixture: SamplerFixture) -> tuple[dict[str, object], Path]:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        progress = Path(temporary.name) / "progress.json"
+        result, exit_code = sampler.execute(
+            self.args(),
+            environment={sampler.PROGRESS_FILE_ENV: str(progress), sampler.DEADLINE_ENV: "30"},
+            gcloud_runner=fixture.gcloud,
+            http_runner=fixture.http,
+            clock=FakeClock(),
+        )
+        self.assertEqual(exit_code, 0)
+        return result, progress
 
     def test_exact_total_deadline_and_timeout_phase_marker(self) -> None:
         clock = FakeClock()

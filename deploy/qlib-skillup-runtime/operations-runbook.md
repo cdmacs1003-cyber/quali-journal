@@ -113,6 +113,25 @@ The Service-wide `--max=2` result is a separate defense-in-depth limit and canno
 
 ## 4. Revision-specific authenticated smoke at 0% service traffic
 
+Cloud Run authentication and application health use two coexisting contracts. The
+canonical identity-token audience is the exact, pathless HTTPS `run.app`
+`status.url` returned by `gcloud run services describe` for the stable service.
+The stable health request uses `<stable status.url>/health`. A private-tag health
+request uses `<private tag URL>/health`, but its audience remains the stable
+service `status.url`; a tag URL, revision URL, custom domain, or a value containing
+`/health` is never an audience. Obtain the token only with
+`gcloud auth print-identity-token --audiences=<memory-only stable service status.url> --quiet`,
+compare its decoded `aud` claim exactly in memory before HTTP, and persist neither
+the URL, token, decoded claim, nor response body. The Cloud Run boundary must
+return 403 without authentication and 200 with authentication. The authenticated
+JSON schema is exact: string field `status` equals `ok` and string field `service`
+equals `qlib-skillup-runtime`.
+
+This exact Cloud Run response-schema contract does not replace the legacy
+observer and rollback normalized-health evidence contract below. They coexist;
+the latter continues to use case and surrounding-whitespace normalization only
+within its established legacy scope.
+
 Using an authorized identity token without printing it, call only the candidate tag/revision URL:
 
 - `GET /health`: HTTP 200 and a health value that becomes exactly `ok` after case-insensitive, surrounding-whitespace-trimmed normalization. `OK`, `ok`, and surrounding whitespace are equivalent; every other value fails.
