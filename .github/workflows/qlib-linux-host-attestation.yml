@@ -1,0 +1,1677 @@
+name: QLIB D41 Linux Host Attestation
+
+on:
+  push:
+    branches:
+      - r9znw-488d41-linux-host-attestation
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: r9znw-488d41-linux-host-attestation
+  cancel-in-progress: false
+
+jobs:
+  attest:
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/r9znw-488d41-linux-host-attestation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Execute bounded Linux capability attestation
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          python3 -B - <<'PY'
+          import ctypes
+          import errno
+          import hashlib
+          import json
+          import os
+          import platform
+          import re
+          import select
+          import signal
+          import struct
+          import sys
+          import tempfile
+          import time
+
+
+          TASK_ID = "R9ZNW-488D41_LINUX_EXECUTION_HOST_PROVISIONING_AND_CAPABILITY_ATTESTATION"
+          BRANCH = "r9znw-488d41-linux-host-attestation"
+          REQUIRED_CASES = (
+              "CAP_PLATFORM_IDENTITY",
+              "CAP_SESSION_PROCESS_GROUP",
+              "CAP_SCOPED_SIGTERM",
+              "CAP_SCOPED_SIGKILL_ESCALATION",
+              "CAP_WAITPID_EXIT_STATUS",
+              "CAP_ZOMBIE_REAP",
+              "CAP_PROC_LIFECYCLE",
+              "CAP_TEMPFS_CREATE_CLEANUP",
+              "CAP_ATOMIC_REPLACE_SAME_FS",
+              "CAP_MONOTONIC_CLOCK",
+              "CAP_FINAL_ZERO_AUDIT",
+          )
+          OPTIONAL_CASES = ("CAP_WAITID_EXIT_STATUS", "CAP_PIDFD_OPEN")
+          ALL_CASES = REQUIRED_CASES + OPTIONAL_CASES
+          SAMPLE_COUNT = 3
+          PR_SET_CHILD_SUBREAPER = 36
+          READY_TIMEOUT_SECONDS = 3.0
+          EXIT_TIMEOUT_SECONDS = 3.0
+          TERM_GRACE_SECONDS = 0.30
+          ALLOWED_IMAGE_OS = {"ubuntu22", "ubuntu24"}
+          IMAGE_VERSION_RE = re.compile(r"^[0-9]{8}\.[0-9]+(?:\.[0-9]+)?$")
+          SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+          RUN_ID_RE = re.compile(r"^[0-9]+$")
+
+          owned = {}
+          groups = {}
+          all_identities = []
+          samples = []
+          counters = {
+              "unrelated_signal_count": 0,
+              "unrelated_termination_count": 0,
+              "timeout_leak_count": 0,
+              "unresolved_wait_count": 0,
+              "cleanup_error_count": 0,
+              "blocked_unowned_signal_count": 0,
+              "task_owned_signal_count": 0,
+          }
+          metadata = {
+              "source_commit": "NOT_VERIFIED",
+              "run_id_digest": "NOT_VERIFIED",
+              "image_os": "NOT_VERIFIED",
+              "image_version": "NOT_VERIFIED",
+          }
+          current_case = "NONE"
+          primary_failure_code = "NONE"
+          cleanup_failure_code = "NONE"
+          active_duration_bucket = "NOT_MEASURED"
+
+
+          class AttestationFailure(Exception):
+              pass
+
+
+          def require(condition):
+              if not condition:
+                  raise AttestationFailure()
+
+
+          def canonical_bytes(value):
+              return json.dumps(
+                  value,
+                  sort_keys=True,
+                  separators=(",", ":"),
+                  ensure_ascii=True,
+              ).encode("ascii")
+
+
+          def digest(value):
+              return hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+          def bounded_pause(seconds=0.01):
+              select.select([], [], [], seconds)
+
+
+          def safe_close(descriptor):
+              if descriptor is None:
+                  return
+              try:
+                  os.close(descriptor)
+              except OSError:
+                  counters["cleanup_error_count"] += 1
+
+
+          def wait_until(predicate, timeout_seconds):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  if predicate():
+                      return True
+                  if time.monotonic() >= deadline:
+                      return False
+                  bounded_pause()
+
+
+          def read_exact(fd, length, timeout_seconds):
+              data = b""
+              deadline = time.monotonic() + timeout_seconds
+              while len(data) < length:
+                  remaining = deadline - time.monotonic()
+                  if remaining <= 0:
+                      raise AttestationFailure()
+                  readable, _, _ = select.select([fd], [], [], min(remaining, 0.05))
+                  if not readable:
+                      continue
+                  chunk = os.read(fd, length - len(data))
+                  if not chunk:
+                      raise AttestationFailure()
+                  data += chunk
+              return data
+
+
+          def proc_stat(process_id):
+              try:
+                  with open(f"/proc/{process_id}/stat", "r", encoding="ascii") as handle:
+                      raw = handle.read()
+              except (FileNotFoundError, ProcessLookupError):
+                  return None
+              close_paren = raw.rfind(")")
+              require(close_paren > 0)
+              fields = raw[close_paren + 2 :].split()
+              require(len(fields) > 19)
+              return {
+                  "state": fields[0],
+                  "ppid": int(fields[1]),
+                  "pgrp": int(fields[2]),
+                  "session": int(fields[3]),
+                  "starttime": int(fields[19]),
+              }
+
+
+          def register_process(process_id, role, expected_parent=None):
+              require(isinstance(process_id, int) and process_id > 1)
+              stat = proc_stat(process_id)
+              require(stat is not None)
+              if expected_parent is not None:
+                  require(stat["ppid"] == expected_parent)
+              record = {
+                  "role": role,
+                  "starttime": stat["starttime"],
+                  "pgrp": stat["pgrp"],
+                  "session": stat["session"],
+                  "expected_parent": expected_parent,
+              }
+              owned[process_id] = record
+              all_identities.append(
+                  {
+                      "process_id": process_id,
+                      "starttime": stat["starttime"],
+                      "role": role,
+                      "expected_parent": expected_parent,
+                  }
+              )
+              return record
+
+
+          def refresh_registration(process_id, role, expected_parent=None):
+              require(process_id in owned)
+              prior = owned[process_id]
+              stat = proc_stat(process_id)
+              require(stat is not None and stat["starttime"] == prior["starttime"])
+              if expected_parent is not None:
+                  require(stat["ppid"] == expected_parent)
+              owned[process_id] = {
+                  "role": role,
+                  "starttime": stat["starttime"],
+                  "pgrp": stat["pgrp"],
+                  "session": stat["session"],
+                  "expected_parent": expected_parent,
+              }
+              return stat
+
+
+          def registered_stat(process_id):
+              record = owned.get(process_id)
+              if record is None:
+                  return None
+              stat = proc_stat(process_id)
+              if stat is None or stat["starttime"] != record["starttime"]:
+                  return None
+              return stat
+
+
+          def registered_live(process_id):
+              stat = registered_stat(process_id)
+              return stat is not None and stat["state"] != "Z"
+
+
+          def unregister_reaped(process_id):
+              record = owned.get(process_id)
+              require(record is not None)
+              stat = proc_stat(process_id)
+              require(stat is None or stat["starttime"] != record["starttime"])
+              del owned[process_id]
+
+
+          def reap_exact(process_id, timeout_seconds=EXIT_TIMEOUT_SECONDS):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  try:
+                      waited_id, status = os.waitpid(process_id, os.WNOHANG)
+                  except ChildProcessError:
+                      counters["unresolved_wait_count"] += 1
+                      raise AttestationFailure()
+                  if waited_id == process_id:
+                      return status
+                  if time.monotonic() >= deadline:
+                      counters["unresolved_wait_count"] += 1
+                      raise AttestationFailure()
+                  bounded_pause()
+
+
+          def safe_direct_kill(process_id):
+              if process_id not in owned:
+                  return
+              stat = registered_stat(process_id)
+              if stat is None or process_id <= 1 or process_id == os.getpid():
+                  return
+              try:
+                  os.kill(process_id, signal.SIGKILL)
+                  counters["task_owned_signal_count"] += 1
+              except ProcessLookupError:
+                  pass
+
+
+          def process_terminated(process_id):
+              stat = registered_stat(process_id)
+              return stat is None or stat["state"] == "Z"
+
+
+          def verify_group_for_signal(leader_id):
+              members = groups.get(leader_id)
+              require(members is not None and len(members) == 2)
+              require(leader_id > 1)
+              require(leader_id != os.getpgrp() and leader_id != os.getsid(0))
+              leader_stat = registered_stat(leader_id)
+              require(leader_stat is not None)
+              require(leader_stat["pgrp"] == leader_id)
+              require(leader_stat["session"] == leader_id)
+              for member_id in members:
+                  member_stat = registered_stat(member_id)
+                  require(member_stat is not None)
+                  require(member_stat["pgrp"] == leader_id)
+                  require(member_stat["session"] == leader_id)
+              return members
+
+
+          def signal_owned_group(leader_id, signal_number):
+              verify_group_for_signal(leader_id)
+              try:
+                  os.killpg(leader_id, signal_number)
+                  counters["task_owned_signal_count"] += 1
+              except ProcessLookupError:
+                  raise AttestationFailure()
+
+
+          def signal_verified_provisional_group(leader_id, signal_number):
+              require(leader_id in owned)
+              require(leader_id > 1)
+              require(leader_id != os.getpgrp() and leader_id != os.getsid(0))
+              stat = registered_stat(leader_id)
+              require(stat is not None)
+              require(stat["pgrp"] == leader_id and stat["session"] == leader_id)
+              try:
+                  os.killpg(leader_id, signal_number)
+                  counters["task_owned_signal_count"] += 1
+              except ProcessLookupError:
+                  pass
+
+
+          def reap_group(leader_id, expected_signal):
+              members = groups.get(leader_id)
+              require(members is not None)
+              leader_status = reap_exact(members[0])
+              descendant_status = reap_exact(members[1])
+              require(os.WIFSIGNALED(leader_status))
+              require(os.WTERMSIG(leader_status) == expected_signal)
+              require(os.WIFSIGNALED(descendant_status))
+              require(os.WTERMSIG(descendant_status) == expected_signal)
+              unregister_reaped(members[0])
+              unregister_reaped(members[1])
+              del groups[leader_id]
+
+
+          def cleanup_group(leader_id):
+              members = groups.get(leader_id)
+              if members is None:
+                  return
+              live_members = [member for member in members if registered_live(member)]
+              if live_members:
+                  try:
+                      signal_owned_group(leader_id, signal.SIGTERM)
+                  except AttestationFailure:
+                      for member in live_members:
+                          safe_direct_kill(member)
+                  if not wait_until(
+                      lambda: all(process_terminated(member) for member in members),
+                      TERM_GRACE_SECONDS,
+                  ):
+                      try:
+                          signal_owned_group(leader_id, signal.SIGKILL)
+                      except AttestationFailure:
+                          for member in members:
+                              safe_direct_kill(member)
+              for member in members:
+                  if member not in owned:
+                      continue
+                  try:
+                      reap_exact(member)
+                  except BaseException:
+                      counters["cleanup_error_count"] += 1
+                  if member in owned:
+                      try:
+                          stat = registered_stat(member)
+                      except BaseException:
+                          counters["cleanup_error_count"] += 1
+                          stat = {"state": "UNKNOWN"}
+                      if stat is None:
+                          del owned[member]
+              groups.pop(leader_id, None)
+
+
+          def direct_child_ids():
+              process_id = os.getpid()
+              with open(
+                  f"/proc/{process_id}/task/{process_id}/children",
+                  "r",
+                  encoding="ascii",
+              ) as handle:
+                  raw = handle.read().strip()
+              if not raw:
+                  return []
+              child_ids = [int(value) for value in raw.split()]
+              require(all(value > 1 for value in child_ids))
+              return child_ids
+
+
+          def recover_adopted_group_children(leader_id):
+              recovered = []
+              for process_id in direct_child_ids():
+                  if process_id in owned:
+                      continue
+                  stat = proc_stat(process_id)
+                  if stat is None:
+                      continue
+                  if (
+                      stat["ppid"] == os.getpid()
+                      and stat["pgrp"] == leader_id
+                      and stat["session"] == leader_id
+                  ):
+                      register_process(
+                          process_id,
+                          "RECOVERED_GROUP_DESCENDANT",
+                          os.getpid(),
+                      )
+                      recovered.append(process_id)
+              return recovered
+
+
+          def adopt_fresh_child_for_cleanup(process_id, role):
+              if process_id in owned:
+                  return True
+              try:
+                  stat = proc_stat(process_id)
+                  if stat is not None and stat["ppid"] == os.getpid():
+                      register_process(process_id, role, os.getpid())
+                      return True
+                  waited_id, _ = os.waitpid(process_id, os.WNOHANG)
+                  if waited_id == process_id:
+                      return False
+              except ChildProcessError:
+                  return False
+              except BaseException:
+                  counters["cleanup_error_count"] += 1
+              return False
+
+
+          def cleanup_failed_group(leader_id, group_verified):
+              adopt_fresh_child_for_cleanup(
+                  leader_id,
+                  "GROUP_LEADER_RECOVERY",
+              )
+              if group_verified and leader_id in owned:
+                  try:
+                      signal_verified_provisional_group(leader_id, signal.SIGKILL)
+                  except BaseException:
+                      counters["cleanup_error_count"] += 1
+              elif leader_id in owned:
+                  safe_direct_kill(leader_id)
+
+              if leader_id in owned:
+                  try:
+                      reap_exact(leader_id)
+                  except BaseException:
+                      counters["cleanup_error_count"] += 1
+                  if leader_id in owned and registered_stat(leader_id) is None:
+                      del owned[leader_id]
+
+              try:
+                  recovered = recover_adopted_group_children(leader_id)
+              except BaseException:
+                  counters["cleanup_error_count"] += 1
+                  recovered = []
+              for process_id in recovered:
+                  safe_direct_kill(process_id)
+              for process_id in recovered:
+                  try:
+                      reap_exact(process_id)
+                  except BaseException:
+                      counters["cleanup_error_count"] += 1
+                  if process_id in owned and registered_stat(process_id) is None:
+                      del owned[process_id]
+
+
+          def enable_subreaper():
+              libc = ctypes.CDLL(None, use_errno=True)
+              libc.prctl.argtypes = [
+                  ctypes.c_int,
+                  ctypes.c_ulong,
+                  ctypes.c_ulong,
+                  ctypes.c_ulong,
+                  ctypes.c_ulong,
+              ]
+              libc.prctl.restype = ctypes.c_int
+              result = libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
+              require(result == 0)
+              require(direct_child_ids() == [])
+
+
+          def spawn_group(ignore_sigterm):
+              read_fd, write_fd = os.pipe()
+              control_read, control_write = os.pipe()
+              leader_id = os.fork()
+              if leader_id == 0:
+                  os.close(read_fd)
+                  os.close(control_write)
+                  try:
+                      os.setsid()
+                      if ignore_sigterm:
+                          signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                      os.write(write_fd, b"S")
+                      require(os.read(control_read, 1) == b"F")
+                      os.close(control_read)
+                      descendant_id = os.fork()
+                      if descendant_id == 0:
+                          os.close(write_fd)
+                          while True:
+                              signal.pause()
+                      payload = b"D" + struct.pack("!Q", descendant_id)
+                      os.write(write_fd, payload)
+                      os.close(write_fd)
+                      while True:
+                          signal.pause()
+                  except BaseException:
+                      os._exit(91)
+              os.close(write_fd)
+              os.close(control_read)
+              group_verified = False
+              completed = False
+              try:
+                  register_process(leader_id, "GROUP_LEADER_PENDING", os.getpid())
+                  require(read_exact(read_fd, 1, READY_TIMEOUT_SECONDS) == b"S")
+                  leader_stat = refresh_registration(
+                      leader_id, "GROUP_LEADER", os.getpid()
+                  )
+                  require(leader_stat["pgrp"] == leader_id)
+                  require(leader_stat["session"] == leader_id)
+                  group_verified = True
+                  require(os.write(control_write, b"F") == 1)
+                  os.close(control_write)
+                  control_write = None
+                  payload = read_exact(read_fd, 9, READY_TIMEOUT_SECONDS)
+                  require(payload[:1] == b"D")
+                  descendant_id = struct.unpack("!Q", payload[1:])[0]
+                  descendant_stat = register_process(
+                      descendant_id, "GROUP_DESCENDANT", leader_id
+                  )
+                  require(descendant_stat["pgrp"] == leader_id)
+                  require(descendant_stat["session"] == leader_id)
+                  groups[leader_id] = [leader_id, descendant_id]
+                  completed = True
+                  return leader_id
+              except BaseException:
+                  raise AttestationFailure()
+              finally:
+                  if control_write is not None:
+                      safe_close(control_write)
+                  safe_close(read_fd)
+                  if not completed:
+                      cleanup_failed_group(leader_id, group_verified)
+
+
+          def spawn_sentinel():
+              ready_read, ready_write = os.pipe()
+              control_read, control_write = os.pipe()
+              process_id = os.fork()
+              if process_id == 0:
+                  os.close(ready_read)
+                  os.close(control_write)
+                  try:
+                      os.setsid()
+                      os.write(ready_write, b"R")
+                      os.close(ready_write)
+                      value = os.read(control_read, 1)
+                      os.close(control_read)
+                      os._exit(0 if value == b"X" else 92)
+                  except BaseException:
+                      os._exit(93)
+              os.close(ready_write)
+              os.close(control_read)
+              try:
+                  register_process(
+                      process_id,
+                      "CONTROL_SENTINEL_PENDING",
+                      os.getpid(),
+                  )
+                  require(read_exact(ready_read, 1, READY_TIMEOUT_SECONDS) == b"R")
+                  stat = refresh_registration(
+                      process_id, "CONTROL_SENTINEL", os.getpid()
+                  )
+                  require(stat["pgrp"] == process_id)
+                  require(stat["session"] == process_id)
+                  return process_id, control_write
+              except BaseException:
+                  try:
+                      os.close(control_write)
+                  except OSError:
+                      pass
+                  adopt_fresh_child_for_cleanup(
+                      process_id,
+                      "CONTROL_SENTINEL_RECOVERY",
+                  )
+                  safe_direct_kill(process_id)
+                  try:
+                      reap_exact(process_id)
+                  except BaseException:
+                      counters["cleanup_error_count"] += 1
+                  if process_id in owned and registered_stat(process_id) is None:
+                      del owned[process_id]
+                  raise AttestationFailure()
+              finally:
+                  safe_close(ready_read)
+
+
+          def release_sentinel(process_id, control_write):
+              require(registered_live(process_id))
+              os.write(control_write, b"X")
+              os.close(control_write)
+              status = reap_exact(process_id)
+              require(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0)
+              unregister_reaped(process_id)
+
+
+          def cleanup_sentinel(process_id, control_write):
+              if control_write is not None:
+                  try:
+                      os.write(control_write, b"X")
+                  except OSError:
+                      pass
+                  try:
+                      os.close(control_write)
+                  except OSError:
+                      pass
+              if process_id in owned:
+                  try:
+                      status = reap_exact(process_id, TERM_GRACE_SECONDS)
+                      if not (os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0):
+                          counters["unrelated_termination_count"] += 1
+                  except BaseException:
+                      counters["cleanup_error_count"] += 1
+                      counters["unrelated_termination_count"] += 1
+                      safe_direct_kill(process_id)
+                      try:
+                          reap_exact(process_id)
+                      except BaseException:
+                          counters["cleanup_error_count"] += 1
+                  if process_id in owned and registered_stat(process_id) is None:
+                      del owned[process_id]
+
+
+          def platform_checks():
+              source_commit = os.environ.get("GITHUB_SHA", "")
+              raw_run_id = os.environ.get("GITHUB_RUN_ID", "")
+              event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+              ref_name = os.environ.get("GITHUB_REF_NAME", "")
+              image_os = os.environ.get("ImageOS", "")
+              image_version = os.environ.get("ImageVersion", "")
+              implementation = platform.python_implementation()
+              version = sys.version_info
+              machine = platform.machine().lower()
+              system = platform.system()
+
+              require(SHA_RE.fullmatch(source_commit) is not None)
+              require(RUN_ID_RE.fullmatch(raw_run_id) is not None)
+              require(event_name == "push")
+              require(ref_name == BRANCH)
+              require(image_os in ALLOWED_IMAGE_OS)
+              require(IMAGE_VERSION_RE.fullmatch(image_version) is not None)
+              require(system == "Linux")
+              require(machine == "x86_64")
+              require(implementation == "CPython")
+              require((version.major, version.minor) >= (3, 10))
+              require(version.major < 4)
+
+              metadata["source_commit"] = source_commit
+              metadata["run_id_digest"] = hashlib.sha256(
+                  ("qlib-d41-run-id-v1:" + raw_run_id).encode("ascii")
+              ).hexdigest()
+              metadata["image_os"] = image_os
+              metadata["image_version"] = image_version
+              return {
+                  "linux": True,
+                  "architecture_allowlisted": True,
+                  "python_supported": True,
+                  "runner_image_allowlisted": True,
+                  "trigger_scope_verified": True,
+              }
+
+
+          def term_group_checks():
+              leader_id = None
+              sentinel_id = None
+              control_write = None
+              try:
+                  sentinel_id, control_write = spawn_sentinel()
+                  leader_id = spawn_group(False)
+                  members = verify_group_for_signal(leader_id)
+                  require(all(registered_live(member) for member in members))
+                  require(registered_live(sentinel_id))
+                  signal_owned_group(leader_id, signal.SIGTERM)
+                  terminated = wait_until(
+                      lambda: all(process_terminated(member) for member in members),
+                      EXIT_TIMEOUT_SECONDS,
+                  )
+                  require(terminated)
+                  require(registered_live(sentinel_id))
+                  reap_group(leader_id, signal.SIGTERM)
+                  leader_id = None
+                  release_sentinel(sentinel_id, control_write)
+                  sentinel_id = None
+                  control_write = None
+                  return {
+                      "session": {
+                          "setsid_verified": True,
+                          "leader_group_verified": True,
+                          "descendant_group_verified": True,
+                          "proc_present_before": True,
+                      },
+                      "term": {
+                          "exact_group_only": True,
+                          "sigterm_sufficient": True,
+                          "sigkill_not_used": True,
+                          "sentinel_survived": True,
+                          "all_reaped": True,
+                      },
+                  }
+              finally:
+                  if leader_id is not None:
+                      cleanup_group(leader_id)
+                  if sentinel_id is not None:
+                      cleanup_sentinel(sentinel_id, control_write)
+
+
+          def kill_escalation_checks():
+              leader_id = None
+              sentinel_id = None
+              control_write = None
+              try:
+                  sentinel_id, control_write = spawn_sentinel()
+                  leader_id = spawn_group(True)
+                  members = verify_group_for_signal(leader_id)
+                  signal_owned_group(leader_id, signal.SIGTERM)
+                  grace_start = time.monotonic()
+                  while time.monotonic() - grace_start < TERM_GRACE_SECONDS:
+                      require(all(registered_live(member) for member in members))
+                      bounded_pause()
+                  require(time.monotonic() - grace_start >= TERM_GRACE_SECONDS)
+                  require(registered_live(sentinel_id))
+                  signal_owned_group(leader_id, signal.SIGKILL)
+                  terminated = wait_until(
+                      lambda: all(process_terminated(member) for member in members),
+                      EXIT_TIMEOUT_SECONDS,
+                  )
+                  require(terminated)
+                  require(registered_live(sentinel_id))
+                  reap_group(leader_id, signal.SIGKILL)
+                  leader_id = None
+                  release_sentinel(sentinel_id, control_write)
+                  sentinel_id = None
+                  control_write = None
+                  return {
+                      "exact_group_only": True,
+                      "sigterm_grace_observed": True,
+                      "conditional_sigkill_used": True,
+                      "sentinel_survived": True,
+                      "all_reaped": True,
+                  }
+              finally:
+                  if leader_id is not None:
+                      cleanup_group(leader_id)
+                  if sentinel_id is not None:
+                      cleanup_sentinel(sentinel_id, control_write)
+
+
+          def wait_and_zombie_checks():
+              read_fd, write_fd = os.pipe()
+              process_id = os.fork()
+              if process_id == 0:
+                  os.close(read_fd)
+                  try:
+                      os.setsid()
+                      os.write(write_fd, b"R")
+                      os.close(write_fd)
+                      os._exit(7)
+                  except BaseException:
+                      os._exit(94)
+              os.close(write_fd)
+              reaped = False
+              try:
+                  register_process(process_id, "WAIT_CHILD_PENDING", os.getpid())
+                  require(read_exact(read_fd, 1, READY_TIMEOUT_SECONDS) == b"R")
+                  stat = refresh_registration(process_id, "WAIT_CHILD", os.getpid())
+                  require(stat["pgrp"] == process_id)
+                  require(stat["session"] == process_id)
+                  require(
+                      wait_until(
+                          lambda: (
+                              registered_stat(process_id) is not None
+                              and registered_stat(process_id)["state"] == "Z"
+                          ),
+                          EXIT_TIMEOUT_SECONDS,
+                      )
+                  )
+                  zombie_stat = registered_stat(process_id)
+                  require(zombie_stat is not None and zombie_stat["state"] == "Z")
+                  waitid_available = all(
+                      hasattr(os, name)
+                      for name in (
+                          "waitid",
+                          "WNOWAIT",
+                          "WEXITED",
+                          "WNOHANG",
+                          "P_PID",
+                          "CLD_EXITED",
+                      )
+                  )
+                  if waitid_available:
+                      deadline = time.monotonic() + EXIT_TIMEOUT_SECONDS
+                      result = None
+                      try:
+                          while result is None:
+                              result = os.waitid(
+                                  os.P_PID,
+                                  process_id,
+                                  os.WEXITED | os.WNOWAIT | os.WNOHANG,
+                              )
+                              if result is not None:
+                                  break
+                              require(time.monotonic() < deadline)
+                              bounded_pause()
+                      except OSError as error:
+                          if error.errno not in (
+                              errno.ENOSYS,
+                              errno.EINVAL,
+                              errno.EPERM,
+                          ):
+                              raise
+                          waitid_available = False
+                  if waitid_available:
+                      require(result.si_pid == process_id)
+                      require(result.si_code == os.CLD_EXITED)
+                      require(result.si_status == 7)
+                      waitid_verdict = "PASS"
+                      waitid_checks = {
+                          "available": True,
+                          "exit_status_observed": True,
+                          "wnowait_verified": True,
+                          "deadline_bounded": True,
+                      }
+                  else:
+                      waitid_verdict = "OPTIONAL_UNAVAILABLE"
+                      waitid_checks = {
+                          "available": False,
+                          "exit_status_observed": False,
+                          "wnowait_verified": False,
+                          "deadline_bounded": True,
+                      }
+                  status = reap_exact(process_id)
+                  reaped = True
+                  require(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 7)
+                  unregister_reaped(process_id)
+                  return {
+                      "waitpid": {
+                          "exit_status_collected": True,
+                          "normal_exit_verified": True,
+                          "reaped": True,
+                      },
+                      "waitid_verdict": waitid_verdict,
+                      "waitid": waitid_checks,
+                      "zombie": {
+                          "zombie_observed": True,
+                          "zombie_reaped": True,
+                          "zombie_after": False,
+                      },
+                      "proc": {
+                          "proc_present_before": True,
+                          "proc_zombie_corroborated": True,
+                          "proc_absent_after": True,
+                      },
+                  }
+              finally:
+                  safe_close(read_fd)
+                  adopt_fresh_child_for_cleanup(
+                      process_id,
+                      "WAIT_CHILD_RECOVERY",
+                  )
+                  if process_id in owned:
+                      if not reaped:
+                          safe_direct_kill(process_id)
+                          try:
+                              reap_exact(process_id)
+                          except BaseException:
+                              counters["cleanup_error_count"] += 1
+                      if process_id in owned and registered_stat(process_id) is None:
+                          del owned[process_id]
+
+
+          def filesystem_checks():
+              start = time.monotonic_ns()
+              temp_path = None
+              payload = b"qlib-d41-atomic-evidence-v1"
+              expected_digest = hashlib.sha256(payload).hexdigest()
+              with tempfile.TemporaryDirectory(prefix="r9znw-d41-") as directory:
+                  temp_path = directory
+                  source_path = os.path.join(directory, "candidate")
+                  target_path = os.path.join(directory, "sealed")
+                  descriptor = os.open(
+                      source_path,
+                      os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                      0o600,
+                  )
+                  try:
+                      require(os.write(descriptor, payload) == len(payload))
+                      os.fsync(descriptor)
+                  finally:
+                      os.close(descriptor)
+                  require(os.stat(source_path).st_dev == os.stat(directory).st_dev)
+                  os.replace(source_path, target_path)
+                  directory_descriptor = os.open(
+                      directory,
+                      os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                  )
+                  try:
+                      os.fsync(directory_descriptor)
+                  finally:
+                      os.close(directory_descriptor)
+                  with open(target_path, "rb") as handle:
+                      sealed_digest = hashlib.sha256(handle.read()).hexdigest()
+                  require(sealed_digest == expected_digest)
+                  require(not os.path.exists(source_path))
+                  require(os.path.exists(target_path))
+                  before_pause = time.monotonic_ns()
+                  bounded_pause(0.02)
+                  after_pause = time.monotonic_ns()
+                  require(after_pause > before_pause)
+              require(temp_path is not None and not os.path.exists(temp_path))
+              require(time.monotonic_ns() > start)
+              return {
+                  "tempfs": {
+                      "directory_created": True,
+                      "file_created": True,
+                      "cleanup_verified": True,
+                  },
+                  "atomic": {
+                      "same_filesystem": True,
+                      "replace_verified": True,
+                      "content_digest_verified": True,
+                  },
+                  "monotonic": {
+                      "monotonic_increased": True,
+                      "bounded_deadline_verified": True,
+                  },
+              }
+
+
+          def pidfd_checks():
+              ready_read, ready_write = os.pipe()
+              control_read, control_write = os.pipe()
+              process_id = os.fork()
+              if process_id == 0:
+                  os.close(ready_read)
+                  os.close(control_write)
+                  try:
+                      os.setsid()
+                      os.write(ready_write, b"R")
+                      os.close(ready_write)
+                      value = os.read(control_read, 1)
+                      os.close(control_read)
+                      os._exit(0 if value == b"X" else 95)
+                  except BaseException:
+                      os._exit(96)
+              os.close(ready_write)
+              os.close(control_read)
+              pidfd = None
+              released = False
+              reaped = False
+              try:
+                  register_process(process_id, "PIDFD_CHILD_PENDING", os.getpid())
+                  require(read_exact(ready_read, 1, READY_TIMEOUT_SECONDS) == b"R")
+                  stat = refresh_registration(process_id, "PIDFD_CHILD", os.getpid())
+                  require(stat["pgrp"] == process_id and stat["session"] == process_id)
+                  if not hasattr(os, "pidfd_open"):
+                      os.write(control_write, b"X")
+                      released = True
+                      os.close(control_write)
+                      status = reap_exact(process_id)
+                      reaped = True
+                      require(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0)
+                      unregister_reaped(process_id)
+                      return "OPTIONAL_UNAVAILABLE", {
+                          "supported": False,
+                          "opened": False,
+                          "readiness_verified": False,
+                          "cleanup_verified": True,
+                      }
+                  try:
+                      pidfd = os.pidfd_open(process_id, 0)
+                  except OSError as error:
+                      if error.errno not in (errno.ENOSYS, errno.EPERM, errno.EINVAL):
+                          raise AttestationFailure()
+                      os.write(control_write, b"X")
+                      released = True
+                      os.close(control_write)
+                      status = reap_exact(process_id)
+                      reaped = True
+                      require(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0)
+                      unregister_reaped(process_id)
+                      return "OPTIONAL_UNAVAILABLE", {
+                          "supported": False,
+                          "opened": False,
+                          "readiness_verified": False,
+                          "cleanup_verified": True,
+                      }
+                  os.fstat(pidfd)
+                  os.write(control_write, b"X")
+                  released = True
+                  os.close(control_write)
+                  poller = select.poll()
+                  poller.register(pidfd, select.POLLIN)
+                  events = poller.poll(int(EXIT_TIMEOUT_SECONDS * 1000))
+                  require(len(events) >= 1)
+                  reject_mask = select.POLLERR | select.POLLNVAL
+                  require(all(event_fd == pidfd for event_fd, _ in events))
+                  require(all((flags & reject_mask) == 0 for _, flags in events))
+                  require(any((flags & select.POLLIN) != 0 for _, flags in events))
+                  status = reap_exact(process_id)
+                  reaped = True
+                  require(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0)
+                  unregister_reaped(process_id)
+                  return "PASS", {
+                      "supported": True,
+                      "opened": True,
+                      "readiness_verified": True,
+                      "cleanup_verified": True,
+                  }
+              finally:
+                  safe_close(ready_read)
+                  if pidfd is not None:
+                      safe_close(pidfd)
+                  if not released:
+                      try:
+                          os.write(control_write, b"X")
+                      except OSError:
+                          pass
+                      try:
+                          os.close(control_write)
+                      except OSError:
+                          pass
+                  if process_id in owned:
+                      if not reaped:
+                          try:
+                              status = reap_exact(process_id, TERM_GRACE_SECONDS)
+                              reaped = True
+                              require(os.WIFEXITED(status))
+                          except BaseException:
+                              counters["cleanup_error_count"] += 1
+                              safe_direct_kill(process_id)
+                              try:
+                                  reap_exact(process_id)
+                              except BaseException:
+                                  counters["cleanup_error_count"] += 1
+                      if process_id in owned and registered_stat(process_id) is None:
+                          del owned[process_id]
+                  else:
+                      adopt_fresh_child_for_cleanup(
+                          process_id,
+                          "PIDFD_CHILD_RECOVERY",
+                      )
+                      if process_id in owned:
+                          safe_direct_kill(process_id)
+                          try:
+                              reap_exact(process_id)
+                          except BaseException:
+                              counters["cleanup_error_count"] += 1
+                          if (
+                              process_id in owned
+                              and registered_stat(process_id) is None
+                          ):
+                              del owned[process_id]
+
+
+          def identity_still_present(identity):
+              stat = proc_stat(identity["process_id"])
+              return (
+                  stat is not None
+                  and stat["starttime"] == identity["starttime"]
+              )
+
+
+          def measured_process_counts():
+              live = 0
+              zombies = 0
+              descendants = 0
+              orphans = 0
+              retained = 0
+              for identity in all_identities:
+                  stat = proc_stat(identity["process_id"])
+                  if (
+                      stat is None
+                      or stat["starttime"] != identity["starttime"]
+                  ):
+                      continue
+                  retained += 1
+                  if stat["state"] == "Z":
+                      zombies += 1
+                  else:
+                      live += 1
+                  if identity["role"] in (
+                      "GROUP_DESCENDANT",
+                      "RECOVERED_GROUP_DESCENDANT",
+                  ):
+                      descendants += 1
+                      expected_parent = identity["expected_parent"]
+                      if (
+                          identity["role"] == "RECOVERED_GROUP_DESCENDANT"
+                          or (
+                              expected_parent is not None
+                              and stat["ppid"] != expected_parent
+                          )
+                      ):
+                          orphans += 1
+              return {
+                  "task_owned_process_count": retained,
+                  "task_owned_live_count": live,
+                  "descendant_count": descendants,
+                  "orphan_count": orphans,
+                  "zombie_count": zombies,
+                  "unresolved_wait_count": counters["unresolved_wait_count"],
+                  "unrelated_signal_count": counters["unrelated_signal_count"],
+                  "unrelated_termination_count": counters[
+                      "unrelated_termination_count"
+                  ],
+                  "timeout_leak_count": counters["timeout_leak_count"],
+                  "cleanup_error_count": counters["cleanup_error_count"],
+                  "blocked_unowned_signal_count": counters[
+                      "blocked_unowned_signal_count"
+                  ],
+              }
+
+
+          def zero_audit_checks():
+              counts = measured_process_counts()
+              require(counts["task_owned_process_count"] == 0)
+              require(counts["task_owned_live_count"] == 0)
+              require(counts["zombie_count"] == 0)
+              require(counts["descendant_count"] == 0)
+              require(counts["orphan_count"] == 0)
+              require(direct_child_ids() == [])
+              require(len(owned) == 0)
+              require(len(groups) == 0)
+              require(counters["unresolved_wait_count"] == 0)
+              require(counters["unrelated_signal_count"] == 0)
+              require(counters["unrelated_termination_count"] == 0)
+              require(counters["timeout_leak_count"] == 0)
+              require(counters["cleanup_error_count"] == 0)
+              require(counters["blocked_unowned_signal_count"] == 0)
+              return {
+                  "task_owned_process_zero": True,
+                  "live_zero": True,
+                  "descendant_zero": True,
+                  "orphan_zero": True,
+                  "zombie_zero": True,
+                  "unresolved_wait_zero": True,
+                  "direct_child_zero": True,
+                  "unrelated_signal_zero": True,
+                  "unrelated_termination_zero": True,
+                  "timeout_leak_zero": True,
+                  "cleanup_error_zero": True,
+              }
+
+
+          def measure_operation(function):
+              global active_duration_bucket
+              started = time.monotonic_ns()
+              value = function()
+              elapsed_ns = time.monotonic_ns() - started
+              require(elapsed_ns >= 0)
+              require(elapsed_ns < 30_000_000_000)
+              active_duration_bucket = "MEASURED_LT_30S"
+              return value
+
+
+          def add_sample(case_id, sample_index, requirement, verdict, checks):
+              require(case_id in ALL_CASES)
+              require(sample_index in (1, 2, 3))
+              require(requirement in ("REQUIRED", "OPTIONAL"))
+              require(verdict in ("PASS", "FAIL", "OPTIONAL_UNAVAILABLE"))
+              require(active_duration_bucket == "MEASURED_LT_30S")
+              require(isinstance(checks, dict) and checks)
+              require(all(isinstance(key, str) for key in checks))
+              require(all(isinstance(value, bool) for value in checks.values()))
+              signature_payload = {
+                  "case_id": case_id,
+                  "requirement": requirement,
+                  "verdict": verdict,
+                  "duration_bucket": active_duration_bucket,
+                  "checks": checks,
+                  "counts": {
+                      "live_after": 0,
+                      "zombie_after": 0,
+                  },
+              }
+              sample = dict(signature_payload)
+              sample["sample_index"] = sample_index
+              sample["signature_digest"] = digest(signature_payload)
+              samples.append(sample)
+
+
+          def cleanup_remaining():
+              historical_group_leaders = {
+                  identity["process_id"]
+                  for identity in all_identities
+                  if identity["role"].startswith("GROUP_LEADER")
+              }
+              for leader_id in list(groups):
+                  try:
+                      cleanup_group(leader_id)
+                  except BaseException:
+                      counters["cleanup_error_count"] += 1
+              for _ in range(3):
+                  for process_id in list(owned):
+                      try:
+                          safe_direct_kill(process_id)
+                      except BaseException:
+                          counters["cleanup_error_count"] += 1
+                      try:
+                          reap_exact(process_id, TERM_GRACE_SECONDS)
+                      except BaseException:
+                          counters["cleanup_error_count"] += 1
+                      try:
+                          if (
+                              process_id in owned
+                              and registered_stat(process_id) is None
+                          ):
+                              del owned[process_id]
+                      except BaseException:
+                          counters["cleanup_error_count"] += 1
+                  try:
+                      recovery_children = direct_child_ids()
+                  except BaseException:
+                      counters["cleanup_error_count"] += 1
+                      recovery_children = []
+                  for process_id in recovery_children:
+                      if process_id not in owned:
+                          try:
+                              stat = proc_stat(process_id)
+                              require(stat is not None)
+                              recovered_group_descendant = (
+                                  stat["pgrp"] in historical_group_leaders
+                                  and stat["session"] == stat["pgrp"]
+                              )
+                              register_process(
+                                  process_id,
+                                  (
+                                      "RECOVERED_GROUP_DESCENDANT"
+                                      if recovered_group_descendant
+                                      else "FINAL_RECOVERY_CHILD"
+                                  ),
+                                  os.getpid(),
+                              )
+                          except BaseException:
+                              counters["cleanup_error_count"] += 1
+                  if not recovery_children:
+                      break
+              try:
+                  remaining_direct = len(direct_child_ids())
+              except BaseException:
+                  counters["cleanup_error_count"] += 1
+                  remaining_direct = 1
+              retained = sum(
+                  1 for identity in all_identities if identity_still_present(identity)
+              )
+              if retained or remaining_direct or owned or groups:
+                  counters["timeout_leak_count"] += (
+                      retained + remaining_direct + len(owned) + len(groups)
+                  )
+
+
+          def execute_campaign():
+              global current_case
+              enable_subreaper()
+              for sample_index in range(1, SAMPLE_COUNT + 1):
+                  current_case = "CAP_PLATFORM_IDENTITY"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      measure_operation(platform_checks),
+                  )
+
+                  current_case = "CAP_SESSION_PROCESS_GROUP"
+                  term = measure_operation(term_group_checks)
+                  add_sample(
+                      "CAP_SESSION_PROCESS_GROUP",
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      term["session"],
+                  )
+                  current_case = "CAP_SCOPED_SIGTERM"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      term["term"],
+                  )
+
+                  current_case = "CAP_SCOPED_SIGKILL_ESCALATION"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      measure_operation(kill_escalation_checks),
+                  )
+
+                  current_case = "CAP_WAITPID_EXIT_STATUS"
+                  wait_checks = measure_operation(wait_and_zombie_checks)
+                  add_sample(
+                      "CAP_WAITPID_EXIT_STATUS",
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      wait_checks["waitpid"],
+                  )
+                  current_case = "CAP_WAITID_EXIT_STATUS"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "OPTIONAL",
+                      wait_checks["waitid_verdict"],
+                      wait_checks["waitid"],
+                  )
+                  current_case = "CAP_ZOMBIE_REAP"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      wait_checks["zombie"],
+                  )
+                  current_case = "CAP_PROC_LIFECYCLE"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      wait_checks["proc"],
+                  )
+
+                  current_case = "CAP_TEMPFS_CREATE_CLEANUP"
+                  fs_checks = measure_operation(filesystem_checks)
+                  add_sample(
+                      "CAP_TEMPFS_CREATE_CLEANUP",
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      fs_checks["tempfs"],
+                  )
+                  current_case = "CAP_ATOMIC_REPLACE_SAME_FS"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      fs_checks["atomic"],
+                  )
+                  current_case = "CAP_MONOTONIC_CLOCK"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      fs_checks["monotonic"],
+                  )
+
+                  current_case = "CAP_PIDFD_OPEN"
+                  pidfd_verdict, pidfd_result = measure_operation(pidfd_checks)
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "OPTIONAL",
+                      pidfd_verdict,
+                      pidfd_result,
+                  )
+
+                  current_case = "CAP_FINAL_ZERO_AUDIT"
+                  add_sample(
+                      current_case,
+                      sample_index,
+                      "REQUIRED",
+                      "PASS",
+                      measure_operation(zero_audit_checks),
+                  )
+              current_case = "NONE"
+
+
+          def matrix_rows():
+              rows = []
+              for case_id in ALL_CASES:
+                  case_samples = sorted(
+                      (item for item in samples if item["case_id"] == case_id),
+                      key=lambda item: item["sample_index"],
+                  )
+                  verdicts = [item["verdict"] for item in case_samples]
+                  signatures = {item["signature_digest"] for item in case_samples}
+                  requirement = "REQUIRED" if case_id in REQUIRED_CASES else "OPTIONAL"
+                  signature_valid = all(
+                      item["signature_digest"]
+                      == digest(
+                          {
+                              key: value
+                              for key, value in item.items()
+                              if key not in ("sample_index", "signature_digest")
+                          }
+                      )
+                      for item in case_samples
+                  )
+                  indices_valid = [
+                      item["sample_index"] for item in case_samples
+                  ] == list(range(1, SAMPLE_COUNT + 1))
+                  requirements_valid = all(
+                      item["requirement"] == requirement for item in case_samples
+                  )
+                  stable = (
+                      len(case_samples) == SAMPLE_COUNT
+                      and len(signatures) == 1
+                      and signature_valid
+                      and indices_valid
+                      and requirements_valid
+                  )
+                  if requirement == "REQUIRED":
+                      verdict = "PASS" if stable and verdicts == ["PASS"] * SAMPLE_COUNT else "FAIL"
+                  else:
+                      optional_ok = verdicts in (
+                          ["PASS"] * SAMPLE_COUNT,
+                          ["OPTIONAL_UNAVAILABLE"] * SAMPLE_COUNT,
+                      )
+                      verdict = verdicts[0] if stable and optional_ok else "FAIL"
+                  rows.append(
+                      {
+                          "case_id": case_id,
+                          "requirement": requirement,
+                          "verdict": verdict,
+                          "stable": stable,
+                          "pass_count": verdicts.count("PASS"),
+                          "optional_unavailable_count": verdicts.count(
+                              "OPTIONAL_UNAVAILABLE"
+                          ),
+                          "fail_count": verdicts.count("FAIL"),
+                          "signature_count": len(signatures),
+                      }
+                  )
+              return rows
+
+
+          def raw_schema_count(value):
+              forbidden_keys = {
+                  "pid",
+                  "ppid",
+                  "pgid",
+                  "command",
+                  "command_line",
+                  "environment",
+                  "token",
+                  "username",
+                  "url",
+                  "response",
+                  "response_body",
+                  "path",
+              }
+              count = 0
+              if isinstance(value, dict):
+                  for key, nested in value.items():
+                      if key.lower() in forbidden_keys:
+                          count += 1
+                      count += raw_schema_count(nested)
+              elif isinstance(value, list):
+                  for nested in value:
+                      count += raw_schema_count(nested)
+              return count
+
+
+          def build_evidence():
+              matrix = matrix_rows()
+              try:
+                  final_counts = measured_process_counts()
+                  final_counts["direct_child_count"] = len(direct_child_ids())
+                  final_counts["registry_residual_count"] = len(owned)
+                  final_counts["group_registry_residual_count"] = len(groups)
+                  final_counts["measurement_failure_count"] = 0
+              except BaseException:
+                  final_counts = {
+                      "task_owned_process_count": 1,
+                      "task_owned_live_count": 1,
+                      "descendant_count": 1,
+                      "orphan_count": 1,
+                      "zombie_count": 1,
+                      "unresolved_wait_count": counters[
+                          "unresolved_wait_count"
+                      ],
+                      "unrelated_signal_count": counters[
+                          "unrelated_signal_count"
+                      ],
+                      "unrelated_termination_count": counters[
+                          "unrelated_termination_count"
+                      ],
+                      "timeout_leak_count": counters["timeout_leak_count"],
+                      "cleanup_error_count": counters["cleanup_error_count"],
+                      "blocked_unowned_signal_count": counters[
+                          "blocked_unowned_signal_count"
+                      ],
+                      "direct_child_count": 1,
+                      "registry_residual_count": len(owned),
+                      "group_registry_residual_count": len(groups),
+                      "measurement_failure_count": 1,
+                  }
+              final_counts["raw_persistence_count"] = 0
+              final_counts["wrong_pass_claim_count"] = 0
+              unstable_count = sum(1 for row in matrix if not row["stable"])
+              required_ok = all(
+                  row["verdict"] == "PASS" and row["stable"]
+                  for row in matrix
+                  if row["requirement"] == "REQUIRED"
+              )
+              optional_ok = all(
+                  row["verdict"] in ("PASS", "OPTIONAL_UNAVAILABLE")
+                  and row["stable"]
+                  for row in matrix
+                  if row["requirement"] == "OPTIONAL"
+              )
+              counts_ok = all(value == 0 for value in final_counts.values())
+              eligible_before_raw_audit = (
+                  primary_failure_code == "NONE"
+                  and cleanup_failure_code == "NONE"
+                  and current_case == "NONE"
+                  and len(samples) == len(ALL_CASES) * SAMPLE_COUNT
+                  and required_ok
+                  and optional_ok
+                  and counts_ok
+              )
+              evidence = {
+                  "schema": "QLIB_D41_LINUX_HOST_ATTESTATION_V1",
+                  "task_id": TASK_ID,
+                  "source_commit": metadata["source_commit"],
+                  "run_id_digest": metadata["run_id_digest"],
+                  "runner": {
+                      "label": "UBUNTU_LATEST",
+                      "image_os": metadata["image_os"],
+                      "image_version": metadata["image_version"],
+                      "os": "LINUX" if eligible_before_raw_audit else "NOT_VERIFIED",
+                      "arch": "X86_64" if eligible_before_raw_audit else "NOT_VERIFIED",
+                      "python_contract": "CPYTHON_GE_3_10",
+                      "python_supported": eligible_before_raw_audit,
+                  },
+                  "execution": {
+                      "trigger": "PUSH_BOOTSTRAP",
+                      "trigger_scope_verified": eligible_before_raw_audit,
+                      "manual_dispatch": "DECLARED_NOT_DEFAULT_BRANCH_ACTIVE",
+                      "automatic_retry": False,
+                      "samples_per_case": SAMPLE_COUNT,
+                      "task_owned_signal_count": counters[
+                          "task_owned_signal_count"
+                      ],
+                  },
+                  "samples": samples,
+                  "matrix": matrix,
+                  "final": final_counts,
+                  "summary": {
+                      "required_case_count": len(REQUIRED_CASES),
+                      "optional_case_count": len(OPTIONAL_CASES),
+                      "planned_sample_count": len(ALL_CASES) * SAMPLE_COUNT,
+                      "completed_sample_count": len(samples),
+                      "unstable_case_count": unstable_count,
+                  },
+                  "failure": {
+                      "primary_code": primary_failure_code,
+                      "cleanup_code": cleanup_failure_code,
+                      "evidence_build_code": "NONE",
+                      "case_id": current_case,
+                  },
+                  "selected_verdict": "FAIL",
+              }
+              final_counts["raw_persistence_count"] = raw_schema_count(evidence)
+              eligible = (
+                  eligible_before_raw_audit
+                  and final_counts["raw_persistence_count"] == 0
+              )
+              evidence["selected_verdict"] = "PASS" if eligible else "FAIL"
+              final_counts["wrong_pass_claim_count"] = int(
+                  evidence["selected_verdict"] == "PASS" and not eligible
+              )
+              evidence["evidence_digest"] = digest(evidence)
+              return evidence
+
+
+          def build_failsafe_evidence():
+              evidence = {
+                  "schema": "QLIB_D41_LINUX_HOST_ATTESTATION_V1",
+                  "task_id": TASK_ID,
+                  "source_commit": metadata["source_commit"],
+                  "run_id_digest": metadata["run_id_digest"],
+                  "runner": {
+                      "label": "UBUNTU_LATEST",
+                      "image_os": metadata["image_os"],
+                      "image_version": metadata["image_version"],
+                      "os": "NOT_VERIFIED",
+                      "arch": "NOT_VERIFIED",
+                      "python_contract": "CPYTHON_GE_3_10",
+                      "python_supported": False,
+                  },
+                  "execution": {
+                      "trigger": "PUSH_BOOTSTRAP",
+                      "trigger_scope_verified": False,
+                      "manual_dispatch": "DECLARED_NOT_DEFAULT_BRANCH_ACTIVE",
+                      "automatic_retry": False,
+                      "samples_per_case": SAMPLE_COUNT,
+                      "task_owned_signal_count": counters[
+                          "task_owned_signal_count"
+                      ],
+                  },
+                  "samples": [],
+                  "matrix": [],
+                  "final": {
+                      "task_owned_process_count": 1,
+                      "task_owned_live_count": 1,
+                      "descendant_count": 1,
+                      "orphan_count": 1,
+                      "zombie_count": 1,
+                      "unresolved_wait_count": counters[
+                          "unresolved_wait_count"
+                      ],
+                      "unrelated_signal_count": counters[
+                          "unrelated_signal_count"
+                      ],
+                      "unrelated_termination_count": counters[
+                          "unrelated_termination_count"
+                      ],
+                      "timeout_leak_count": counters["timeout_leak_count"],
+                      "cleanup_error_count": counters["cleanup_error_count"],
+                      "blocked_unowned_signal_count": counters[
+                          "blocked_unowned_signal_count"
+                      ],
+                      "direct_child_count": 1,
+                      "registry_residual_count": len(owned),
+                      "group_registry_residual_count": len(groups),
+                      "measurement_failure_count": 1,
+                      "raw_persistence_count": 0,
+                      "wrong_pass_claim_count": 0,
+                  },
+                  "summary": {
+                      "required_case_count": len(REQUIRED_CASES),
+                      "optional_case_count": len(OPTIONAL_CASES),
+                      "planned_sample_count": len(ALL_CASES) * SAMPLE_COUNT,
+                      "completed_sample_count": 0,
+                      "unstable_case_count": len(ALL_CASES),
+                  },
+                  "failure": {
+                      "primary_code": primary_failure_code,
+                      "cleanup_code": cleanup_failure_code,
+                      "evidence_build_code": "EVIDENCE_BUILD_FAILURE",
+                      "case_id": current_case,
+                  },
+                  "selected_verdict": "FAIL",
+              }
+              evidence["final"]["raw_persistence_count"] = raw_schema_count(
+                  evidence
+              )
+              evidence["evidence_digest"] = digest(evidence)
+              return evidence
+
+
+          def emit(evidence):
+              print("QLIB_D41_EVIDENCE_BEGIN")
+              print(canonical_bytes(evidence).decode("ascii"))
+              print("QLIB_D41_EVIDENCE_END")
+
+
+          try:
+              execute_campaign()
+          except AttestationFailure:
+              primary_failure_code = "CAPABILITY_FAILURE"
+          except BaseException:
+              primary_failure_code = "INTERNAL_FAILURE"
+          finally:
+              try:
+                  cleanup_remaining()
+              except BaseException:
+                  cleanup_failure_code = "CLEANUP_FAILURE"
+              if (
+                  counters["cleanup_error_count"] != 0
+                  or counters["timeout_leak_count"] != 0
+              ):
+                  cleanup_failure_code = "CLEANUP_FAILURE"
+
+          try:
+              result = build_evidence()
+          except BaseException:
+              result = build_failsafe_evidence()
+          emit(result)
+          raise SystemExit(0 if result["selected_verdict"] == "PASS" else 1)
+          PY
