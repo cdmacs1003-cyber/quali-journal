@@ -1344,6 +1344,363 @@ def validate_production_sample_contract(
         )
 
 
+_OBSERVER_IDENTITY_CHECK_STAGES = {
+    "NOT_APPLICABLE",
+    "NOT_VERIFIED",
+    "ROOT_CREATION_IDENTITY_QUERY",
+    "CREATION_ORDER_IDENTITY_CHECK",
+    "PARENT_REVALIDATION_IDENTITY_CHECK",
+    "HANDLE_IDENTITY_REVALIDATION_CHECK",
+    "OPEN_PROCESS_CODE_87_RECONCILIATION",
+    "SNAPSHOT_COMPLETENESS_CHECK",
+    "DESCENDANT_ORPHAN_CLOSURE_CHECK",
+    "CANCELLATION_CLOSURE_CHECK",
+}
+_OBSERVER_IDENTITY_FAILURE_KINDS = {
+    "NONE",
+    "NOT_VERIFIED",
+    "OS_API_FAILURE",
+    "CREATION_BEFORE_ROOT",
+    "CREATION_BEFORE_PARENT",
+    "CREATION_BEFORE_ROOT_AND_PARENT",
+    "PARENT_ABSENT",
+    "PARENT_RELATION_CHANGED",
+    "HANDLE_CREATION_IDENTITY_CHANGED",
+    "LEGACY_IDENTITY_MISMATCH_UNCLASSIFIED",
+    "INCOMPLETE_SNAPSHOT",
+    "EXACT_PID_STILL_PRESENT",
+    "RESIDUAL_DESCENDANT_OR_ORPHAN",
+    "CANCELLATION_FAILED",
+    "DIAGNOSTIC_SERIALIZATION_FAILURE",
+}
+_OBSERVER_DIAGNOSTIC_OS_APIS = {
+    "NONE",
+    "NOT_VERIFIED",
+    "Win32ProcessApi",
+    "CreateToolhelp32Snapshot",
+    "Process32FirstW",
+    "Process32NextW",
+    "OpenProcess",
+    "GetProcessTimes",
+    "WaitForSingleObject",
+    "TerminateProcess",
+    "CloseHandle",
+    "PopenHandle",
+}
+_OBSERVER_IDENTITY_RELATIONS = {
+    "NOT_APPLICABLE",
+    "NOT_VERIFIED",
+    "SAME",
+    "DIFFERENT",
+    "CREATION_BEFORE_ROOT",
+    "CREATION_BEFORE_PARENT",
+    "CREATION_BEFORE_ROOT_AND_PARENT",
+    "PARENT_ABSENT",
+    "PARENT_CHANGED",
+}
+_OBSERVER_IDENTITY_SUBJECT_ROLES = {
+    "NOT_APPLICABLE",
+    "NOT_VERIFIED",
+    "ROOT",
+    "DESCENDANT",
+}
+_OBSERVER_CLEANUP_DECISIONS = {
+    "NOT_APPLICABLE",
+    "FAIL_CLOSED_IDENTITY_MISMATCH",
+    "FAIL_CLOSED_OS_API",
+    "FAIL_CLOSED_INCOMPLETE_SNAPSHOT",
+    "FAIL_CLOSED_EXACT_PID_PRESENT",
+    "FAIL_CLOSED_RESIDUAL_PROCESS",
+    "FAIL_CLOSED_CANCELLATION",
+    "CONTINUE_VERIFIED_CODE87_PID_ABSENT",
+    "CLOSURE_PROVED",
+    "FAIL_CLOSED_DIAGNOSTIC_SERIALIZATION",
+}
+_OBSERVER_DIAGNOSTIC_TERMINAL_REASONS = {
+    "NONE",
+    "SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+}
+_OBSERVER_DIAGNOSTIC_KEYS = {
+    "identity_check_stage",
+    "identity_failure_kind",
+    "os_api",
+    "sanitized_error_code",
+    "snapshot_complete",
+    "expected_identity_present",
+    "observed_identity_present",
+    "identity_relation",
+    "identity_subject_role",
+    "exact_pid_absent",
+    "descendant_count",
+    "orphan_count",
+    "cancellation_state",
+    "cleanup_decision",
+    "terminal_reason",
+    "diagnostic_serialization_status",
+}
+_OBSERVER_TERMINAL_REASONS = {
+    *(f"SAMPLER_{category}" for category in SAMPLER_FAILURE_CATEGORIES),
+    *STOP_REASONS,
+    "INVALID_START_METADATA",
+    "SAMPLE_GAP_EXCEEDED",
+    "STALE_HEARTBEAT",
+    "CHILD_PROCESS_LOSS",
+    "TERMINAL_WRITE_PENDING",
+    "TERMINAL_REASON_NOT_ALLOWLISTED",
+}
+
+
+def _observer_diagnostic_fallback() -> dict[str, Any]:
+    return {
+        "diagnostic_contract_status": "INVALID",
+        "identity_check_stage": "NOT_VERIFIED",
+        "identity_failure_kind": "DIAGNOSTIC_SERIALIZATION_FAILURE",
+        "os_api": "NOT_VERIFIED",
+        "sanitized_error_code": 0,
+        "snapshot_complete": None,
+        "expected_identity_present": None,
+        "observed_identity_present": None,
+        "identity_relation": "NOT_VERIFIED",
+        "identity_subject_role": "NOT_VERIFIED",
+        "exact_pid_absent": None,
+        "descendant_count": 0,
+        "orphan_count": 1,
+        "cancellation_state": "FAILED",
+        "cleanup_decision": "FAIL_CLOSED_DIAGNOSTIC_SERIALIZATION",
+        "terminal_reason": "SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+        "diagnostic_serialization_status": "FAILED",
+        "raw_identity_value_persisted": False,
+    }
+
+
+def _observer_identity_diagnostic(
+    *,
+    identity_check_stage: str,
+    identity_failure_kind: str,
+    os_api: str,
+    sanitized_error_code: int,
+    snapshot_complete: bool | None,
+    expected_identity_present: bool | None,
+    observed_identity_present: bool | None,
+    identity_relation: str,
+    identity_subject_role: str,
+    exact_pid_absent: bool | None,
+    descendant_count: int,
+    orphan_count: int,
+    cancellation_state: str,
+    cleanup_decision: str,
+    terminal_reason: str,
+    diagnostic_serialization_status: str = "PASS",
+    diagnostic_contract_status: str = "PASS",
+) -> dict[str, Any]:
+    """Build primitive-only observer evidence or a fail-closed fallback."""
+
+    fallback = _observer_diagnostic_fallback()
+    try:
+        if identity_check_stage not in _OBSERVER_IDENTITY_CHECK_STAGES:
+            return fallback
+        if identity_failure_kind not in _OBSERVER_IDENTITY_FAILURE_KINDS:
+            return fallback
+        if os_api not in _OBSERVER_DIAGNOSTIC_OS_APIS:
+            return fallback
+        if identity_relation not in _OBSERVER_IDENTITY_RELATIONS:
+            return fallback
+        if identity_subject_role not in _OBSERVER_IDENTITY_SUBJECT_ROLES:
+            return fallback
+        if cleanup_decision not in _OBSERVER_CLEANUP_DECISIONS:
+            return fallback
+        if terminal_reason not in _OBSERVER_DIAGNOSTIC_TERMINAL_REASONS:
+            return fallback
+        if diagnostic_serialization_status not in {"PASS", "NOT_REQUIRED"}:
+            return fallback
+        if diagnostic_contract_status not in {"PASS", "NOT_AVAILABLE_LEGACY"}:
+            return fallback
+        for optional_boolean in (
+            snapshot_complete,
+            expected_identity_present,
+            observed_identity_present,
+            exact_pid_absent,
+        ):
+            if optional_boolean is not None and type(optional_boolean) is not bool:
+                return fallback
+        for count, maximum in (
+            (sanitized_error_code, 0xFFFFFFFF),
+            (descendant_count, 1000),
+            (orphan_count, 1),
+        ):
+            if type(count) is not int or not 0 <= count <= maximum:
+                return fallback
+        if cancellation_state not in {"NOT_REQUIRED", "COMPLETED", "FAILED"}:
+            return fallback
+        if diagnostic_contract_status == "NOT_AVAILABLE_LEGACY" and (
+            identity_check_stage != "NOT_VERIFIED"
+            or identity_failure_kind != "LEGACY_IDENTITY_MISMATCH_UNCLASSIFIED"
+            or identity_relation != "NOT_VERIFIED"
+            or identity_subject_role != "NOT_VERIFIED"
+        ):
+            return fallback
+        if diagnostic_contract_status == "PASS" and "NOT_VERIFIED" in {
+            identity_check_stage,
+            identity_failure_kind,
+            os_api,
+            identity_relation,
+            identity_subject_role,
+        }:
+            return fallback
+        if cleanup_decision.startswith("FAIL_CLOSED_") and (
+            cancellation_state != "FAILED"
+            or terminal_reason != "SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT"
+        ):
+            return fallback
+        if cleanup_decision in {
+            "CONTINUE_VERIFIED_CODE87_PID_ABSENT",
+            "CLOSURE_PROVED",
+        } and terminal_reason != "NONE":
+            return fallback
+        payload = {
+            "diagnostic_contract_status": diagnostic_contract_status,
+            "identity_check_stage": identity_check_stage,
+            "identity_failure_kind": identity_failure_kind,
+            "os_api": os_api,
+            "sanitized_error_code": sanitized_error_code,
+            "snapshot_complete": snapshot_complete,
+            "expected_identity_present": expected_identity_present,
+            "observed_identity_present": observed_identity_present,
+            "identity_relation": identity_relation,
+            "identity_subject_role": identity_subject_role,
+            "exact_pid_absent": exact_pid_absent,
+            "descendant_count": descendant_count,
+            "orphan_count": orphan_count,
+            "cancellation_state": cancellation_state,
+            "cleanup_decision": cleanup_decision,
+            "terminal_reason": terminal_reason,
+            "diagnostic_serialization_status": diagnostic_serialization_status,
+            "raw_identity_value_persisted": False,
+        }
+        json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        return payload
+    except Exception:
+        return fallback
+
+
+def _observer_cleanup_diagnostic_fields(**kwargs: Any) -> dict[str, Any]:
+    try:
+        return _observer_identity_diagnostic(**kwargs)
+    except Exception:
+        return _observer_diagnostic_fallback()
+
+
+def _observer_legacy_cleanup_diagnostic(
+    *,
+    failure_api: str,
+    failure_code: int,
+    failure_phase: str,
+    failure_reason: str,
+    snapshot_status: str,
+    owned_process_count: int,
+    orphan_count: int,
+    cancellation_state: str,
+) -> dict[str, Any]:
+    api_name = (
+        failure_api
+        if failure_api in _OBSERVER_DIAGNOSTIC_OS_APIS
+        else "Win32ProcessApi"
+    )
+    code = failure_code if type(failure_code) is int else 0
+    code = max(0, min(0xFFFFFFFF, code))
+    descendant_count = max(0, min(1000, owned_process_count - 1))
+    snapshot_complete = (
+        True
+        if snapshot_status == "COMPLETE"
+        else False
+        if snapshot_status == "INCOMPLETE_SNAPSHOT"
+        else None
+    )
+    if failure_reason == "IDENTITY_MISMATCH":
+        return _observer_cleanup_diagnostic_fields(
+            identity_check_stage="NOT_VERIFIED",
+            identity_failure_kind="LEGACY_IDENTITY_MISMATCH_UNCLASSIFIED",
+            os_api=api_name,
+            sanitized_error_code=code,
+            snapshot_complete=snapshot_complete,
+            expected_identity_present=None,
+            observed_identity_present=None,
+            identity_relation="NOT_VERIFIED",
+            identity_subject_role="NOT_VERIFIED",
+            exact_pid_absent=None,
+            descendant_count=descendant_count,
+            orphan_count=1,
+            cancellation_state="FAILED",
+            cleanup_decision="FAIL_CLOSED_IDENTITY_MISMATCH",
+            terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+            diagnostic_contract_status="NOT_AVAILABLE_LEGACY",
+        )
+    if failure_reason == "INCOMPLETE_SNAPSHOT":
+        stage = "SNAPSHOT_COMPLETENESS_CHECK"
+        failure_kind = "INCOMPLETE_SNAPSHOT"
+        decision = "FAIL_CLOSED_INCOMPLETE_SNAPSHOT"
+    elif failure_reason == "RESIDUAL_OWNED_PROCESS":
+        stage = "DESCENDANT_ORPHAN_CLOSURE_CHECK"
+        failure_kind = "RESIDUAL_DESCENDANT_OR_ORPHAN"
+        decision = "FAIL_CLOSED_RESIDUAL_PROCESS"
+    elif failure_reason != "NONE" or cancellation_state == "FAILED" or orphan_count:
+        stage = (
+            "CANCELLATION_CLOSURE_CHECK"
+            if failure_phase in {"PROCESS_WAIT", "PROCESS_TERMINATION"}
+            else "NOT_APPLICABLE"
+        )
+        failure_kind = (
+            "CANCELLATION_FAILED"
+            if stage == "CANCELLATION_CLOSURE_CHECK"
+            else "OS_API_FAILURE"
+        )
+        decision = (
+            "FAIL_CLOSED_CANCELLATION"
+            if stage == "CANCELLATION_CLOSURE_CHECK"
+            else "FAIL_CLOSED_OS_API"
+        )
+    else:
+        return _observer_cleanup_diagnostic_fields(
+            identity_check_stage="NOT_APPLICABLE",
+            identity_failure_kind="NONE",
+            os_api="NONE",
+            sanitized_error_code=0,
+            snapshot_complete=snapshot_complete,
+            expected_identity_present=None,
+            observed_identity_present=None,
+            identity_relation="NOT_APPLICABLE",
+            identity_subject_role="NOT_APPLICABLE",
+            exact_pid_absent=None,
+            descendant_count=0,
+            orphan_count=0,
+            cancellation_state=cancellation_state,
+            cleanup_decision=(
+                "CLOSURE_PROVED"
+                if snapshot_complete is True
+                else "NOT_APPLICABLE"
+            ),
+            terminal_reason="NONE",
+            diagnostic_serialization_status="NOT_REQUIRED",
+        )
+    return _observer_cleanup_diagnostic_fields(
+        identity_check_stage=stage,
+        identity_failure_kind=failure_kind,
+        os_api=api_name,
+        sanitized_error_code=code,
+        snapshot_complete=snapshot_complete,
+        expected_identity_present=None,
+        observed_identity_present=None,
+        identity_relation="NOT_APPLICABLE",
+        identity_subject_role="NOT_APPLICABLE",
+        exact_pid_absent=None,
+        descendant_count=descendant_count,
+        orphan_count=1,
+        cancellation_state="FAILED",
+        cleanup_decision=decision,
+        terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+    )
+
+
 def _sanitize_sampler_diagnostics(value: dict[str, Any]) -> dict[str, Any]:
     allowed_current = set(SAMPLER_PHASES) | {"NOT_STARTED", "BETWEEN_PHASES"}
     allowed_last = set(SAMPLER_PHASES) | {"NONE"}
@@ -1470,6 +1827,55 @@ def _sanitize_sampler_diagnostics(value: dict[str, Any]) -> dict[str, Any]:
     }
     if failure_reason not in allowed_failure_reasons:
         failure_reason = "API_FAILURE"
+    failure_code = bounded_count("cleanup_failure_code", 0xFFFFFFFF)
+    owned_process_count = bounded_count("owned_process_count")
+    diagnostic_present = any(
+        key in value
+        for key in _OBSERVER_DIAGNOSTIC_KEYS | {"diagnostic_contract_status"}
+    )
+    if diagnostic_present:
+        diagnostic = _observer_cleanup_diagnostic_fields(
+            identity_check_stage=value.get("identity_check_stage"),
+            identity_failure_kind=value.get("identity_failure_kind"),
+            os_api=value.get("os_api"),
+            sanitized_error_code=value.get("sanitized_error_code"),
+            snapshot_complete=value.get("snapshot_complete"),
+            expected_identity_present=value.get("expected_identity_present"),
+            observed_identity_present=value.get("observed_identity_present"),
+            identity_relation=value.get("identity_relation"),
+            identity_subject_role=value.get("identity_subject_role"),
+            exact_pid_absent=value.get("exact_pid_absent"),
+            descendant_count=value.get("descendant_count"),
+            orphan_count=value.get("orphan_count"),
+            cancellation_state=value.get("cancellation_state"),
+            cleanup_decision=value.get("cleanup_decision"),
+            terminal_reason=value.get("terminal_reason"),
+            diagnostic_serialization_status=value.get(
+                "diagnostic_serialization_status"
+            ),
+            diagnostic_contract_status=value.get("diagnostic_contract_status"),
+        )
+    else:
+        diagnostic = _observer_legacy_cleanup_diagnostic(
+            failure_api=failure_api,
+            failure_code=failure_code,
+            failure_phase=failure_phase,
+            failure_reason=failure_reason,
+            snapshot_status=snapshot_status,
+            owned_process_count=owned_process_count,
+            orphan_count=orphan_count,
+            cancellation_state=cancellation_state,
+        )
+    if diagnostic["diagnostic_contract_status"] == "INVALID":
+        cancellation_state = "FAILED"
+        verification_status = "NOT_VERIFIED"
+        orphan_count = 1
+        cleanup_status = "CLEANUP_FAILED"
+        snapshot_status = "INCOMPLETE_SNAPSHOT"
+        failure_api = "Win32ProcessApi"
+        failure_code = 0
+        failure_phase = "IDENTITY_VERIFICATION"
+        failure_reason = "API_FAILURE"
     return {
         "current_phase": current if current in allowed_current else "NOT_STARTED",
         "last_completed_phase": last if last in allowed_last else "NONE",
@@ -1484,15 +1890,14 @@ def _sanitize_sampler_diagnostics(value: dict[str, Any]) -> dict[str, Any]:
         "orphan_verification_status": verification_status,
         "process_tree_cleanup_status": cleanup_status,
         "process_tree_snapshot_status": snapshot_status,
-        "owned_process_count": bounded_count("owned_process_count"),
+        "owned_process_count": owned_process_count,
         "terminated_process_count": bounded_count("terminated_process_count"),
         "identity_mismatch_count": bounded_count("identity_mismatch_count"),
         "cleanup_failure_api": failure_api,
-        "cleanup_failure_code": bounded_count(
-            "cleanup_failure_code", 0xFFFFFFFF
-        ),
+        "cleanup_failure_code": failure_code,
         "cleanup_failure_phase": failure_phase,
         "cleanup_failure_reason": failure_reason,
+        **diagnostic,
     }
 
 
@@ -1502,6 +1907,194 @@ def _read_sampler_progress(path: Path) -> dict[str, Any]:
     except (FileNotFoundError, OSError, json.JSONDecodeError, UnicodeError):
         return _sanitize_sampler_diagnostics({})
     return _sanitize_sampler_diagnostics(value if isinstance(value, dict) else {})
+
+
+def _safe_contract_string(value: Any, *, fallback: str = "NOT_VERIFIED") -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,95}", value):
+        return fallback
+    return value
+
+
+def _sanitize_terminal_failure_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    """Allowlist terminal metadata and never retain malformed diagnostic values."""
+
+    source_line = value.get("source_line", 0)
+    if type(source_line) is not int or not 0 <= source_line <= 10_000_000:
+        source_line = 0
+    failure_category = str(value.get("failure_category") or "")
+    if failure_category not in SAMPLER_FAILURE_CATEGORIES:
+        failure_category = "ARGUMENT_OR_SERIALIZATION_DEFECT"
+    sanitized = {
+        "first_failure_phase": _safe_contract_string(
+            value.get("first_failure_phase")
+        ),
+        "failure_category": failure_category,
+        "source_file": "tools/qlib_traffic_observer.py",
+        "source_function": _safe_contract_string(
+            value.get("source_function"), fallback="NOT_VERIFIED"
+        ),
+        "source_line": source_line,
+        "exception_class": "SamplerFailure",
+        "dependency_class": _safe_contract_string(
+            value.get("dependency_class"), fallback="NOT_VERIFIED"
+        ),
+        "exit_category": _safe_contract_string(
+            value.get("exit_category"), fallback="NOT_VERIFIED"
+        ),
+        "retryable": value.get("retryable") if type(value.get("retryable")) is bool else False,
+        "raw_exception_message_persisted": False,
+        "raw_sampler_output_persisted": False,
+    }
+    sanitized.update(_sanitize_sampler_diagnostics(value))
+    return sanitized
+
+
+def _observer_terminal_diagnostic(first_failure: dict[str, Any]) -> dict[str, Any]:
+    diagnostic_present = any(
+        key in first_failure
+        for key in _OBSERVER_DIAGNOSTIC_KEYS | {"diagnostic_contract_status"}
+    )
+    if not diagnostic_present:
+        return {
+            "diagnostic_contract_status": "NOT_AVAILABLE_LEGACY",
+            "identity_check_stage": "NOT_VERIFIED",
+            "identity_failure_kind": "NOT_VERIFIED",
+            "os_api": "NOT_VERIFIED",
+            "sanitized_error_code": "NOT_VERIFIED",
+            "snapshot_complete": None,
+            "expected_identity_present": None,
+            "observed_identity_present": None,
+            "identity_relation": "NOT_VERIFIED",
+            "identity_subject_role": "NOT_VERIFIED",
+            "exact_pid_absent": None,
+            "descendant_count": "NOT_VERIFIED",
+            "orphan_count": "NOT_VERIFIED",
+            "cancellation_state": "NOT_VERIFIED",
+            "cleanup_decision": "NOT_VERIFIED",
+            "diagnostic_terminal_reason": "NOT_VERIFIED",
+            "diagnostic_serialization_status": "NOT_VERIFIED",
+            "raw_identity_value_persisted": False,
+        }
+    diagnostic = _observer_cleanup_diagnostic_fields(
+        identity_check_stage=first_failure.get("identity_check_stage"),
+        identity_failure_kind=first_failure.get("identity_failure_kind"),
+        os_api=first_failure.get("os_api"),
+        sanitized_error_code=first_failure.get("sanitized_error_code"),
+        snapshot_complete=first_failure.get("snapshot_complete"),
+        expected_identity_present=first_failure.get("expected_identity_present"),
+        observed_identity_present=first_failure.get("observed_identity_present"),
+        identity_relation=first_failure.get("identity_relation"),
+        identity_subject_role=first_failure.get("identity_subject_role"),
+        exact_pid_absent=first_failure.get("exact_pid_absent"),
+        descendant_count=first_failure.get("descendant_count"),
+        orphan_count=first_failure.get("orphan_count"),
+        cancellation_state=first_failure.get("cancellation_state"),
+        cleanup_decision=first_failure.get("cleanup_decision"),
+        terminal_reason=first_failure.get("terminal_reason"),
+        diagnostic_serialization_status=first_failure.get(
+            "diagnostic_serialization_status"
+        ),
+        diagnostic_contract_status=first_failure.get("diagnostic_contract_status"),
+    )
+    invalid = diagnostic["diagnostic_contract_status"] == "INVALID"
+    cancellation = first_failure.get("child_cancellation_state")
+    if cancellation in {"NOT_REQUIRED", "COMPLETED", "FAILED"} and (
+        diagnostic["cancellation_state"] != cancellation
+    ):
+        invalid = True
+    legacy_orphan = first_failure.get("orphan_child_count")
+    if type(legacy_orphan) is int and diagnostic["orphan_count"] != legacy_orphan:
+        invalid = True
+    snapshot_relation = {
+        "COMPLETE": True,
+        "INCOMPLETE_SNAPSHOT": False,
+        "NOT_STARTED": None,
+    }
+    legacy_snapshot = first_failure.get("process_tree_snapshot_status")
+    if legacy_snapshot in snapshot_relation and (
+        diagnostic["snapshot_complete"] != snapshot_relation[legacy_snapshot]
+    ):
+        invalid = True
+    if first_failure.get("cleanup_failure_reason") == "IDENTITY_MISMATCH" and (
+        diagnostic["cleanup_decision"] != "FAIL_CLOSED_IDENTITY_MISMATCH"
+        or diagnostic["identity_failure_kind"] == "NONE"
+    ):
+        invalid = True
+    if invalid:
+        diagnostic = _observer_diagnostic_fallback()
+    result = dict(diagnostic)
+    result["diagnostic_terminal_reason"] = result.pop("terminal_reason")
+    return result
+
+
+def _observer_safe_terminal_reason(value: Any) -> tuple[str, bool]:
+    candidate = str(value or "")
+    if candidate in _OBSERVER_TERMINAL_REASONS:
+        return candidate, True
+    return "TERMINAL_REASON_NOT_ALLOWLISTED", False
+
+
+def _observer_cleanup_summary(
+    reason: Any,
+    first_failure: dict[str, Any] | None,
+) -> dict[str, Any]:
+    safe_reason, reason_allowlisted = _observer_safe_terminal_reason(reason)
+    failure = first_failure if isinstance(first_failure, dict) else {}
+    diagnostic = _observer_terminal_diagnostic(failure)
+    orphan_count = diagnostic.get("orphan_count")
+    if type(orphan_count) is not int:
+        orphan_count = 1 if failure else 0
+    descendant_count = diagnostic.get("descendant_count")
+    if type(descendant_count) is not int:
+        descendant_count = 0
+    cancellation_state = diagnostic.get("cancellation_state")
+    cancellation_failure_count = int(
+        cancellation_state == "FAILED"
+        or failure.get("child_cancellation_state") == "FAILED"
+    )
+    diagnostic_invalid_count = int(
+        diagnostic.get("diagnostic_contract_status") == "INVALID"
+    )
+    unresolved_cleanup_count = min(
+        1000,
+        orphan_count
+        + descendant_count
+        + cancellation_failure_count
+        + diagnostic_invalid_count,
+    )
+    diagnostic_reason = diagnostic.get("diagnostic_terminal_reason")
+    reason_preserved = reason_allowlisted and diagnostic_reason in {
+        "NONE",
+        "NOT_VERIFIED",
+        safe_reason,
+    }
+    observer_cleanup_failure = (
+        failure.get("exit_category") == "PROCESS_TREE_CLEANUP_FAILED"
+        or safe_reason == "SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT"
+        or unresolved_cleanup_count > 0
+    )
+    return {
+        **diagnostic,
+        "status": "FAIL",
+        "terminal_reason": safe_reason,
+        "terminal_reason_input_allowlisted": reason_allowlisted,
+        "terminal_reason_preserved_exactly": reason_preserved,
+        "terminal_reason_fallback_used": not reason_allowlisted,
+        "parent_validator_masking_count": 0 if reason_preserved else 1,
+        "terminal_reason_masking_count": 0 if reason_preserved else 1,
+        "terminal_reason_comparison_count": int(bool(failure)),
+        "incomplete_first_failure_count": int(bool(failure)),
+        "unresolved_cleanup_count": unresolved_cleanup_count,
+        "orphan_count": orphan_count,
+        "descendant_count": descendant_count,
+        "cancellation_failure_count": cancellation_failure_count,
+        "raw_process_identity_persistence_count": 0,
+        "verdict": (
+            "OBSERVER_CLEANUP_FAILURE"
+            if observer_cleanup_failure
+            else "OBSERVER_TERMINAL_FAILURE"
+        ),
+    }
 
 
 def _win32_exception_code(exc: BaseException) -> int:
@@ -1530,6 +2123,36 @@ def _win32_failure_fields(
         "cleanup_failure_phase": phase,
         "cleanup_failure_reason": reason,
     }
+
+
+def _d27_reconcile_open_process_disappearance(
+    process_id: int,
+    open_failure: dict[str, Any],
+    disappearance_check: dict[str, Any] | None,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Continue only for code 87 plus a complete snapshot proving PID absence."""
+
+    if (
+        int(open_failure.get("cleanup_failure_code", 0)) == 87
+        and disappearance_check is not None
+        and disappearance_check.get("complete") is True
+        and all(
+            int(candidate_pid) != process_id
+            for candidate_pid, _ in disappearance_check.get("entries", [])
+        )
+    ):
+        return True, None
+    if disappearance_check is not None and disappearance_check.get("complete") is not True:
+        return False, {
+            key: disappearance_check[key]
+            for key in (
+                "cleanup_failure_api",
+                "cleanup_failure_code",
+                "cleanup_failure_phase",
+                "cleanup_failure_reason",
+            )
+        }
+    return False, dict(open_failure)
 
 
 def _enumerate_windows_processes(
@@ -1602,12 +2225,13 @@ def _enumerate_windows_processes(
             try:
                 process_api.close_handle(snapshot_handle)
             except Exception as exc:
-                failure = _win32_failure_fields(
-                    exc,
-                    api_name="CloseHandle",
-                    phase="HANDLE_CLOSE",
-                    reason="HANDLE_CLOSE_FAILED",
-                )
+                if failure is None:
+                    failure = _win32_failure_fields(
+                        exc,
+                        api_name="CloseHandle",
+                        phase="HANDLE_CLOSE",
+                        reason="HANDLE_CLOSE_FAILED",
+                    )
 
     if failure is not None:
         return {"complete": False, "entries": [], **failure}
@@ -1686,6 +2310,47 @@ def _windows_cleanup_failure(
     identity_mismatch_count: int,
     snapshot_status: str,
 ) -> dict[str, Any]:
+    if _OBSERVER_DIAGNOSTIC_KEYS.issubset(failure):
+        diagnostic = _observer_cleanup_diagnostic_fields(
+            identity_check_stage=failure.get("identity_check_stage"),
+            identity_failure_kind=failure.get("identity_failure_kind"),
+            os_api=failure.get("os_api"),
+            sanitized_error_code=failure.get("sanitized_error_code"),
+            snapshot_complete=failure.get("snapshot_complete"),
+            expected_identity_present=failure.get("expected_identity_present"),
+            observed_identity_present=failure.get("observed_identity_present"),
+            identity_relation=failure.get("identity_relation"),
+            identity_subject_role=failure.get("identity_subject_role"),
+            exact_pid_absent=failure.get("exact_pid_absent"),
+            descendant_count=failure.get("descendant_count"),
+            orphan_count=failure.get("orphan_count"),
+            cancellation_state=failure.get("cancellation_state"),
+            cleanup_decision=failure.get("cleanup_decision"),
+            terminal_reason=failure.get("terminal_reason"),
+            diagnostic_serialization_status=failure.get(
+                "diagnostic_serialization_status"
+            ),
+            diagnostic_contract_status=failure.get("diagnostic_contract_status"),
+        )
+    else:
+        diagnostic = _observer_legacy_cleanup_diagnostic(
+            failure_api=str(failure.get("cleanup_failure_api") or "Win32ProcessApi"),
+            failure_code=(
+                failure.get("cleanup_failure_code", 0)
+                if type(failure.get("cleanup_failure_code", 0)) is int
+                else 0
+            ),
+            failure_phase=str(
+                failure.get("cleanup_failure_phase") or "API_INITIALIZATION"
+            ),
+            failure_reason=str(
+                failure.get("cleanup_failure_reason") or "API_FAILURE"
+            ),
+            snapshot_status=snapshot_status,
+            owned_process_count=owned_process_count,
+            orphan_count=1,
+            cancellation_state="FAILED",
+        )
     return {
         "child_exit_state": "UNKNOWN",
         "child_cancellation_state": "FAILED",
@@ -1701,6 +2366,7 @@ def _windows_cleanup_failure(
         "terminated_process_count": terminated_process_count,
         "identity_mismatch_count": identity_mismatch_count,
         **failure,
+        **diagnostic,
     }
 
 
@@ -1720,6 +2386,7 @@ def _terminate_windows_owned_tree(
     snapshot_status = "NOT_STARTED"
     failure: dict[str, Any] | None = None
     closure_proved = False
+    last_diagnostic: dict[str, Any] | None = None
 
     try:
         process_api = api if api is not None else _Win32ProcessApi()
@@ -1744,6 +2411,25 @@ def _terminate_windows_owned_tree(
                     exc,
                     api_name="GetProcessTimes",
                     phase="ROOT_IDENTITY",
+                )
+                failure.update(
+                    _observer_cleanup_diagnostic_fields(
+                        identity_check_stage="ROOT_CREATION_IDENTITY_QUERY",
+                        identity_failure_kind="OS_API_FAILURE",
+                        os_api="GetProcessTimes",
+                        sanitized_error_code=int(failure["cleanup_failure_code"]),
+                        snapshot_complete=None,
+                        expected_identity_present=True,
+                        observed_identity_present=False,
+                        identity_relation="NOT_APPLICABLE",
+                        identity_subject_role="ROOT",
+                        exact_pid_absent=None,
+                        descendant_count=0,
+                        orphan_count=1,
+                        cancellation_state="FAILED",
+                        cleanup_decision="FAIL_CLOSED_OS_API",
+                        terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                    )
                 )
             else:
                 records[root_pid] = {
@@ -1793,10 +2479,111 @@ def _terminate_windows_owned_tree(
                     handle = int(process_api.open_process(process_id))
                     owned_handles.append(handle)
                 except Exception as exc:
-                    failure = _win32_failure_fields(
+                    open_failure = _win32_failure_fields(
                         exc,
                         api_name="OpenProcess",
                         phase="OPEN_PROCESS",
+                    )
+                    disappearance_check = None
+                    if int(open_failure.get("cleanup_failure_code", 0)) == 87:
+                        disappearance_check = _enumerate_windows_processes(
+                            process_api,
+                            phase="FINAL_VERIFICATION",
+                        )
+                    continue_scan, reconciled_failure = (
+                        _d27_reconcile_open_process_disappearance(
+                            process_id,
+                            open_failure,
+                            disappearance_check,
+                        )
+                    )
+                    if continue_scan:
+                        last_diagnostic = _observer_cleanup_diagnostic_fields(
+                            identity_check_stage="OPEN_PROCESS_CODE_87_RECONCILIATION",
+                            identity_failure_kind="NONE",
+                            os_api="OpenProcess",
+                            sanitized_error_code=87,
+                            snapshot_complete=True,
+                            expected_identity_present=True,
+                            observed_identity_present=False,
+                            identity_relation="NOT_APPLICABLE",
+                            identity_subject_role="DESCENDANT",
+                            exact_pid_absent=True,
+                            descendant_count=0,
+                            orphan_count=0,
+                            cancellation_state="NOT_REQUIRED",
+                            cleanup_decision="CONTINUE_VERIFIED_CODE87_PID_ABSENT",
+                            terminal_reason="NONE",
+                        )
+                        if last_diagnostic["diagnostic_contract_status"] == "INVALID":
+                            failure = {
+                                "cleanup_failure_api": "Win32ProcessApi",
+                                "cleanup_failure_code": 0,
+                                "cleanup_failure_phase": "IDENTITY_VERIFICATION",
+                                "cleanup_failure_reason": "API_FAILURE",
+                                **last_diagnostic,
+                            }
+                            break
+                        continue
+                    failure = dict(reconciled_failure or open_failure)
+                    resnapshot_complete = (
+                        disappearance_check.get("complete") is True
+                        if disappearance_check is not None
+                        else None
+                    )
+                    exact_pid_absent = (
+                        all(
+                            int(candidate_pid) != process_id
+                            for candidate_pid, _ in disappearance_check.get(
+                                "entries", []
+                            )
+                        )
+                        if resnapshot_complete is True
+                        else None
+                    )
+                    if failure.get("cleanup_failure_reason") == "INCOMPLETE_SNAPSHOT":
+                        snapshot_status = "INCOMPLETE_SNAPSHOT"
+                        failure_kind = "INCOMPLETE_SNAPSHOT"
+                        cleanup_decision = "FAIL_CLOSED_INCOMPLETE_SNAPSHOT"
+                    elif (
+                        int(open_failure.get("cleanup_failure_code", 0)) == 87
+                        and exact_pid_absent is False
+                    ):
+                        failure_kind = "EXACT_PID_STILL_PRESENT"
+                        cleanup_decision = "FAIL_CLOSED_EXACT_PID_PRESENT"
+                    else:
+                        failure_kind = "OS_API_FAILURE"
+                        cleanup_decision = "FAIL_CLOSED_OS_API"
+                    failure.update(
+                        _observer_cleanup_diagnostic_fields(
+                            identity_check_stage=(
+                                "OPEN_PROCESS_CODE_87_RECONCILIATION"
+                                if int(open_failure.get("cleanup_failure_code", 0)) == 87
+                                else "NOT_APPLICABLE"
+                            ),
+                            identity_failure_kind=failure_kind,
+                            os_api=str(
+                                failure.get("cleanup_failure_api") or "OpenProcess"
+                            ),
+                            sanitized_error_code=int(
+                                failure.get("cleanup_failure_code", 0)
+                            ),
+                            snapshot_complete=resnapshot_complete,
+                            expected_identity_present=True,
+                            observed_identity_present=(
+                                not exact_pid_absent
+                                if exact_pid_absent is not None
+                                else None
+                            ),
+                            identity_relation="NOT_APPLICABLE",
+                            identity_subject_role="DESCENDANT",
+                            exact_pid_absent=exact_pid_absent,
+                            descendant_count=0,
+                            orphan_count=1,
+                            cancellation_state="FAILED",
+                            cleanup_decision=cleanup_decision,
+                            terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                        )
                     )
                     break
                 try:
@@ -1807,6 +2594,25 @@ def _terminate_windows_owned_tree(
                         api_name="GetProcessTimes",
                         phase="IDENTITY_QUERY",
                     )
+                    failure.update(
+                        _observer_cleanup_diagnostic_fields(
+                            identity_check_stage="CREATION_ORDER_IDENTITY_CHECK",
+                            identity_failure_kind="OS_API_FAILURE",
+                            os_api="GetProcessTimes",
+                            sanitized_error_code=int(failure["cleanup_failure_code"]),
+                            snapshot_complete=True,
+                            expected_identity_present=True,
+                            observed_identity_present=False,
+                            identity_relation="NOT_APPLICABLE",
+                            identity_subject_role="DESCENDANT",
+                            exact_pid_absent=None,
+                            descendant_count=max(0, len(records) - 1),
+                            orphan_count=1,
+                            cancellation_state="FAILED",
+                            cleanup_decision="FAIL_CLOSED_OS_API",
+                            terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                        )
+                    )
                     break
                 parent_record = records.get(parent_id)
                 parent_identity = (
@@ -1816,11 +2622,39 @@ def _terminate_windows_owned_tree(
                 )
                 if creation_identity < root_identity or creation_identity < parent_identity:
                     identity_mismatch_count += 1
+                    before_root = creation_identity < root_identity
+                    before_parent = creation_identity < parent_identity
+                    if before_root and before_parent:
+                        identity_failure_kind = "CREATION_BEFORE_ROOT_AND_PARENT"
+                        identity_relation = "CREATION_BEFORE_ROOT_AND_PARENT"
+                    elif before_root:
+                        identity_failure_kind = "CREATION_BEFORE_ROOT"
+                        identity_relation = "CREATION_BEFORE_ROOT"
+                    else:
+                        identity_failure_kind = "CREATION_BEFORE_PARENT"
+                        identity_relation = "CREATION_BEFORE_PARENT"
                     failure = {
                         "cleanup_failure_api": "GetProcessTimes",
                         "cleanup_failure_code": 0,
                         "cleanup_failure_phase": "IDENTITY_VERIFICATION",
                         "cleanup_failure_reason": "IDENTITY_MISMATCH",
+                        **_observer_cleanup_diagnostic_fields(
+                            identity_check_stage="CREATION_ORDER_IDENTITY_CHECK",
+                            identity_failure_kind=identity_failure_kind,
+                            os_api="GetProcessTimes",
+                            sanitized_error_code=0,
+                            snapshot_complete=True,
+                            expected_identity_present=True,
+                            observed_identity_present=True,
+                            identity_relation=identity_relation,
+                            identity_subject_role="DESCENDANT",
+                            exact_pid_absent=None,
+                            descendant_count=max(0, len(records) - 1),
+                            orphan_count=1,
+                            cancellation_state="FAILED",
+                            cleanup_decision="FAIL_CLOSED_IDENTITY_MISMATCH",
+                            terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                        ),
                     }
                     break
                 revalidation = _enumerate_windows_processes(
@@ -1837,6 +2671,32 @@ def _terminate_windows_owned_tree(
                             "cleanup_failure_reason",
                         )
                     }
+                    failure.update(
+                        _observer_cleanup_diagnostic_fields(
+                            identity_check_stage="PARENT_REVALIDATION_IDENTITY_CHECK",
+                            identity_failure_kind="INCOMPLETE_SNAPSHOT",
+                            os_api=str(
+                                failure.get(
+                                    "cleanup_failure_api",
+                                    "CreateToolhelp32Snapshot",
+                                )
+                            ),
+                            sanitized_error_code=int(
+                                failure.get("cleanup_failure_code", 0)
+                            ),
+                            snapshot_complete=False,
+                            expected_identity_present=True,
+                            observed_identity_present=None,
+                            identity_relation="NOT_APPLICABLE",
+                            identity_subject_role="DESCENDANT",
+                            exact_pid_absent=None,
+                            descendant_count=max(0, len(records) - 1),
+                            orphan_count=1,
+                            cancellation_state="FAILED",
+                            cleanup_decision="FAIL_CLOSED_INCOMPLETE_SNAPSHOT",
+                            terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                        )
+                    )
                     break
                 revalidated_parents = {
                     int(candidate_pid): int(candidate_parent)
@@ -1844,11 +2704,37 @@ def _terminate_windows_owned_tree(
                 }
                 if revalidated_parents.get(process_id) != parent_id:
                     identity_mismatch_count += 1
+                    observed_present = process_id in revalidated_parents
                     failure = {
                         "cleanup_failure_api": "GetProcessTimes",
                         "cleanup_failure_code": 0,
                         "cleanup_failure_phase": "IDENTITY_VERIFICATION",
                         "cleanup_failure_reason": "IDENTITY_MISMATCH",
+                        **_observer_cleanup_diagnostic_fields(
+                            identity_check_stage="PARENT_REVALIDATION_IDENTITY_CHECK",
+                            identity_failure_kind=(
+                                "PARENT_RELATION_CHANGED"
+                                if observed_present
+                                else "PARENT_ABSENT"
+                            ),
+                            os_api="Process32NextW",
+                            sanitized_error_code=0,
+                            snapshot_complete=True,
+                            expected_identity_present=True,
+                            observed_identity_present=observed_present,
+                            identity_relation=(
+                                "PARENT_CHANGED"
+                                if observed_present
+                                else "PARENT_ABSENT"
+                            ),
+                            identity_subject_role="DESCENDANT",
+                            exact_pid_absent=None,
+                            descendant_count=max(0, len(records) - 1),
+                            orphan_count=1,
+                            cancellation_state="FAILED",
+                            cleanup_decision="FAIL_CLOSED_IDENTITY_MISMATCH",
+                            terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                        ),
                     }
                     break
                 records[process_id] = {
@@ -1881,6 +2767,27 @@ def _terminate_windows_owned_tree(
                         api_name="GetProcessTimes",
                         phase="IDENTITY_VERIFICATION",
                     )
+                    failure.update(
+                        _observer_cleanup_diagnostic_fields(
+                            identity_check_stage="HANDLE_IDENTITY_REVALIDATION_CHECK",
+                            identity_failure_kind="OS_API_FAILURE",
+                            os_api="GetProcessTimes",
+                            sanitized_error_code=int(failure["cleanup_failure_code"]),
+                            snapshot_complete=True,
+                            expected_identity_present=True,
+                            observed_identity_present=False,
+                            identity_relation="NOT_APPLICABLE",
+                            identity_subject_role=str(
+                                record.get("relation") or "NOT_APPLICABLE"
+                            ),
+                            exact_pid_absent=None,
+                            descendant_count=max(0, len(records) - 1),
+                            orphan_count=1,
+                            cancellation_state="FAILED",
+                            cleanup_decision="FAIL_CLOSED_OS_API",
+                            terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                        )
+                    )
                     break
                 if current_identity != int(record["creation_identity"]):
                     identity_mismatch_count += 1
@@ -1889,6 +2796,25 @@ def _terminate_windows_owned_tree(
                         "cleanup_failure_code": 0,
                         "cleanup_failure_phase": "IDENTITY_VERIFICATION",
                         "cleanup_failure_reason": "IDENTITY_MISMATCH",
+                        **_observer_cleanup_diagnostic_fields(
+                            identity_check_stage="HANDLE_IDENTITY_REVALIDATION_CHECK",
+                            identity_failure_kind="HANDLE_CREATION_IDENTITY_CHANGED",
+                            os_api="GetProcessTimes",
+                            sanitized_error_code=0,
+                            snapshot_complete=True,
+                            expected_identity_present=True,
+                            observed_identity_present=True,
+                            identity_relation="DIFFERENT",
+                            identity_subject_role=str(
+                                record.get("relation") or "NOT_APPLICABLE"
+                            ),
+                            exact_pid_absent=None,
+                            descendant_count=max(0, len(records) - 1),
+                            orphan_count=1,
+                            cancellation_state="FAILED",
+                            cleanup_decision="FAIL_CLOSED_IDENTITY_MISMATCH",
+                            terminal_reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                        ),
                     }
                     break
                 wait_result = _wait_windows_process(
@@ -1985,6 +2911,57 @@ def _terminate_windows_owned_tree(
             identity_mismatch_count=identity_mismatch_count,
             snapshot_status=snapshot_status,
         )
+    success_cancellation_state = "COMPLETED" if terminated_count else "NOT_REQUIRED"
+    if last_diagnostic is not None:
+        success_diagnostic = _observer_cleanup_diagnostic_fields(
+            identity_check_stage=str(last_diagnostic["identity_check_stage"]),
+            identity_failure_kind="NONE",
+            os_api=str(last_diagnostic["os_api"]),
+            sanitized_error_code=int(last_diagnostic["sanitized_error_code"]),
+            snapshot_complete=True,
+            expected_identity_present=last_diagnostic["expected_identity_present"],
+            observed_identity_present=last_diagnostic["observed_identity_present"],
+            identity_relation=str(last_diagnostic["identity_relation"]),
+            identity_subject_role=str(last_diagnostic["identity_subject_role"]),
+            exact_pid_absent=last_diagnostic["exact_pid_absent"],
+            descendant_count=0,
+            orphan_count=0,
+            cancellation_state=success_cancellation_state,
+            cleanup_decision=str(last_diagnostic["cleanup_decision"]),
+            terminal_reason="NONE",
+        )
+    else:
+        success_diagnostic = _observer_cleanup_diagnostic_fields(
+            identity_check_stage="DESCENDANT_ORPHAN_CLOSURE_CHECK",
+            identity_failure_kind="NONE",
+            os_api="NONE",
+            sanitized_error_code=0,
+            snapshot_complete=True,
+            expected_identity_present=None,
+            observed_identity_present=None,
+            identity_relation="NOT_APPLICABLE",
+            identity_subject_role="NOT_APPLICABLE",
+            exact_pid_absent=None,
+            descendant_count=0,
+            orphan_count=0,
+            cancellation_state=success_cancellation_state,
+            cleanup_decision="CLOSURE_PROVED",
+            terminal_reason="NONE",
+        )
+    if success_diagnostic["diagnostic_contract_status"] == "INVALID":
+        return _windows_cleanup_failure(
+            {
+                "cleanup_failure_api": "Win32ProcessApi",
+                "cleanup_failure_code": 0,
+                "cleanup_failure_phase": "IDENTITY_VERIFICATION",
+                "cleanup_failure_reason": "API_FAILURE",
+                **success_diagnostic,
+            },
+            owned_process_count=len(records),
+            terminated_process_count=terminated_count,
+            identity_mismatch_count=identity_mismatch_count,
+            snapshot_status="INCOMPLETE_SNAPSHOT",
+        )
     return {
         "child_exit_state": "TERMINATED" if terminated_count else "EXITED",
         "child_cancellation_state": "COMPLETED" if terminated_count else "NOT_REQUIRED",
@@ -2001,6 +2978,7 @@ def _terminate_windows_owned_tree(
         "cleanup_failure_code": 0,
         "cleanup_failure_phase": "NONE",
         "cleanup_failure_reason": "NONE",
+        **success_diagnostic,
     }
 
 
@@ -2372,13 +3350,20 @@ def _write_incomplete(
 
     start = _read_json(directory / "start.json") or {}
     state = _read_json(directory / "state.json") or {}
+    safe_reason, _reason_allowlisted = _observer_safe_terminal_reason(reason)
+    sanitized_failure = (
+        _sanitize_terminal_failure_metadata(failure_metadata)
+        if isinstance(failure_metadata, dict)
+        else None
+    )
+    cleanup_summary = _observer_cleanup_summary(safe_reason, sanitized_failure)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "observation_id": start.get("observation_id"),
         "mode": start.get("mode"),
         "status": "INCOMPLETE",
         "verification_status": "NOT_VERIFIED",
-        "reason": reason,
+        "reason": safe_reason,
         "requested_duration_seconds": start.get("requested_duration_seconds"),
         "started_at_utc": start.get("started_at_utc"),
         "ended_at_utc": _utc_now(),
@@ -2389,9 +3374,10 @@ def _write_incomplete(
         "maximum_allowed_gap_seconds": start.get("maximum_allowed_gap_seconds"),
         "process_exit_code": process_exit_code,
         "completion_marker": False,
+        "cleanup_summary": cleanup_summary,
     }
-    if failure_metadata is not None:
-        payload["first_failure"] = dict(failure_metadata)
+    if sanitized_failure is not None:
+        payload["first_failure"] = sanitized_failure
     if not _acquire_terminal_claim(directory, "INCOMPLETE"):
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
@@ -2412,25 +3398,28 @@ def _write_incomplete(
         {
             "event": "INCOMPLETE",
             "at_utc": payload["ended_at_utc"],
-            "reason": reason,
+            "reason": safe_reason,
             "process_exit_code": process_exit_code,
             "failure_category": (
-                failure_metadata.get("failure_category")
-                if failure_metadata is not None
+                sanitized_failure.get("failure_category")
+                if sanitized_failure is not None
                 else None
             ),
+            "first_failure": sanitized_failure,
+            "cleanup_summary": cleanup_summary,
         },
     )
     state.update(
         {
             "status": "INCOMPLETE",
             "verification_status": "NOT_VERIFIED",
-            "reason": reason,
+            "reason": safe_reason,
             "ended_at_utc": payload["ended_at_utc"],
+            "cleanup_summary": cleanup_summary,
         }
     )
-    if failure_metadata is not None:
-        state["first_failure"] = dict(failure_metadata)
+    if sanitized_failure is not None:
+        state["first_failure"] = sanitized_failure
     _atomic_write_json(directory / "state.json", state)
     _atomic_write_json(directory / "incomplete.json", payload)
     return _read_json(directory / "incomplete.json") or payload
@@ -2821,6 +3810,50 @@ def _run_worker(
         next_sample_monotonic = started_monotonic + sample_count * interval_seconds
 
 
+def _validate_incomplete(
+    start: dict[str, Any], incomplete: dict[str, Any]
+) -> list[str]:
+    failures: list[str] = []
+    if incomplete.get("status") != "INCOMPLETE":
+        failures.append("INCOMPLETE_STATUS_INVALID")
+    if incomplete.get("verification_status") != "NOT_VERIFIED":
+        failures.append("INCOMPLETE_VERIFICATION_STATUS_INVALID")
+    if incomplete.get("completion_marker") is not False:
+        failures.append("INCOMPLETE_COMPLETION_MARKER_INVALID")
+    if incomplete.get("observation_id") != start.get("observation_id"):
+        failures.append("OBSERVATION_ID_MISMATCH")
+    if incomplete.get("mode") != start.get("mode"):
+        failures.append("MODE_MISMATCH")
+    process_exit_code = incomplete.get("process_exit_code")
+    if type(process_exit_code) is not int or process_exit_code == 0:
+        failures.append("INCOMPLETE_PROCESS_EXIT_CODE_INVALID")
+    raw_failure = incomplete.get("first_failure")
+    if raw_failure is not None and not isinstance(raw_failure, dict):
+        failures.append("FIRST_FAILURE_NOT_OBJECT")
+        sanitized_failure = None
+    else:
+        sanitized_failure = (
+            _sanitize_terminal_failure_metadata(raw_failure)
+            if isinstance(raw_failure, dict)
+            else None
+        )
+        if isinstance(raw_failure, dict) and sanitized_failure != raw_failure:
+            failures.append("FIRST_FAILURE_NOT_SANITIZED")
+    expected_summary = _observer_cleanup_summary(
+        incomplete.get("reason"), sanitized_failure
+    )
+    summary = incomplete.get("cleanup_summary")
+    if not isinstance(summary, dict):
+        failures.append("CLEANUP_SUMMARY_MISSING_OR_INVALID")
+    elif summary != expected_summary:
+        failures.append("CLEANUP_SUMMARY_CONTRACT_MISMATCH")
+    elif summary.get("status") != "FAIL" or str(summary.get("verdict", "")).endswith(
+        "PASS"
+    ):
+        failures.append("CLEANUP_SUMMARY_FALSE_PASS")
+    return failures
+
+
 def _validate_final(start: dict[str, Any], final: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     if final.get("completion_marker") is not True:
@@ -2880,6 +3913,16 @@ def poll_observation(
             "reason": "TERMINAL_ARTIFACT_CONFLICT",
         }
     if incomplete is not None:
+        failures = _validate_incomplete(start, incomplete)
+        if failures:
+            return {
+                "observation_id": observation_id,
+                "mode": start.get("mode"),
+                "status": "NOT_VERIFIED",
+                "verification_status": "NOT_VERIFIED",
+                "reason": "INVALID_INCOMPLETE_SUMMARY",
+                "validation_failures": failures,
+            }
         return incomplete
     if final is not None:
         failures = _validate_final(start, final)
