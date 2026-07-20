@@ -2038,9 +2038,18 @@ def _observer_cleanup_summary(
     reason: Any,
     first_failure: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    safe_reason, reason_allowlisted = _observer_safe_terminal_reason(reason)
+    safe_reason, input_allowlisted = _observer_safe_terminal_reason(reason)
+    reason_fallback_used = (
+        not input_allowlisted or safe_reason == "TERMINAL_REASON_NOT_ALLOWLISTED"
+    )
+    reason_allowlisted = not reason_fallback_used
     failure = first_failure if isinstance(first_failure, dict) else {}
     diagnostic = _observer_terminal_diagnostic(failure)
+    if (
+        reason_fallback_used
+        and diagnostic.get("diagnostic_contract_status") == "NOT_AVAILABLE_LEGACY"
+    ):
+        diagnostic = {**diagnostic, "diagnostic_contract_status": "INVALID"}
     orphan_count = diagnostic.get("orphan_count")
     if type(orphan_count) is not int:
         orphan_count = 1 if failure else 0
@@ -2063,11 +2072,12 @@ def _observer_cleanup_summary(
         + diagnostic_invalid_count,
     )
     diagnostic_reason = diagnostic.get("diagnostic_terminal_reason")
-    reason_preserved = reason_allowlisted and diagnostic_reason in {
+    diagnostic_reason_mismatch = diagnostic_reason not in {
         "NONE",
         "NOT_VERIFIED",
         safe_reason,
     }
+    reason_preserved = not reason_fallback_used
     observer_cleanup_failure = (
         failure.get("exit_category") == "PROCESS_TREE_CLEANUP_FAILED"
         or safe_reason == "SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT"
@@ -2079,9 +2089,14 @@ def _observer_cleanup_summary(
         "terminal_reason": safe_reason,
         "terminal_reason_input_allowlisted": reason_allowlisted,
         "terminal_reason_preserved_exactly": reason_preserved,
-        "terminal_reason_fallback_used": not reason_allowlisted,
-        "parent_validator_masking_count": 0 if reason_preserved else 1,
-        "terminal_reason_masking_count": 0 if reason_preserved else 1,
+        "terminal_reason_fallback_used": reason_fallback_used,
+        "parent_validator_masking_count": 0,
+        "terminal_reason_masking_count": int(reason_fallback_used),
+        "terminal_reason_sanitization_masking_count": int(reason_fallback_used),
+        "unintended_terminal_masking_count": 0,
+        "diagnostic_terminal_reason_mismatch_count": int(
+            diagnostic_reason_mismatch
+        ),
         "terminal_reason_comparison_count": int(bool(failure)),
         "incomplete_first_failure_count": int(bool(failure)),
         "unresolved_cleanup_count": unresolved_cleanup_count,
@@ -3350,13 +3365,13 @@ def _write_incomplete(
 
     start = _read_json(directory / "start.json") or {}
     state = _read_json(directory / "state.json") or {}
-    safe_reason, _reason_allowlisted = _observer_safe_terminal_reason(reason)
     sanitized_failure = (
         _sanitize_terminal_failure_metadata(failure_metadata)
         if isinstance(failure_metadata, dict)
         else None
     )
-    cleanup_summary = _observer_cleanup_summary(safe_reason, sanitized_failure)
+    cleanup_summary = _observer_cleanup_summary(reason, sanitized_failure)
+    safe_reason = cleanup_summary["terminal_reason"]
     payload = {
         "schema_version": SCHEMA_VERSION,
         "observation_id": start.get("observation_id"),

@@ -1330,6 +1330,292 @@ def build_canonical_fixture_result() -> dict[str, Any]:
     }
 
 
+def _d34_in_memory_write(
+    *,
+    reason: Any,
+    failure_metadata: dict[str, Any] | None = None,
+    process_exit_code: Any = 42,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    directory = Path("d34-synthetic-artifact")
+    storage: dict[str, dict[str, Any]] = {
+        "start.json": {
+            "observation_id": "D34-SYNTHETIC",
+            "mode": "local-test",
+            "requested_duration_seconds": 60.0,
+            "started_at_utc": "2026-07-20T00:00:00+00:00",
+            "sample_interval_seconds": 2.0,
+            "maximum_allowed_gap_seconds": 5.0,
+        },
+        "state.json": {
+            "status": "RUNNING",
+            "monotonic_elapsed_seconds": 10.0,
+            "sample_count": 6,
+            "maximum_gap_seconds": 2.0,
+        },
+    }
+    events: list[dict[str, Any]] = []
+
+    def clone(value: dict[str, Any]) -> dict[str, Any]:
+        return json.loads(json.dumps(value, ensure_ascii=True, sort_keys=True))
+
+    def read_json(path: Path) -> dict[str, Any] | None:
+        value = storage.get(path.name)
+        return clone(value) if value is not None else None
+
+    def append_event(_path: Path, payload: dict[str, Any]) -> None:
+        events.append(clone(payload))
+
+    def atomic_write(path: Path, payload: dict[str, Any]) -> None:
+        storage[path.name] = clone(payload)
+
+    with mock.patch.object(observer, "_read_json", side_effect=read_json), mock.patch.object(
+        observer, "_acquire_terminal_claim", return_value=True
+    ), mock.patch.object(
+        observer, "_append_event", side_effect=append_event
+    ), mock.patch.object(
+        observer, "_atomic_write_json", side_effect=atomic_write
+    ), mock.patch.object(
+        observer, "_utc_now", return_value="2026-07-20T00:00:00+00:00"
+    ), mock.patch.object(Path, "exists", return_value=False):
+        result = observer._write_incomplete(
+            directory,
+            reason=reason,
+            process_exit_code=process_exit_code,
+            failure_metadata=failure_metadata,
+        )
+    return result, storage, events
+
+
+def _d34_written_case(
+    *,
+    case_id: str,
+    reason: Any,
+    failure_metadata: dict[str, Any] | None,
+    expected: dict[str, Any],
+    raw_probe: str | None = None,
+) -> dict[str, Any]:
+    result, storage, events = _d34_in_memory_write(
+        reason=reason, failure_metadata=failure_metadata
+    )
+    incomplete = storage["incomplete.json"]
+    state = storage["state.json"]
+    event = events[-1]
+    summary = incomplete["cleanup_summary"]
+    encoded = _canonical_bytes({"storage": storage, "events": events})
+    actual = {
+        "stored_terminal_reason": summary.get("terminal_reason"),
+        "fallback_used": summary.get("terminal_reason_fallback_used"),
+        "preserved_exactly": summary.get("terminal_reason_preserved_exactly"),
+        "sanitization_masking_count": summary.get(
+            "terminal_reason_sanitization_masking_count",
+            summary.get("terminal_reason_masking_count"),
+        ),
+        "unintended_masking_count": summary.get(
+            "unintended_terminal_masking_count", 0
+        ),
+        "diagnostic_reason_mismatch_count": summary.get(
+            "diagnostic_terminal_reason_mismatch_count", 0
+        ),
+        "diagnostic_contract_status": summary.get("diagnostic_contract_status"),
+        "cleanup_status": summary.get("status"),
+        "final_terminal_state": (
+            "INCOMPLETE/FAIL"
+            if incomplete.get("status") == "INCOMPLETE"
+            and summary.get("status") == "FAIL"
+            else "UNEXPECTED"
+        ),
+        "representations_match": (
+            result == incomplete
+            and incomplete.get("reason")
+            == state.get("reason")
+            == event.get("reason")
+            and summary
+            == state.get("cleanup_summary")
+            == event.get("cleanup_summary")
+        ),
+        "raw_sentinel_persistence_count": (
+            encoded.count(raw_probe.encode("utf-8")) if raw_probe else 0
+        ),
+    }
+    contract_pass = all(actual.get(key) == value for key, value in expected.items())
+    return {
+        "case_id": case_id,
+        "contract_pass": contract_pass,
+        "false_runtime_pass_count": int(
+            incomplete.get("status") == "PASS" or summary.get("status") == "PASS"
+        ),
+        "unintended_terminal_masking_count": int(
+            actual["unintended_masking_count"] or 0
+        ),
+        "raw_sentinel_persistence_count": actual[
+            "raw_sentinel_persistence_count"
+        ],
+        "ambiguity_count": int(not contract_pass),
+        "actual": actual,
+    }
+
+
+def _d34_serialization_case() -> dict[str, Any]:
+    cycle: list[Any] = []
+    cycle.append(cycle)
+    raised = "NONE"
+    try:
+        _d34_in_memory_write(reason="OWNER_STOP", process_exit_code=cycle)
+    except Exception as exc:
+        raised = type(exc).__name__
+    passed = raised == "ValueError"
+    return {
+        "case_id": "D34-P08",
+        "contract_pass": passed,
+        "false_runtime_pass_count": 0,
+        "unintended_terminal_masking_count": 0,
+        "raw_sentinel_persistence_count": 0,
+        "ambiguity_count": int(not passed),
+        "actual": {
+            "exception_class": raised,
+            "final_terminal_state": "FAIL_CLOSED_EXCEPTION",
+        },
+    }
+
+
+def build_d34_production_path_fixture_result() -> dict[str, Any]:
+    fallback = "TERMINAL_REASON_NOT_ALLOWLISTED"
+    raw_reason = "".join(
+        ["D34", "_RUNTIME_", hashlib.sha256(b"reason-probe-v1").hexdigest().upper()]
+    )
+    common = {
+        "cleanup_status": "FAIL",
+        "final_terminal_state": "INCOMPLETE/FAIL",
+        "representations_match": True,
+        "raw_sentinel_persistence_count": 0,
+        "unintended_masking_count": 0,
+    }
+    collision = _valid_failure_metadata()
+    collision["process_tree_snapshot_status"] = "INCOMPLETE_SNAPSHOT"
+    cases = [
+        _d34_written_case(
+            case_id="D34-P01",
+            reason="OWNER_STOP",
+            failure_metadata=None,
+            expected={
+                **common,
+                "stored_terminal_reason": "OWNER_STOP",
+                "fallback_used": False,
+                "preserved_exactly": True,
+                "sanitization_masking_count": 0,
+                "diagnostic_contract_status": "NOT_AVAILABLE_LEGACY",
+            },
+        ),
+        _d34_written_case(
+            case_id="D34-P02",
+            reason=raw_reason,
+            failure_metadata=None,
+            raw_probe=raw_reason,
+            expected={
+                **common,
+                "stored_terminal_reason": fallback,
+                "fallback_used": True,
+                "preserved_exactly": False,
+                "sanitization_masking_count": 1,
+                "diagnostic_contract_status": "INVALID",
+            },
+        ),
+        _d34_written_case(
+            case_id="D34-P03",
+            reason="",
+            failure_metadata=None,
+            expected={
+                **common,
+                "stored_terminal_reason": fallback,
+                "fallback_used": True,
+                "preserved_exactly": False,
+                "sanitization_masking_count": 1,
+                "diagnostic_contract_status": "INVALID",
+            },
+        ),
+        _d34_written_case(
+            case_id="D34-P04",
+            reason=48834,
+            failure_metadata=None,
+            raw_probe="48834",
+            expected={
+                **common,
+                "stored_terminal_reason": fallback,
+                "fallback_used": True,
+                "preserved_exactly": False,
+                "sanitization_masking_count": 1,
+                "diagnostic_contract_status": "INVALID",
+            },
+        ),
+        _d34_written_case(
+            case_id="D34-P05",
+            reason="SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+            failure_metadata=collision,
+            expected={
+                **common,
+                "stored_terminal_reason": "SAMPLER_DEPENDENCY_OR_SUBPROCESS_DEFECT",
+                "fallback_used": False,
+                "preserved_exactly": True,
+                "sanitization_masking_count": 0,
+                "diagnostic_contract_status": "INVALID",
+            },
+        ),
+        _d34_written_case(
+            case_id="D34-P06",
+            reason="OWNER_STOP",
+            failure_metadata=_valid_failure_metadata(),
+            expected={
+                **common,
+                "stored_terminal_reason": "OWNER_STOP",
+                "fallback_used": False,
+                "preserved_exactly": True,
+                "sanitization_masking_count": 0,
+                "diagnostic_contract_status": "PASS",
+                "diagnostic_reason_mismatch_count": 1,
+            },
+        ),
+        _d34_written_case(
+            case_id="D34-P07",
+            reason=fallback,
+            failure_metadata=None,
+            expected={
+                **common,
+                "stored_terminal_reason": fallback,
+                "fallback_used": True,
+                "preserved_exactly": False,
+                "sanitization_masking_count": 1,
+                "diagnostic_contract_status": "INVALID",
+            },
+        ),
+        _d34_serialization_case(),
+    ]
+    false_pass_count = sum(case["false_runtime_pass_count"] for case in cases)
+    masking_count = sum(
+        case["unintended_terminal_masking_count"] for case in cases
+    )
+    raw_count = sum(case["raw_sentinel_persistence_count"] for case in cases)
+    ambiguity_count = sum(case["ambiguity_count"] for case in cases)
+    return {
+        "schema": "R9ZNW_R488D34_TRACKED_PRODUCTION_PATH_FIXTURE_V1",
+        "case_count": len(cases),
+        "contract_pass_count": sum(case["contract_pass"] for case in cases),
+        "contract_fail_count": sum(not case["contract_pass"] for case in cases),
+        "false_runtime_pass_count": false_pass_count,
+        "unintended_terminal_masking_count": masking_count,
+        "raw_sentinel_persistence_count": raw_count,
+        "ambiguity_count": ambiguity_count,
+        "strict_gate": (
+            len(cases) == 8
+            and all(case["contract_pass"] for case in cases)
+            and false_pass_count == 0
+            and masking_count == 0
+            and raw_count == 0
+            and ambiguity_count == 0
+        ),
+        "cases": cases,
+    }
+
+
 class R488D33CanonicalObserverEvidenceContractTests(unittest.TestCase):
     def test_canonical_39_case_contract(self) -> None:
         result = build_canonical_fixture_result()
@@ -1338,6 +1624,17 @@ class R488D33CanonicalObserverEvidenceContractTests(unittest.TestCase):
         self.assertEqual(result["contract_fail_count"], 0)
         self.assertEqual(result["false_pass_count"], 0)
         self.assertEqual(result["unintended_terminal_masking_count"], 0)
+        self.assertEqual(result["ambiguity_count"], 0)
+        self.assertTrue(result["strict_gate"])
+
+    def test_d34_write_incomplete_reason_provenance_contract(self) -> None:
+        result = build_d34_production_path_fixture_result()
+        self.assertEqual(result["case_count"], 8)
+        self.assertEqual(result["contract_pass_count"], 8)
+        self.assertEqual(result["contract_fail_count"], 0)
+        self.assertEqual(result["false_runtime_pass_count"], 0)
+        self.assertEqual(result["unintended_terminal_masking_count"], 0)
+        self.assertEqual(result["raw_sentinel_persistence_count"], 0)
         self.assertEqual(result["ambiguity_count"], 0)
         self.assertTrue(result["strict_gate"])
 
