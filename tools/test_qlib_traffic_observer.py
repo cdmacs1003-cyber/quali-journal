@@ -2054,6 +2054,7 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
                 "start_ticks = int(raw[raw.rfind(')') + 2:].split()[19])",
                 "marker = pathlib.Path(os.environ['QLIB_TEST_GRANDCHILD_PID_FILE'])",
                 "marker.write_text(os.environ['QLIB_TEST_CASE_NONCE'] + ':' + str(os.getpid()) + ':' + str(start_ticks), encoding='utf-8')",
+                "os.write(1, b'R')",
                 "stop = pathlib.Path(os.environ['QLIB_TEST_EMERGENCY_STOP_FILE'])",
                 "deadline = time.monotonic() + 60.0",
                 "while not stop.exists() and time.monotonic() < deadline:",
@@ -2063,7 +2064,9 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
         script = "\n".join(
             (
                 "import json, os, pathlib, subprocess, sys, time",
-                f"grandchild = subprocess.Popen([sys.executable, '-c', {grandchild_script!r}])",
+                "grandchild = subprocess.Popen([sys.executable, os.environ['QLIB_TEST_GRANDCHILD_SCRIPT']], stdout=subprocess.PIPE)",
+                "if grandchild.stdout is None or grandchild.stdout.read(1) != b'R': raise SystemExit(61)",
+                "grandchild.stdout.close()",
                 "progress = {'current_phase':'HTTP_REQUEST','last_completed_phase':'REQUEST_PREPARATION','phase_timings':[{'phase':'AUTHENTICATION','elapsed_ms':1.0,'status':'PASS'}],'timeout_reason':'NONE','read_only_command_count':2,'mutation_command_count':0,'valid_sample_count':0,'child_exit_state':'RUNNING','child_cancellation_state':'NOT_REQUIRED','orphan_child_count':0}",
                 "pathlib.Path(os.environ['QLIB_SAMPLER_PROGRESS_FILE']).write_text(json.dumps(progress), encoding='utf-8')",
                 "print('{\"sample_status\":', flush=True)",
@@ -2073,8 +2076,14 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
                 "    time.sleep(0.02)",
             )
         )
+        grandchild_path = root / "grandchild.py"
+        sampler_path = root / "sampler.py"
+        grandchild_path.write_text(grandchild_script, encoding="utf-8")
+        sampler_path.write_text(script, encoding="utf-8")
         observation_id = "r487a-linux-supervised-timeout"
-        sampler_argv = [sys.executable, "-c", script]
+        sampler_argv = [sys.executable, str(sampler_path)]
+        self.assertLessEqual(max(len(item) for item in sampler_argv), 1024)
+        self.assertEqual(observer._validate_sampler_argv(sampler_argv), sampler_argv)
         state: dict[str, Any] = {
             "root": root,
             "directory": root / observation_id,
@@ -2099,6 +2108,7 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
                 "QLIB_TEST_GRANDCHILD_PID_FILE": str(marker),
                 "QLIB_TEST_EMERGENCY_STOP_FILE": str(emergency_stop),
                 "QLIB_TEST_CASE_NONCE": nonce,
+                "QLIB_TEST_GRANDCHILD_SCRIPT": str(grandchild_path),
             },
             clear=False,
         ):
