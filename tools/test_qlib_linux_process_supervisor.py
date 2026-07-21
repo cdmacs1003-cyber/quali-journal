@@ -936,11 +936,20 @@ class PlatformTierFailureEvidenceTests(unittest.TestCase):
             "synthetic.unexpected.case raw-response-body",
         )
         tests = tuple(synthetic_test(value) for value in raw_values)
-        result.failures = [(tests[0], "raw failure traceback token")]
-        result.errors = [(tests[1], "raw error traceback command")]
+        result.failures = [(tests[0], "AssertionError: raw failure traceback token")]
+        result.errors = [
+            (
+                tests[1],
+                "Traceback (most recent call last):\n"
+                '  File "raw-path", line 1, in _cleanup_linux_timeout_fixture\n'
+                "    raw-command raw-identity\n"
+                "AttributeError: raw error traceback command "
+                "SUPERVISOR_HANDLE_REAP_FAILED\n",
+            )
+        ]
         result.skipped = [(tests[2], "raw skip reason url")]
         result.expectedFailures = [
-            (tests[3], "raw expected failure environment")
+            (tests[3], "AssertionError: raw expected failure environment")
         ]
         result.unexpectedSuccesses = [tests[4]]
 
@@ -951,11 +960,88 @@ class PlatformTierFailureEvidenceTests(unittest.TestCase):
             sorted(platform_tiers.FAILURE_OUTCOMES),
         )
         serialized_records = json.dumps(records, sort_keys=True)
-        for raw_value in (*raw_values, "raw failure traceback token"):
+        for raw_value in (
+            *raw_values,
+            "raw failure traceback token",
+            "raw-path",
+            "raw-command",
+            "raw-identity",
+            "raw error traceback command",
+        ):
             self.assertNotIn(raw_value, serialized_records)
         for record in records:
             self.assertRegex(record["failed_test_id_sha256"], r"^[a-f0-9]{64}$")
             self.assertRegex(record["detail_sha256"], r"^[a-f0-9]{64}$")
+            self.assertIn(
+                record["detail_class_enum"],
+                platform_tiers.FAILURE_DETAIL_CLASSES,
+            )
+            self.assertIn(
+                record["detail_reason_enum"],
+                platform_tiers.FAILURE_DETAIL_REASONS,
+            )
+            self.assertIn(
+                record["detail_stage_enum"],
+                platform_tiers.FAILURE_DETAIL_STAGES,
+            )
+        error_record = next(
+            record for record in records if record["outcome_enum"] == "ERROR"
+        )
+        self.assertEqual(error_record["detail_class_enum"], "ATTRIBUTE_ERROR")
+        self.assertEqual(
+            error_record["detail_reason_enum"], "NONE"
+        )
+        self.assertEqual(
+            error_record["detail_stage_enum"], "TIMEOUT_FIXTURE_CLEANUP"
+        )
+        source_collision = platform_tiers._classify_nonpass_detail(
+            "Traceback (most recent call last):\n"
+            "  raise LinuxSupervisorError('PROC_IDENTITY_NOT_AVAILABLE')\n"
+            "AssertionError: terminal assertion only\n"
+        )
+        self.assertEqual(
+            source_collision, ("ASSERTION_ERROR", "NONE", "UNKNOWN")
+        )
+        chained = platform_tiers._classify_nonpass_detail(
+            "ValueError: CLEANUP_POLL_FAILED\n\n"
+            "The above exception was the direct cause of the following exception:\n\n"
+            "Traceback (most recent call last):\n"
+            '  File "safe", line 2, in _assert_linux_supervised_timeout_contract\n'
+            "RuntimeError: terminal runtime error\n"
+        )
+        self.assertEqual(
+            chained, ("RUNTIME_ERROR", "NONE", "TIMEOUT_TEST_BODY")
+        )
+        ambiguous = platform_tiers._classify_nonpass_detail(
+            "AssertionError: LINUX_TIMEOUT_FIXTURE_CLEANUP_FAILED:"
+            "CLEANUP_POLL_FAILED,EXACT_CHILD_REMAINS\n"
+        )
+        self.assertEqual(
+            ambiguous, ("ASSERTION_ERROR", "AMBIGUOUS", "UNKNOWN")
+        )
+        exact_cleanup_reason = platform_tiers._classify_nonpass_detail(
+            "Traceback (most recent call last):\n"
+            '  File "safe", line 3, in _cleanup_linux_timeout_fixture\n'
+            "AssertionError: LINUX_TIMEOUT_FIXTURE_CLEANUP_FAILED:"
+            "EXACT_CHILD_REMAINS\n"
+        )
+        self.assertEqual(
+            exact_cleanup_reason,
+            ("ASSERTION_ERROR", "EXACT_CHILD_REMAINS", "TIMEOUT_FIXTURE_CLEANUP"),
+        )
+        multiline_decoy = platform_tiers._classify_nonpass_detail(
+            "Traceback (most recent call last):\n"
+            '  File "safe", line 4, in _assert_linux_supervised_timeout_contract\n'
+            "AttributeError: terminal message begins\n"
+            "RuntimeError: decoy continuation\n"
+        )
+        self.assertEqual(
+            multiline_decoy, ("ATTRIBUTE_ERROR", "NONE", "TIMEOUT_TEST_BODY")
+        )
+        self.assertEqual(
+            platform_tiers._classify_nonpass_detail("opaque nonpass detail"),
+            ("UNCLASSIFIED_NONPASS", "NONE", "UNKNOWN"),
+        )
 
         payload = platform_tiers._failure_payload(
             phase="TEST_EXECUTION",
@@ -978,8 +1064,26 @@ class PlatformTierFailureEvidenceTests(unittest.TestCase):
             platform_tiers._atomic_write(path, payload)
             platform_tiers.verify_failure_evidence_directory(root)
             persisted = path.read_text(encoding="utf-8")
-            for raw_value in (*raw_values, "raw gate detail must be hashed"):
+            for raw_value in (
+                *raw_values,
+                "raw gate detail must be hashed",
+                "raw-path",
+                "raw-command",
+                "raw-identity",
+                "raw error traceback command",
+            ):
                 self.assertNotIn(raw_value, persisted)
+            opaque_error = json.loads(persisted)
+            opaque_error.pop("report_digest")
+            for record in opaque_error["diagnostic_records"]:
+                if record["outcome_enum"] == "ERROR":
+                    record["detail_class_enum"] = "UNCLASSIFIED_NONPASS"
+                    record["detail_reason_enum"] = "NONE"
+                    record["detail_stage_enum"] = "UNKNOWN"
+            platform_tiers._atomic_write(
+                path, platform_tiers._sealed(opaque_error)
+            )
+            platform_tiers.verify_failure_evidence_directory(root)
             contradictory = dict(payload)
             contradictory.pop("report_digest")
             contradictory["phase_enum"] = "PRE_TEST_GATE"
@@ -991,6 +1095,34 @@ class PlatformTierFailureEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 platform_tiers.TierGateError,
                 "FAILURE_EVIDENCE_COUNT_INVALID",
+            ):
+                platform_tiers.verify_failure_evidence_directory(root)
+            outcome_mismatch = json.loads(persisted)
+            outcome_mismatch.pop("report_digest")
+            outcome_mismatch["failure_count"] = 0
+            outcome_mismatch["error_count"] = 2
+            platform_tiers._atomic_write(
+                path, platform_tiers._sealed(outcome_mismatch)
+            )
+            with self.assertRaisesRegex(
+                platform_tiers.TierGateError,
+                "FAILURE_EVIDENCE_COUNT_INVALID",
+            ):
+                platform_tiers.verify_failure_evidence_directory(root)
+            semantic_mismatch = json.loads(persisted)
+            semantic_mismatch.pop("report_digest")
+            semantic_mismatch["diagnostic_records"][0][
+                "detail_class_enum"
+            ] = "UNCLASSIFIED_NONPASS"
+            semantic_mismatch["diagnostic_records"][0][
+                "detail_reason_enum"
+            ] = "SUPERVISOR_LAUNCH_FAILED"
+            platform_tiers._atomic_write(
+                path, platform_tiers._sealed(semantic_mismatch)
+            )
+            with self.assertRaisesRegex(
+                platform_tiers.TierGateError,
+                "FAILURE_EVIDENCE_RECORD_INVALID",
             ):
                 platform_tiers.verify_failure_evidence_directory(root)
             tampered = json.loads(persisted)

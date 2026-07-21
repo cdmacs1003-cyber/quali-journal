@@ -15,6 +15,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -28,7 +29,7 @@ MANIFEST_SCHEMA_VERSION = "R9ZNW-488D42C_TEST_TIERS_V1"
 LINUX_TIER = "LINUX_SHARED_REQUIRED"
 WINDOWS_TIER = "WINDOWS_PORTABLE_SHARED"
 WINDOWS_NATIVE_VERDICT = "WINDOWS_NATIVE_OBSERVER_NOT_APPROVED"
-FAILURE_SCHEMA_VERSION = "R9ZNW-488D42C_PLATFORM_TIER_FAILURE_V1"
+FAILURE_SCHEMA_VERSION = "R9ZNW-488D42C_PLATFORM_TIER_FAILURE_V2"
 FAILURE_FILENAME = "platform-tier-failure.json"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 EXACT_MODULE_ORDER = (
@@ -56,6 +57,76 @@ SKIP_OR_XFAIL_DECORATORS = frozenset(
 )
 FAILURE_OUTCOMES = frozenset(
     {"FAILURE", "ERROR", "SKIPPED", "EXPECTED_FAILURE", "UNEXPECTED_SUCCESS"}
+)
+FAILURE_DETAIL_CLASSES = frozenset(
+    {
+        "ASSERTION_ERROR",
+        "ATTRIBUTE_ERROR",
+        "BROKEN_PIPE_ERROR",
+        "CHILD_PROCESS_ERROR",
+        "EOF_ERROR",
+        "FILE_NOT_FOUND_ERROR",
+        "INDEX_ERROR",
+        "JSON_DECODE_ERROR",
+        "KEY_ERROR",
+        "LINUX_SUPERVISOR_ERROR",
+        "NAME_ERROR",
+        "NOT_IMPLEMENTED_ERROR",
+        "OBSERVER_ERROR",
+        "OS_ERROR",
+        "PERMISSION_ERROR",
+        "PROCESS_LOOKUP_ERROR",
+        "RECURSION_ERROR",
+        "RUNTIME_ERROR",
+        "SAMPLER_FAILURE",
+        "STOP_ITERATION",
+        "SUBPROCESS_TIMEOUT_EXPIRED",
+        "TIMEOUT_ERROR",
+        "TYPE_ERROR",
+        "UNCLASSIFIED_NONPASS",
+        "UNICODE_ERROR",
+        "VALUE_ERROR",
+    }
+)
+FAILURE_DETAIL_REASONS = frozenset(
+    {
+        "BOUNDED_READINESS_NOT_RECEIVED",
+        "CLEANUP_POLL_FAILED",
+        "CLEANUP_STOP_FAILED",
+        "EMERGENCY_STOP_PUBLICATION_FAILED",
+        "EXACT_CHILD_REMAINS",
+        "EXACT_FALLBACK_SIGNAL_REJECTED",
+        "EXACT_IDENTITY_UNCERTAIN",
+        "MARKER_BINDING_REJECTED",
+        "MARKER_IDENTITY_UNAVAILABLE",
+        "MARKER_IDENTITY_MISMATCH",
+        "MARKER_SCHEMA_REJECTED",
+        "MARKER_WITHOUT_EXACT_IDENTITY",
+        "AMBIGUOUS",
+        "NONE",
+        "PROC_IDENTITY_NOT_AVAILABLE",
+        "PROC_ENUMERATION_NOT_AVAILABLE",
+        "DEPENDENCY_OR_SUBPROCESS_DEFECT",
+        "DUPLICATE_OBSERVATION_ID",
+        "SUPERVISOR_HANDLE_ALREADY_REGISTERED",
+        "SUPERVISOR_HANDLE_REAP_FAILED",
+        "SUPERVISOR_LAUNCH_FAILED",
+        "SUPERVISOR_READINESS_BINDING_REJECTED",
+        "SUPERVISOR_READINESS_REJECTED",
+        "SUPERVISOR_STARTUP_CLEANUP_UNVERIFIED",
+        "STARTUP_DESCENDANT_IDENTITY_CHANGED",
+        "TIMEOUT",
+    }
+)
+FAILURE_DETAIL_STAGES = frozenset(
+    {
+        "SUPERVISOR_HANDLE_REAP",
+        "SUPERVISOR_STARTUP",
+        "TIMEOUT_FIXTURE_CLEANUP",
+        "TIMEOUT_FIXTURE_IDENTITY_CAPTURE",
+        "TIMEOUT_TEST_BODY",
+        "UNKNOWN",
+    }
 )
 FAILURE_CAUSES = frozenset(
     {
@@ -364,6 +435,107 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _classify_nonpass_detail(raw_detail: str) -> tuple[str, str, str]:
+    """Project raw unittest detail into closed class, reason, and stage enums."""
+
+    class_markers = (
+        ("LinuxSupervisorUnavailable", "LINUX_SUPERVISOR_ERROR"),
+        ("ImmutableArtifactError", "LINUX_SUPERVISOR_ERROR"),
+        ("EventContractError", "LINUX_SUPERVISOR_ERROR"),
+        ("LinuxSupervisorError", "LINUX_SUPERVISOR_ERROR"),
+        ("subprocess.TimeoutExpired", "SUBPROCESS_TIMEOUT_EXPIRED"),
+        ("TimeoutExpired", "SUBPROCESS_TIMEOUT_EXPIRED"),
+        ("json.decoder.JSONDecodeError", "JSON_DECODE_ERROR"),
+        ("JSONDecodeError", "JSON_DECODE_ERROR"),
+        ("ChildProcessError", "CHILD_PROCESS_ERROR"),
+        ("ProcessLookupError", "PROCESS_LOOKUP_ERROR"),
+        ("FileNotFoundError", "FILE_NOT_FOUND_ERROR"),
+        ("PermissionError", "PERMISSION_ERROR"),
+        ("BrokenPipeError", "BROKEN_PIPE_ERROR"),
+        ("TimeoutError", "TIMEOUT_ERROR"),
+        ("AssertionError", "ASSERTION_ERROR"),
+        ("AttributeError", "ATTRIBUTE_ERROR"),
+        ("NotImplementedError", "NOT_IMPLEMENTED_ERROR"),
+        ("UnboundLocalError", "NAME_ERROR"),
+        ("NameError", "NAME_ERROR"),
+        ("IndexError", "INDEX_ERROR"),
+        ("KeyError", "KEY_ERROR"),
+        ("RecursionError", "RECURSION_ERROR"),
+        ("StopIteration", "STOP_ITERATION"),
+        ("EOFError", "EOF_ERROR"),
+        ("UnicodeError", "UNICODE_ERROR"),
+        ("SamplerFailure", "SAMPLER_FAILURE"),
+        ("DuplicateObservationError", "OBSERVER_ERROR"),
+        ("ObserverError", "OBSERVER_ERROR"),
+        ("TypeError", "TYPE_ERROR"),
+        ("ValueError", "VALUE_ERROR"),
+        ("RuntimeError", "RUNTIME_ERROR"),
+        ("OSError", "OS_ERROR"),
+    )
+    terminal_class = "UNCLASSIFIED_NONPASS"
+    terminal_message = ""
+    lines = raw_detail.rstrip().splitlines()
+    terminal_index: int | None = None
+    traceback_start = next(
+        (
+            index
+            for index in range(len(lines) - 1, -1, -1)
+            if lines[index] == "Traceback (most recent call last):"
+        ),
+        -1,
+    )
+    for index in range(traceback_start + 1, len(lines)):
+        line = lines[index]
+        for marker, enum in class_markers:
+            match = re.fullmatch(
+                rf"(?:[A-Za-z_][A-Za-z0-9_.]*\.)?{re.escape(marker)}(?:: ?(.*))?",
+                line,
+            )
+            if match is not None:
+                terminal_class = enum
+                terminal_message = match.group(1) or ""
+                terminal_index = index
+                break
+        if terminal_class != "UNCLASSIFIED_NONPASS":
+            break
+    if terminal_class == "UNCLASSIFIED_NONPASS":
+        return terminal_class, "NONE", "UNKNOWN"
+    allowed_reasons = FAILURE_DETAIL_REASONS - {"NONE", "AMBIGUOUS"}
+    reason = "NONE"
+    if terminal_class in {
+        "LINUX_SUPERVISOR_ERROR",
+        "OBSERVER_ERROR",
+        "SAMPLER_FAILURE",
+    }:
+        reason = terminal_message if terminal_message in allowed_reasons else "NONE"
+    elif terminal_class == "ASSERTION_ERROR" and terminal_message.startswith(
+        "LINUX_TIMEOUT_FIXTURE_CLEANUP_FAILED:"
+    ):
+        raw_reasons = terminal_message.partition(":")[2].split(",")
+        if raw_reasons and all(item in allowed_reasons for item in raw_reasons):
+            reason = raw_reasons[0] if len(raw_reasons) == 1 else "AMBIGUOUS"
+        else:
+            reason = "AMBIGUOUS"
+    stage = "UNKNOWN"
+    assert terminal_index is not None
+    stage_functions = {
+        "_bounded_reap_supervisor_handle": "SUPERVISOR_HANDLE_REAP",
+        "_capture_linux_timeout_fixture_identity": "TIMEOUT_FIXTURE_IDENTITY_CAPTURE",
+        "_cleanup_linux_timeout_fixture": "TIMEOUT_FIXTURE_CLEANUP",
+        "_assert_linux_supervised_timeout_contract": "TIMEOUT_TEST_BODY",
+        "test_timeout_preserves_phase_counter_and_cancels_process_tree": "TIMEOUT_TEST_BODY",
+        "start_linux_observation": "SUPERVISOR_STARTUP",
+    }
+    for line in reversed(lines[max(0, traceback_start + 1) : terminal_index]):
+        frame = re.fullmatch(
+            r'  File ".+", line [0-9]+, in ([A-Za-z_][A-Za-z0-9_]*)', line
+        )
+        if frame is not None and frame.group(1) in stage_functions:
+            stage = stage_functions[frame.group(1)]
+            break
+    return terminal_class, reason, stage
+
+
 def _nonpass_records(result: unittest.TestResult) -> list[dict[str, str]]:
     """Digest raw unittest detail immediately; never return identifiers or traces."""
 
@@ -383,11 +555,17 @@ def _nonpass_records(result: unittest.TestResult) -> list[dict[str, str]]:
             test_id = test.id()
             if not isinstance(test_id, str) or not isinstance(raw_detail, str):
                 raise TierGateError("NONPASS_EVIDENCE_COUNT_MISMATCH")
+            detail_class, detail_reason, detail_stage = _classify_nonpass_detail(
+                raw_detail
+            )
             records.append(
                 {
                     "outcome_enum": outcome,
                     "failed_test_id_sha256": _sha256_text(test_id),
                     "detail_sha256": _sha256_text(raw_detail),
+                    "detail_class_enum": detail_class,
+                    "detail_reason_enum": detail_reason,
+                    "detail_stage_enum": detail_stage,
                 }
             )
     return sorted(
@@ -512,10 +690,45 @@ def verify_failure_evidence_directory(directory: Path) -> None:
         if (
             not isinstance(record, dict)
             or set(record)
-            != {"outcome_enum", "failed_test_id_sha256", "detail_sha256"}
+            != {
+                "outcome_enum",
+                "failed_test_id_sha256",
+                "detail_sha256",
+                "detail_class_enum",
+                "detail_reason_enum",
+                "detail_stage_enum",
+            }
             or record.get("outcome_enum") not in FAILURE_OUTCOMES
             or not _is_sha256(record.get("failed_test_id_sha256"))
             or not _is_sha256(record.get("detail_sha256"))
+            or record.get("detail_class_enum") not in FAILURE_DETAIL_CLASSES
+            or record.get("detail_reason_enum") not in FAILURE_DETAIL_REASONS
+            or record.get("detail_stage_enum") not in FAILURE_DETAIL_STAGES
+        ):
+            raise TierGateError("FAILURE_EVIDENCE_RECORD_INVALID")
+        outcome = record["outcome_enum"]
+        detail_class = record["detail_class_enum"]
+        detail_reason = record["detail_reason_enum"]
+        detail_stage = record["detail_stage_enum"]
+        if (
+            (
+                detail_class == "UNCLASSIFIED_NONPASS"
+                and (detail_reason, detail_stage) != ("NONE", "UNKNOWN")
+            )
+            or (outcome == "FAILURE" and detail_class != "ASSERTION_ERROR")
+            or (
+                outcome == "ERROR"
+                and detail_class == "ASSERTION_ERROR"
+            )
+            or (
+                outcome in {"SKIPPED", "UNEXPECTED_SUCCESS"}
+                and (detail_class, detail_reason, detail_stage)
+                != ("UNCLASSIFIED_NONPASS", "NONE", "UNKNOWN")
+            )
+            or (
+                outcome == "EXPECTED_FAILURE"
+                and detail_class == "UNCLASSIFIED_NONPASS"
+            )
         ):
             raise TierGateError("FAILURE_EVIDENCE_RECORD_INVALID")
     expected_record_count = sum(int(payload[key]) for key in count_keys[:-1])
@@ -531,6 +744,19 @@ def verify_failure_evidence_directory(directory: Path) -> None:
             or payload["diagnostic_record_count"] <= 0
             or expected_record_count != payload["diagnostic_record_count"]
         ):
+            raise TierGateError("FAILURE_EVIDENCE_COUNT_INVALID")
+        expected_outcome_counts = {
+            "FAILURE": payload["failure_count"],
+            "ERROR": payload["error_count"],
+            "SKIPPED": payload["skipped_count"],
+            "EXPECTED_FAILURE": payload["expected_failure_count"],
+            "UNEXPECTED_SUCCESS": payload["unexpected_success_count"],
+        }
+        actual_outcome_counts = {
+            outcome: sum(record["outcome_enum"] == outcome for record in records)
+            for outcome in FAILURE_OUTCOMES
+        }
+        if actual_outcome_counts != expected_outcome_counts:
             raise TierGateError("FAILURE_EVIDENCE_COUNT_INVALID")
     elif (
         payload["cause_enum"] == "SELECTED_TEST_NONPASS"
