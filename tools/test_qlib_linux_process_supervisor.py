@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import io
+import inspect
 import os
 import subprocess
 import sys
@@ -627,6 +628,40 @@ class RegistryAndPublicationTests(unittest.TestCase):
         self.assertIs(anchor, retained)
         registry.clear()
 
+    def test_exact_adopted_zombie_reap_never_uses_broad_waitpid(self) -> None:
+        adopted = linux_supervisor.ProcessIdentity(101, 50, 101, 101, 200, "S")
+        unrelated_parent = linux_supervisor.ProcessIdentity(
+            102, 50, 102, 102, 201, "S"
+        )
+        reused = linux_supervisor.ProcessIdentity(103, 50, 103, 103, 202, "S")
+        current = {
+            101: linux_supervisor.ProcessIdentity(
+                101, os.getpid(), 101, 101, 200, "Z"
+            ),
+            102: linux_supervisor.ProcessIdentity(102, 777, 102, 102, 201, "Z"),
+            103: linux_supervisor.ProcessIdentity(
+                103, os.getpid(), 103, 103, 999, "Z"
+            ),
+        }
+        retained = {
+            (identity.process_id, identity.start_ticks): identity
+            for identity in (adopted, unrelated_parent, reused)
+        }
+        with mock.patch.object(
+            linux_supervisor,
+            "_read_proc_identity",
+            side_effect=lambda process_id: current[process_id],
+        ), mock.patch.object(
+            linux_supervisor.os, "waitpid", return_value=(101, 0)
+        ) as waitpid:
+            reaped = linux_supervisor._reap_exact_adopted_zombies(retained)
+        self.assertEqual(reaped, 1)
+        waitpid.assert_called_once_with(101, getattr(os, "WNOHANG", 1))
+        self.assertNotIn(
+            "waitpid(-1",
+            inspect.getsource(linux_supervisor._reap_exact_adopted_zombies),
+        )
+
     def test_exclusive_atomic_publication_is_first_writer_wins(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "terminal.json"
@@ -945,6 +980,19 @@ class PlatformTierFailureEvidenceTests(unittest.TestCase):
             persisted = path.read_text(encoding="utf-8")
             for raw_value in (*raw_values, "raw gate detail must be hashed"):
                 self.assertNotIn(raw_value, persisted)
+            contradictory = dict(payload)
+            contradictory.pop("report_digest")
+            contradictory["phase_enum"] = "PRE_TEST_GATE"
+            contradictory["platform_enum"] = "UNKNOWN"
+            contradictory["tier_enum"] = "UNKNOWN"
+            platform_tiers._atomic_write(
+                path, platform_tiers._sealed(contradictory)
+            )
+            with self.assertRaisesRegex(
+                platform_tiers.TierGateError,
+                "FAILURE_EVIDENCE_COUNT_INVALID",
+            ):
+                platform_tiers.verify_failure_evidence_directory(root)
             tampered = json.loads(persisted)
             tampered["report_digest"] = "0" * 64
             platform_tiers._atomic_write(path, tampered)

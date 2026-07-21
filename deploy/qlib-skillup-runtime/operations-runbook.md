@@ -323,6 +323,15 @@ process, unresolved wait, zombie, unrelated signal, timeout leak, Wrong-PASS,
 or inconsistent terminal/seal. Raw PID, command line, environment, identity,
 URL, token, response body, and raw log are forbidden in persistent evidence.
 
+If the Linux/shared tier fails, the job remains failed and the success-tier
+bundle is not published. A separate failure artifact may contain exactly one
+verified `platform-tier-failure.json`. It persists only outcome enums, counts,
+SHA-256 digests of the failed canonical test IDs and in-memory unittest detail,
+and its own report digest. Raw test IDs, traceback text, exception messages,
+paths, and process identity are never written or printed. A rejected failure
+envelope emits only the fixed `failure_evidence_verdict=REJECTED` enum and
+cannot make the failed job pass.
+
 The workflow declares `workflow_dispatch`, but a workflow that exists only on the validation branch does not provide an active default-branch manual button. Until the exact workflow is adopted on the default branch, record:
 
 ```text

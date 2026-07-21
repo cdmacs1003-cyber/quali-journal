@@ -1205,6 +1205,32 @@ def _startup_tree_is_zero(
     )
 
 
+def _reap_exact_adopted_zombies(
+    retained: Mapping[tuple[int, int], ProcessIdentity]
+) -> int:
+    """Reap only retained PID incarnations adopted by this exact process."""
+
+    reaped = 0
+    for expected in retained.values():
+        try:
+            current = _read_proc_identity(expected.process_id)
+        except LinuxSupervisorError:
+            continue
+        if (
+            not _same_process_incarnation(expected, current)
+            or current.parent_process_id != os.getpid()
+            or current.state != "Z"
+        ):
+            continue
+        try:
+            child, _ = os.waitpid(current.process_id, getattr(os, "WNOHANG", 1))
+        except (ChildProcessError, OSError):
+            continue
+        if child == current.process_id:
+            reaped += 1
+    return reaped
+
+
 def _cleanup_unregistered_direct_child(
     process: subprocess.Popen[bytes],
 ) -> tuple[bool, bool, bool]:
@@ -1277,6 +1303,7 @@ def _cleanup_failed_startup_tree(
 
         # The supervisor may have launched a worker in its own session.  Every
         # retained descendant is drained by its corroborated group or pidfd.
+        _reap_exact_adopted_zombies(retained)
         collect(root)
         _signal_startup_owned_set(retained, signal.SIGTERM, exclude_root=root)
         descendant_deadline = time.monotonic() + 0.5
@@ -1287,6 +1314,7 @@ def _cleanup_failed_startup_tree(
                     IdentityStatus.SCOPE_CHANGED,
                 }:
                     collect(owner)
+            _reap_exact_adopted_zombies(retained)
             if _startup_tree_is_zero(retained):
                 break
             time.sleep(0.01)
@@ -1296,6 +1324,9 @@ def _cleanup_failed_startup_tree(
             )
         final_deadline = time.monotonic() + 1.0
         while time.monotonic() < final_deadline and not _startup_tree_is_zero(retained):
+            _reap_exact_adopted_zombies(retained)
+            if _startup_tree_is_zero(retained):
+                break
             time.sleep(0.01)
         return (
             root_reaped

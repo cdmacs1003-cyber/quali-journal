@@ -160,11 +160,11 @@ def _load_manifest(
     ):
         raise TierGateError("DISCOVERY_BINDING_INVALID")
     required_shared_ids = _require_string_list(
-        manifest, "required_shared_test_ids", expected_count=15
+        manifest, "required_shared_test_ids", expected_count=16
     )
 
     legacy_ids = _require_string_list(
-        manifest, "legacy_native_win32_test_ids", expected_count=8
+        manifest, "legacy_native_win32_test_ids", expected_count=23
     )
     windows_public_legacy_ids = _require_string_list(
         manifest,
@@ -520,9 +520,25 @@ def verify_failure_evidence_directory(directory: Path) -> None:
             raise TierGateError("FAILURE_EVIDENCE_RECORD_INVALID")
     expected_record_count = sum(int(payload[key]) for key in count_keys[:-1])
     if payload["phase_enum"] == "TEST_EXECUTION":
-        if expected_record_count != payload["diagnostic_record_count"]:
+        platform_tier_pair = (
+            payload["platform_enum"],
+            payload["tier_enum"],
+        )
+        if (
+            payload["cause_enum"] != "SELECTED_TEST_NONPASS"
+            or platform_tier_pair
+            not in {("LINUX", LINUX_TIER), ("WINDOWS_NT", WINDOWS_TIER)}
+            or payload["diagnostic_record_count"] <= 0
+            or expected_record_count != payload["diagnostic_record_count"]
+        ):
             raise TierGateError("FAILURE_EVIDENCE_COUNT_INVALID")
-    elif expected_record_count != 0 or payload["diagnostic_record_count"] != 0:
+    elif (
+        payload["cause_enum"] == "SELECTED_TEST_NONPASS"
+        or payload["platform_enum"] != "UNKNOWN"
+        or payload["tier_enum"] != "UNKNOWN"
+        or expected_record_count != 0
+        or payload["diagnostic_record_count"] != 0
+    ):
         raise TierGateError("FAILURE_EVIDENCE_COUNT_INVALID")
     unsealed = dict(payload)
     report_digest = unsealed.pop("report_digest")
