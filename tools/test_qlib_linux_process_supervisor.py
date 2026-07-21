@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tools import qlib_linux_acceptance_test_tiers as platform_tiers
 from tools import qlib_linux_process_supervisor as linux_supervisor
 
 
@@ -881,6 +883,103 @@ class DeterministicCampaignTests(unittest.TestCase):
             sum(result["unrelated_termination_count"] for result in sibling_results),
             10,
         )
+
+
+class PlatformTierFailureEvidenceTests(unittest.TestCase):
+    def test_nonpass_diagnostics_are_digest_only_and_workflow_preserves_failure(self) -> None:
+        def synthetic_test(test_id: str) -> mock.Mock:
+            test = mock.Mock()
+            test.id.return_value = test_id
+            return test
+
+        result = unittest.TestResult()
+        raw_values = (
+            "synthetic.failure.case raw-token raw-path",
+            "synthetic.error.case raw-command raw-identity",
+            "synthetic.skip.case raw-url raw-pid",
+            "synthetic.expected.case raw-environment",
+            "synthetic.unexpected.case raw-response-body",
+        )
+        tests = tuple(synthetic_test(value) for value in raw_values)
+        result.failures = [(tests[0], "raw failure traceback token")]
+        result.errors = [(tests[1], "raw error traceback command")]
+        result.skipped = [(tests[2], "raw skip reason url")]
+        result.expectedFailures = [
+            (tests[3], "raw expected failure environment")
+        ]
+        result.unexpectedSuccesses = [tests[4]]
+
+        records = platform_tiers._nonpass_records(result)
+        self.assertEqual(len(records), 5)
+        self.assertEqual(
+            [record["outcome_enum"] for record in records],
+            sorted(platform_tiers.FAILURE_OUTCOMES),
+        )
+        serialized_records = json.dumps(records, sort_keys=True)
+        for raw_value in (*raw_values, "raw failure traceback token"):
+            self.assertNotIn(raw_value, serialized_records)
+        for record in records:
+            self.assertRegex(record["failed_test_id_sha256"], r"^[a-f0-9]{64}$")
+            self.assertRegex(record["detail_sha256"], r"^[a-f0-9]{64}$")
+
+        payload = platform_tiers._failure_payload(
+            phase="TEST_EXECUTION",
+            cause="SELECTED_TEST_NONPASS",
+            platform="LINUX",
+            tier=platform_tiers.LINUX_TIER,
+            counts={
+                "failure_count": 1,
+                "error_count": 1,
+                "skipped_count": 1,
+                "expected_failure_count": 1,
+                "unexpected_success_count": 1,
+            },
+            records=records,
+            gate_detail="raw gate detail must be hashed",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / platform_tiers.FAILURE_FILENAME
+            platform_tiers._atomic_write(path, payload)
+            platform_tiers.verify_failure_evidence_directory(root)
+            persisted = path.read_text(encoding="utf-8")
+            for raw_value in (*raw_values, "raw gate detail must be hashed"):
+                self.assertNotIn(raw_value, persisted)
+            tampered = json.loads(persisted)
+            tampered["report_digest"] = "0" * 64
+            platform_tiers._atomic_write(path, tampered)
+            with self.assertRaisesRegex(
+                platform_tiers.TierGateError,
+                "FAILURE_EVIDENCE_DIGEST_MISMATCH",
+            ):
+                platform_tiers.verify_failure_evidence_directory(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            rejected = Path(temporary) / "raw-token-path-must-not-render"
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout, mock.patch(
+                "sys.stderr", new_callable=io.StringIO
+            ) as stderr:
+                return_code = platform_tiers.failure_evidence_verifier_main(rejected)
+            self.assertEqual(return_code, 2)
+            self.assertEqual(stdout.getvalue(), "failure_evidence_verdict=REJECTED\n")
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertNotIn(str(rejected), stdout.getvalue())
+
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "qlib-linux-observer-acceptance.yml"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("continue-on-error", workflow)
+        self.assertNotIn("|| true", workflow)
+        self.assertIn("steps.platform_tier.outcome == 'failure'", workflow)
+        self.assertIn(
+            "steps.platform_failure_verifier.outcome == 'success'", workflow
+        )
+        self.assertIn("except BaseException:", workflow)
+        self.assertEqual(workflow.count("platform-tier-failure.json"), 1)
+        self.assertIn('test "${file_count}" -eq 2', workflow)
 
 
 class BundleTests(unittest.TestCase):

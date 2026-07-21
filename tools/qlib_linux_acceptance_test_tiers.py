@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType
-from typing import Iterable, Iterator, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 
 SCHEMA_VERSION = "R9ZNW-488D42C_PLATFORM_TIER_EVIDENCE_V1"
@@ -28,6 +28,8 @@ MANIFEST_SCHEMA_VERSION = "R9ZNW-488D42C_TEST_TIERS_V1"
 LINUX_TIER = "LINUX_SHARED_REQUIRED"
 WINDOWS_TIER = "WINDOWS_PORTABLE_SHARED"
 WINDOWS_NATIVE_VERDICT = "WINDOWS_NATIVE_OBSERVER_NOT_APPROVED"
+FAILURE_SCHEMA_VERSION = "R9ZNW-488D42C_PLATFORM_TIER_FAILURE_V1"
+FAILURE_FILENAME = "platform-tier-failure.json"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 EXACT_MODULE_ORDER = (
     "tools.test_qlib_linux_process_supervisor",
@@ -51,6 +53,39 @@ ROOT_KEYS = frozenset(
 )
 SKIP_OR_XFAIL_DECORATORS = frozenset(
     {"skip", "skipIf", "skipUnless", "expectedFailure"}
+)
+FAILURE_OUTCOMES = frozenset(
+    {"FAILURE", "ERROR", "SKIPPED", "EXPECTED_FAILURE", "UNEXPECTED_SUCCESS"}
+)
+FAILURE_CAUSES = frozenset(
+    {
+        "SELECTED_TEST_NONPASS",
+        "MANIFEST_SCHEMA_INVALID",
+        "MANIFEST_CARDINALITY_INVALID",
+        "MANIFEST_ORDER_INVALID",
+        "MANIFEST_READ_INVALID",
+        "MODULE_SET_INVALID",
+        "WINDOWS_SUPPORT_VERDICT_INVALID",
+        "DISCOVERY_BINDING_INVALID",
+        "MANIFEST_GROUP_OVERLAP",
+        "TIER_CONTRACT_INVALID",
+        "DISCOVERY_OBJECT_INVALID",
+        "TEST_MODULE_IMPORT_FAILED",
+        "TEST_DISCOVERY_FAILED",
+        "DUPLICATE_TEST_ID",
+        "LEGACY_TEST_ID_INVALID",
+        "LEGACY_TEST_SOURCE_MISSING",
+        "LEGACY_TEST_SOURCE_INVALID",
+        "LEGACY_TEST_CLASS_MISSING",
+        "LEGACY_TEST_METHOD_MISSING",
+        "LEGACY_TEST_DECORATED",
+        "DISCOVERY_SET_MISMATCH",
+        "MANIFEST_TEST_ID_MISSING",
+        "UNSUPPORTED_PLATFORM",
+        "REQUIRED_SHARED_TEST_NOT_SELECTED",
+        "NONPASS_EVIDENCE_COUNT_MISMATCH",
+        "UNEXPECTED_FAIL_CLOSED",
+    }
 )
 
 
@@ -125,7 +160,7 @@ def _load_manifest(
     ):
         raise TierGateError("DISCOVERY_BINDING_INVALID")
     required_shared_ids = _require_string_list(
-        manifest, "required_shared_test_ids", expected_count=14
+        manifest, "required_shared_test_ids", expected_count=15
     )
 
     legacy_ids = _require_string_list(
@@ -325,6 +360,201 @@ def _sealed(payload: dict[str, object]) -> dict[str, object]:
     return result
 
 
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _nonpass_records(result: unittest.TestResult) -> list[dict[str, str]]:
+    """Digest raw unittest detail immediately; never return identifiers or traces."""
+
+    records: list[dict[str, str]] = []
+    channels: tuple[tuple[str, Iterable[Any]], ...] = (
+        ("FAILURE", result.failures),
+        ("ERROR", result.errors),
+        ("SKIPPED", result.skipped),
+        ("EXPECTED_FAILURE", result.expectedFailures),
+        (
+            "UNEXPECTED_SUCCESS",
+            ((test, "UNEXPECTED_SUCCESS") for test in result.unexpectedSuccesses),
+        ),
+    )
+    for outcome, entries in channels:
+        for test, raw_detail in entries:
+            test_id = test.id()
+            if not isinstance(test_id, str) or not isinstance(raw_detail, str):
+                raise TierGateError("NONPASS_EVIDENCE_COUNT_MISMATCH")
+            records.append(
+                {
+                    "outcome_enum": outcome,
+                    "failed_test_id_sha256": _sha256_text(test_id),
+                    "detail_sha256": _sha256_text(raw_detail),
+                }
+            )
+    return sorted(
+        records,
+        key=lambda record: (
+            record["outcome_enum"],
+            record["failed_test_id_sha256"],
+            record["detail_sha256"],
+        ),
+    )
+
+
+def _failure_payload(
+    *,
+    phase: str,
+    cause: str,
+    platform: str,
+    tier: str,
+    counts: Mapping[str, int],
+    records: Sequence[Mapping[str, str]],
+    gate_detail: str,
+) -> dict[str, object]:
+    safe_cause = cause if cause in FAILURE_CAUSES else "UNEXPECTED_FAIL_CLOSED"
+    payload: dict[str, object] = {
+        "schema_version": FAILURE_SCHEMA_VERSION,
+        "verdict": "FAIL",
+        "phase_enum": phase,
+        "cause_enum": safe_cause,
+        "platform_enum": platform,
+        "tier_enum": tier,
+        "failure_count": int(counts.get("failure_count", 0)),
+        "error_count": int(counts.get("error_count", 0)),
+        "skipped_count": int(counts.get("skipped_count", 0)),
+        "expected_failure_count": int(counts.get("expected_failure_count", 0)),
+        "unexpected_success_count": int(counts.get("unexpected_success_count", 0)),
+        "diagnostic_record_count": len(records),
+        "diagnostic_records": [dict(record) for record in records],
+        "gate_detail_sha256": _sha256_text(gate_detail),
+        "raw_detail_persisted": False,
+    }
+    return _sealed(payload)
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def verify_failure_evidence_directory(directory: Path) -> None:
+    """Verify the exact sanitized failure envelope without rendering its contents."""
+
+    if not directory.is_dir() or directory.is_symlink():
+        raise TierGateError("FAILURE_EVIDENCE_DIRECTORY_INVALID")
+    entries = tuple(directory.iterdir())
+    names = {path.name for path in entries if path.is_file()}
+    allowed_sets = (
+        {FAILURE_FILENAME},
+        {
+            FAILURE_FILENAME,
+            "linux-shared-regression.json",
+            "windows-native-support.json",
+        },
+    )
+    if (
+        names not in allowed_sets
+        or any(not path.is_file() or path.is_symlink() for path in entries)
+    ):
+        raise TierGateError("FAILURE_EVIDENCE_FILE_SET_INVALID")
+    try:
+        payload = json.loads((directory / FAILURE_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise TierGateError("FAILURE_EVIDENCE_READ_INVALID") from exc
+    expected_keys = {
+        "schema_version",
+        "verdict",
+        "phase_enum",
+        "cause_enum",
+        "platform_enum",
+        "tier_enum",
+        "failure_count",
+        "error_count",
+        "skipped_count",
+        "expected_failure_count",
+        "unexpected_success_count",
+        "diagnostic_record_count",
+        "diagnostic_records",
+        "gate_detail_sha256",
+        "raw_detail_persisted",
+        "report_digest",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise TierGateError("FAILURE_EVIDENCE_SCHEMA_INVALID")
+    if (
+        payload.get("schema_version") != FAILURE_SCHEMA_VERSION
+        or payload.get("verdict") != "FAIL"
+        or payload.get("phase_enum") not in {"PRE_TEST_GATE", "TEST_EXECUTION"}
+        or payload.get("cause_enum") not in FAILURE_CAUSES
+        or payload.get("platform_enum") not in {"LINUX", "WINDOWS_NT", "UNKNOWN"}
+        or payload.get("tier_enum") not in {LINUX_TIER, WINDOWS_TIER, "UNKNOWN"}
+        or payload.get("raw_detail_persisted") is not False
+        or not _is_sha256(payload.get("gate_detail_sha256"))
+        or not _is_sha256(payload.get("report_digest"))
+    ):
+        raise TierGateError("FAILURE_EVIDENCE_SCHEMA_INVALID")
+    count_keys = (
+        "failure_count",
+        "error_count",
+        "skipped_count",
+        "expected_failure_count",
+        "unexpected_success_count",
+        "diagnostic_record_count",
+    )
+    if any(type(payload.get(key)) is not int or payload[key] < 0 for key in count_keys):
+        raise TierGateError("FAILURE_EVIDENCE_COUNT_INVALID")
+    records = payload.get("diagnostic_records")
+    if not isinstance(records, list) or len(records) != payload["diagnostic_record_count"]:
+        raise TierGateError("FAILURE_EVIDENCE_COUNT_INVALID")
+    for record in records:
+        if (
+            not isinstance(record, dict)
+            or set(record)
+            != {"outcome_enum", "failed_test_id_sha256", "detail_sha256"}
+            or record.get("outcome_enum") not in FAILURE_OUTCOMES
+            or not _is_sha256(record.get("failed_test_id_sha256"))
+            or not _is_sha256(record.get("detail_sha256"))
+        ):
+            raise TierGateError("FAILURE_EVIDENCE_RECORD_INVALID")
+    expected_record_count = sum(int(payload[key]) for key in count_keys[:-1])
+    if payload["phase_enum"] == "TEST_EXECUTION":
+        if expected_record_count != payload["diagnostic_record_count"]:
+            raise TierGateError("FAILURE_EVIDENCE_COUNT_INVALID")
+    elif expected_record_count != 0 or payload["diagnostic_record_count"] != 0:
+        raise TierGateError("FAILURE_EVIDENCE_COUNT_INVALID")
+    unsealed = dict(payload)
+    report_digest = unsealed.pop("report_digest")
+    if _digest(unsealed) != report_digest:
+        raise TierGateError("FAILURE_EVIDENCE_DIGEST_MISMATCH")
+
+
+def failure_evidence_verifier_main(directory: Path) -> int:
+    """Return a fixed verdict without rendering rejected evidence or exceptions."""
+
+    try:
+        verify_failure_evidence_directory(directory)
+    except BaseException:
+        print("failure_evidence_verdict=REJECTED")
+        return 2
+    print("failure_evidence_verdict=ACCEPTED")
+    return 0
+
+
+def _publish_gate_failure(output: Path, cause: str, gate_detail: str) -> None:
+    payload = _failure_payload(
+        phase="PRE_TEST_GATE",
+        cause=cause,
+        platform="UNKNOWN",
+        tier="UNKNOWN",
+        counts={},
+        records=(),
+        gate_detail=gate_detail,
+    )
+    _atomic_write(output / FAILURE_FILENAME, payload)
+
+
 def _run(manifest_path: Path, output: Path) -> int:
     (
         manifest,
@@ -389,6 +619,16 @@ def _run(manifest_path: Path, output: Path) -> int:
     unexpected_success_count = len(result.unexpectedSuccesses)
     tests_run_count = int(result.testsRun)
     selected_count = len(selected_tests)
+    nonpass_records = _nonpass_records(result)
+    nonpass_count = (
+        failure_count
+        + error_count
+        + skipped_count
+        + expected_failure_count
+        + unexpected_success_count
+    )
+    if len(nonpass_records) != nonpass_count:
+        raise TierGateError("NONPASS_EVIDENCE_COUNT_MISMATCH")
     passed = (
         tests_run_count == selected_count
         and failure_count == 0
@@ -449,9 +689,34 @@ def _run(manifest_path: Path, output: Path) -> int:
     )
     _atomic_write(output / "linux-shared-regression.json", regression)
     _atomic_write(output / "windows-native-support.json", windows_native)
+    if not passed:
+        failure = _failure_payload(
+            phase="TEST_EXECUTION",
+            cause="SELECTED_TEST_NONPASS",
+            platform=platform_enum,
+            tier=tier,
+            counts={
+                "failure_count": failure_count,
+                "error_count": error_count,
+                "skipped_count": skipped_count,
+                "expected_failure_count": expected_failure_count,
+                "unexpected_success_count": unexpected_success_count,
+            },
+            records=nonpass_records,
+            gate_detail="SELECTED_TEST_NONPASS",
+        )
+        _atomic_write(output / FAILURE_FILENAME, failure)
     print(f"platform_tier_status={'PASS' if passed else 'FAIL'}")
     print(f"platform_tier={tier}")
     print(f"tests_run_count={tests_run_count}")
+    if not passed:
+        print(f"nonpass_case_count={len(nonpass_records)}")
+        print(
+            "nonpass_case_sha256="
+            + ",".join(
+                record["failed_test_id_sha256"] for record in nonpass_records
+            )
+        )
     return 0 if passed else 1
 
 
@@ -473,10 +738,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return _run(args.manifest.resolve(), args.output.resolve())
     except TierGateError as exc:
+        try:
+            _publish_gate_failure(args.output.resolve(), exc.cause, exc.cause)
+        except Exception:
+            pass
         print("platform_tier_status=FAIL")
-        print(f"cause={exc.cause}")
+        print(f"cause={exc.cause if exc.cause in FAILURE_CAUSES else 'UNEXPECTED_FAIL_CLOSED'}")
         return 2
-    except Exception:
+    except Exception as exc:
+        try:
+            _publish_gate_failure(
+                args.output.resolve(),
+                "UNEXPECTED_FAIL_CLOSED",
+                type(exc).__name__,
+            )
+        except Exception:
+            pass
         print("platform_tier_status=FAIL")
         print("cause=UNEXPECTED_FAIL_CLOSED")
         return 2

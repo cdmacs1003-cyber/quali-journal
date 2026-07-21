@@ -6,11 +6,12 @@
     "tools.test_qlib_observer_evidence_contract",
     "tools.test_qlib_production_sampler"
   ],
-  "expected_discovered_test_count": 134,
-  "expected_discovered_test_ids_digest": "707723939b95c4890f17b05e7fff8acf32708a3dd31eb84d7e6fe02c2668ffb1",
+  "expected_discovered_test_count": 135,
+  "expected_discovered_test_ids_digest": "bb93d290babfd28c7dbf404e0a915dc003f4baaa89e3ec4a8c0b4d413e679567",
   "required_shared_test_ids": [
     "tools.test_qlib_linux_process_supervisor.DeterministicCampaignTests.test_actual_campaign_propagates_measured_unrelated_termination_count",
     "tools.test_qlib_linux_process_supervisor.DeterministicCampaignTests.test_deterministic_campaign_counts_wrong_pass_candidates",
+    "tools.test_qlib_linux_process_supervisor.PlatformTierFailureEvidenceTests.test_nonpass_diagnostics_are_digest_only_and_workflow_preserves_failure",
     "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_candidate_parent_change_between_snapshot_and_read_fails_closed",
     "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_current_registered_parent_authorizes_its_current_child",
     "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_group_anchor_never_promotes_unregistered_numeric_member",

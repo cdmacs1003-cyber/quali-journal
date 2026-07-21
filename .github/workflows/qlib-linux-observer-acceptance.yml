@@ -102,6 +102,7 @@ jobs:
             --operator-manual-dispatch-state DECLARED_NOT_DEFAULT_BRANCH_ACTIVE
 
       - name: RUNNING - verify closed sanitized evidence
+        id: acceptance_verifier
         shell: bash
         run: |
           set -euo pipefail
@@ -116,6 +117,7 @@ jobs:
             --input "${evidence_directory}"
 
       - name: RUNNING - exact Linux shared regression tier
+        id: platform_tier
         shell: bash
         run: |
           set -euo pipefail
@@ -130,7 +132,29 @@ jobs:
           test "${file_count}" -eq 2
           test "${entry_count}" -eq 2
 
-      - name: PASS - publish closed sanitized evidence
+      - name: FAIL - verify closed platform diagnostic
+        id: platform_failure_verifier
+        if: ${{ always() && steps.platform_tier.outcome == 'failure' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          try:
+              from pathlib import Path
+              from tools import qlib_linux_acceptance_test_tiers as tiers
+              result = tiers.failure_evidence_verifier_main(
+                  Path(os.environ["RUNNER_TEMP"])
+                  / "r9znw-488d42c-platform-tier-evidence"
+              )
+          except BaseException:
+              print("failure_evidence_verdict=REJECTED")
+              raise SystemExit(2)
+          raise SystemExit(result)
+          PY
+
+      - name: EVIDENCE - publish closed sanitized acceptance
+        if: ${{ always() && steps.acceptance_verifier.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: r9znw-488d42-linux-observer-acceptance
@@ -142,12 +166,23 @@ jobs:
           compression-level: 0
 
       - name: PASS - publish platform-tier evidence
+        if: ${{ steps.platform_tier.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: r9znw-488d42c-platform-tier-evidence
           path: |
             ${{ runner.temp }}/r9znw-488d42c-platform-tier-evidence/linux-shared-regression.json
             ${{ runner.temp }}/r9znw-488d42c-platform-tier-evidence/windows-native-support.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: FAIL - publish closed platform diagnostic
+        if: ${{ always() && steps.platform_failure_verifier.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r9znw-488d42c-platform-tier-failure
+          path: ${{ runner.temp }}/r9znw-488d42c-platform-tier-evidence/platform-tier-failure.json
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
