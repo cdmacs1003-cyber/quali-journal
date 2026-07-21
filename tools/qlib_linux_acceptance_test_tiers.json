@@ -1,0 +1,74 @@
+{
+  "schema_version": "R9ZNW-488D42C_TEST_TIERS_V1",
+  "module_order": [
+    "tools.test_qlib_linux_process_supervisor",
+    "tools.test_qlib_traffic_observer",
+    "tools.test_qlib_observer_evidence_contract",
+    "tools.test_qlib_production_sampler"
+  ],
+  "expected_discovered_test_count": 134,
+  "expected_discovered_test_ids_digest": "707723939b95c4890f17b05e7fff8acf32708a3dd31eb84d7e6fe02c2668ffb1",
+  "required_shared_test_ids": [
+    "tools.test_qlib_linux_process_supervisor.DeterministicCampaignTests.test_actual_campaign_propagates_measured_unrelated_termination_count",
+    "tools.test_qlib_linux_process_supervisor.DeterministicCampaignTests.test_deterministic_campaign_counts_wrong_pass_candidates",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_candidate_parent_change_between_snapshot_and_read_fails_closed",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_current_registered_parent_authorizes_its_current_child",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_group_anchor_never_promotes_unregistered_numeric_member",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_group_drain_without_live_retained_anchor_never_signals",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_live_exact_retained_member_is_group_signal_anchor",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_parent_exit_after_snapshot_proof_cannot_drop_owned_child",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_reused_numeric_group_without_lineage_fails_closed_unregistered",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_reused_registered_parent_cannot_authorize_unrelated_child",
+    "tools.test_qlib_linux_process_supervisor.RegistryAndPublicationTests.test_unrelated_disappearing_process_is_ignored_without_registration",
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_d42c_native_windows_public_surface_fails_closed_before_mutation",
+    "tools.test_qlib_traffic_observer.R483SamplerAndRollbackReliabilityTests.test_linux_timeout_fixture_cleanup_is_fail_closed",
+    "tools.test_qlib_traffic_observer.R483SamplerAndRollbackReliabilityTests.test_timeout_preserves_phase_counter_and_cancels_process_tree"
+  ],
+  "legacy_native_win32_test_ids": [
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_missing_final_marker_and_child_loss_are_incomplete",
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_requested_duration_short_final_is_never_pass",
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_stale_heartbeat_and_sample_gap_are_detected",
+    "tools.test_qlib_traffic_observer.R483SamplerAndRollbackReliabilityTests.test_detached_child_contract_uses_absolute_module_and_scrubbed_environment",
+    "tools.test_qlib_traffic_observer.R488C2Win32ProcessTreeFailClosedTests.test_detached_fixture_inside_current_job_object_without_breakaway",
+    "tools.test_qlib_traffic_observer.R488C2Win32ProcessTreeFailClosedTests.test_marker_owned_residual_process_count_is_zero",
+    "tools.test_qlib_traffic_observer.R488C2Win32ProcessTreeFailClosedTests.test_root_exited_grandchild_alive_with_inherited_pipe",
+    "tools.test_qlib_traffic_observer.R488C2Win32ProcessTreeFailClosedTests.test_unrelated_sibling_survives_owned_tree_cleanup"
+  ],
+  "windows_native_public_legacy_expectation_test_ids": [
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_artifacts_are_redacted_and_local_mode_ignores_production_sampler",
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_detached_start_poll_finalize_and_incremental_artifacts",
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_duplicate_observation_id_is_rejected",
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_repeated_detached_launches_do_not_race_process_metadata",
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_task_owned_early_stop_preserves_unrelated_sibling"
+  ],
+  "windows_portable_linux_only_exclusions": [
+    "tools.test_qlib_linux_process_supervisor.LinuxProcessContractTests.test_group_drain_kills_term_ignoring_descendant_after_root_exit",
+    "tools.test_qlib_linux_process_supervisor.LinuxProcessContractTests.test_operational_local_observation_has_sealed_pass_and_no_raw_identity",
+    "tools.test_qlib_linux_process_supervisor.LinuxProcessContractTests.test_proc_contradiction_does_not_signal_child",
+    "tools.test_qlib_linux_process_supervisor.LinuxProcessContractTests.test_real_failed_startup_drains_unresponsive_separate_session_child",
+    "tools.test_qlib_linux_process_supervisor.LinuxProcessContractTests.test_repeated_lifecycle_reaps_private_supervisor_handles",
+    "tools.test_qlib_linux_process_supervisor.LinuxProcessContractTests.test_scope_escape_is_retained_fail_closed_and_exactly_cleaned",
+    "tools.test_qlib_linux_process_supervisor.LinuxProcessContractTests.test_self_exclusion_refuses_signal",
+    "tools.test_qlib_observer_evidence_contract.R488D33CanonicalObserverEvidenceContractTests.test_linux_poller_and_stop_cannot_author_terminal_artifacts",
+    "tools.test_qlib_traffic_observer.QlibTrafficObserverTests.test_d42_linux_native_public_surface_delegates_without_raw_identity"
+  ],
+  "tiers": {
+    "LINUX_SHARED_REQUIRED": {
+      "os_name": "posix",
+      "sys_platform": "linux",
+      "excluded_groups": [
+        "legacy_native_win32_test_ids"
+      ]
+    },
+    "WINDOWS_PORTABLE_SHARED": {
+      "os_name": "nt",
+      "sys_platform": "win32",
+      "excluded_groups": [
+        "legacy_native_win32_test_ids",
+        "windows_native_public_legacy_expectation_test_ids",
+        "windows_portable_linux_only_exclusions"
+      ]
+    }
+  },
+  "windows_native_support_verdict": "WINDOWS_NATIVE_OBSERVER_NOT_APPROVED"
+}

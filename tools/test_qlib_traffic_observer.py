@@ -13,6 +13,7 @@ import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from tools import qlib_traffic_observer as observer
@@ -136,6 +137,37 @@ def _utc_offset(seconds: float = 0.0) -> str:
     return value.isoformat().replace("+00:00", "Z")
 
 
+def _assert_linux_terminal_pair(
+    test_case: unittest.TestCase,
+    directory: Path,
+    expected: dict[str, object],
+) -> None:
+    api = observer._linux_supervisor_api()
+    terminal = json.loads((directory / "terminal.json").read_text(encoding="utf-8"))
+    seal = json.loads((directory / "seal.json").read_text(encoding="utf-8"))
+    test_case.assertEqual(terminal, expected)
+    test_case.assertEqual(seal["status"], expected["status"])
+    test_case.assertEqual(seal["terminal_digest"], api._digest_payload(terminal))
+    test_case.assertTrue(seal["registry_cleared"])
+    test_case.assertTrue(seal["immutable"])
+    test_case.assertFalse((directory / "final.json").exists())
+    test_case.assertFalse((directory / "incomplete.json").exists())
+    test_case.assertFalse((directory / "process.json").exists())
+    forbidden_keys = {"pid", "command", "argv", "environment", "path"}
+    for artifact in directory.iterdir():
+        if not artifact.is_file() or artifact.suffix != ".json":
+            continue
+        payload = json.loads(artifact.read_text(encoding="utf-8"))
+        pending: list[object] = [payload]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, dict):
+                test_case.assertFalse(forbidden_keys & set(value))
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+
+
 class QlibTrafficObserverTests(unittest.TestCase):
     def setUp(self) -> None:
         temp_parent = Path(os.environ.get("R477_TEST_TMP", tempfile.gettempdir()))
@@ -145,6 +177,7 @@ class QlibTrafficObserverTests(unittest.TestCase):
         )
         self.root = Path(self._temporary.name)
         self.observation_ids: list[str] = []
+        self.launched_observation_ids: list[str] = []
         self.addCleanup(self._temporary.cleanup)
         self.addCleanup(self._stop_running_observations)
 
@@ -154,14 +187,20 @@ class QlibTrafficObserverTests(unittest.TestCase):
         return observation_id
 
     def _stop_running_observations(self) -> None:
-        for observation_id in self.observation_ids:
+        for observation_id in self.launched_observation_ids:
             directory = self.root / observation_id
             if not directory.exists():
                 continue
             result = observer.poll_observation(
                 artifact_root=self.root, observation_id=observation_id
             )
-            if result.get("status") == "RUNNING":
+            status = result.get("status")
+            should_stop = (
+                status not in {"PASS", "HOLD", "FAIL"}
+                if observer._uses_linux_native_supervisor()
+                else status == "RUNNING"
+            )
+            if should_stop:
                 observer.stop_observation(
                     artifact_root=self.root,
                     observation_id=observation_id,
@@ -173,7 +212,7 @@ class QlibTrafficObserverTests(unittest.TestCase):
         self, prefix: str, *, duration: float = 0.45, interval: float = 0.1
     ) -> dict[str, object]:
         observation_id = self._new_id(prefix)
-        return observer.start_observation(
+        result = observer.start_observation(
             artifact_root=self.root,
             observation_id=observation_id,
             duration_seconds=duration,
@@ -182,6 +221,8 @@ class QlibTrafficObserverTests(unittest.TestCase):
             stale_after_seconds=5.0,
             mode="local-test",
         )
+        self.launched_observation_ids.append(observation_id)
+        return result
 
     def _wait_terminal(self, observation_id: str, timeout: float = 6.0) -> dict[str, object]:
         deadline = time.monotonic() + timeout
@@ -190,7 +231,13 @@ class QlibTrafficObserverTests(unittest.TestCase):
             latest = observer.poll_observation(
                 artifact_root=self.root, observation_id=observation_id
             )
-            if latest.get("status") != "RUNNING":
+            status = latest.get("status")
+            is_terminal = (
+                status in {"PASS", "HOLD", "FAIL"}
+                if observer._uses_linux_native_supervisor()
+                else status != "RUNNING"
+            )
+            if is_terminal:
                 return latest
             time.sleep(0.05)
         self.fail(f"observation did not reach a terminal state: {latest}")
@@ -224,43 +271,98 @@ class QlibTrafficObserverTests(unittest.TestCase):
         (directory / "events.ndjson").write_text("", encoding="utf-8")
         return observation_id, directory
 
+    def _poll_legacy_fixture(self, observation_id: str) -> dict[str, object]:
+        """Exercise the Windows artifact contract without host API dependence."""
+
+        with mock.patch.object(
+            observer, "_uses_linux_native_supervisor", return_value=False
+        ):
+            return observer.poll_observation(
+                artifact_root=self.root, observation_id=observation_id
+            )
+
+    def _assert_linux_terminal_pair(
+        self,
+        directory: Path,
+        expected: dict[str, object],
+    ) -> None:
+        _assert_linux_terminal_pair(self, directory, expected)
+
     def test_detached_start_poll_finalize_and_incremental_artifacts(self) -> None:
         launched_at = time.monotonic()
         launch = self._start_short("normal")
         launcher_elapsed = time.monotonic() - launched_at
         observation_id = str(launch["observation_id"])
-        directory = Path(str(launch["artifact_path"]))
+        directory = self.root / observation_id
 
         self.assertLess(launcher_elapsed, 2.0)
-        self.assertEqual(launch["status"], "STARTED")
         self.assertTrue((directory / "start.json").exists())
-        self.assertTrue((directory / "events.ndjson").exists())
-
         initial = observer.poll_observation(
             artifact_root=self.root, observation_id=observation_id
         )
-        self.assertIn(initial["status"], {"RUNNING", "PASS"})
         final = self._wait_terminal(observation_id)
 
-        self.assertEqual(final["status"], "PASS")
-        self.assertTrue(final["completion_marker"])
-        self.assertEqual(final["mode"], "local-test")
-        self.assertGreaterEqual(
-            float(final["monotonic_elapsed_seconds"]),
-            float(final["requested_duration_seconds"]),
-        )
-        self.assertGreaterEqual(int(final["sample_count"]), 2)
-        self.assertLessEqual(
-            float(final["maximum_gap_seconds"]),
-            float(final["maximum_allowed_gap_seconds"]),
-        )
-        self.assertEqual(final["process_exit_code"], 0)
-        self.assertTrue((directory / "heartbeat.json").exists())
-        self.assertTrue((directory / "state.json").exists())
-        self.assertTrue((directory / "final.json").exists())
-        events = (directory / "events.ndjson").read_text(encoding="utf-8")
-        self.assertIn('"event": "SAMPLE"', events)
-        self.assertIn('"event": "COMPLETED"', events)
+        if observer._uses_linux_native_supervisor():
+            self.assertEqual(launch["status"], "READY")
+            self.assertEqual(launch["verification_status"], "NOT_VERIFIED")
+            self.assertEqual(
+                launch["launcher_backend"], "LINUX_NATIVE_SUPERVISOR"
+            )
+            self.assertFalse(
+                {"pid", "command", "argv", "environment", "path"} & set(launch)
+            )
+            self.assertIn(initial["status"], {"READY", "RUNNING", "PASS"})
+            self.assertEqual(final["status"], "PASS")
+            self.assertEqual(final["verification_status"], "VERIFIED")
+            self.assertEqual(final["reason"], "OBSERVATION_COMPLETE")
+            self.assertTrue(final["completion_marker"])
+            self.assertEqual(final["mode"], "local-test")
+            self.assertGreaterEqual(int(final["sample_count"]), 2)
+            self.assertEqual(
+                final["launcher_backend"], "LINUX_NATIVE_SUPERVISOR"
+            )
+            cleanup = final["cleanup_summary"]
+            for counter in (
+                "task_owned_live_count",
+                "descendant_count",
+                "orphan_count",
+                "zombie_count",
+                "unresolved_wait_count",
+                "registry_residual_count",
+                "unrelated_termination_count",
+                "raw_persistence_count",
+                "timeout_leak_count",
+            ):
+                self.assertEqual(cleanup[counter], 0)
+            self.assertTrue(final["capability_summary"]["process_group"])
+            self.assertTrue(final["capability_summary"]["readiness_fd"])
+            self.assertTrue(final["capability_summary"]["waitpid"])
+            self.assertTrue(final["capability_summary"]["proc_corroborated"])
+            self.assertTrue((directory / "state.json").exists())
+            self._assert_linux_terminal_pair(directory, final)
+        else:
+            self.assertEqual(launch["status"], "STARTED")
+            self.assertTrue((directory / "events.ndjson").exists())
+            self.assertIn(initial["status"], {"RUNNING", "PASS"})
+            self.assertEqual(final["status"], "PASS")
+            self.assertTrue(final["completion_marker"])
+            self.assertEqual(final["mode"], "local-test")
+            self.assertGreaterEqual(
+                float(final["monotonic_elapsed_seconds"]),
+                float(final["requested_duration_seconds"]),
+            )
+            self.assertGreaterEqual(int(final["sample_count"]), 2)
+            self.assertLessEqual(
+                float(final["maximum_gap_seconds"]),
+                float(final["maximum_allowed_gap_seconds"]),
+            )
+            self.assertEqual(final["process_exit_code"], 0)
+            self.assertTrue((directory / "heartbeat.json").exists())
+            self.assertTrue((directory / "state.json").exists())
+            self.assertTrue((directory / "final.json").exists())
+            events = (directory / "events.ndjson").read_text(encoding="utf-8")
+            self.assertIn('"event": "SAMPLE"', events)
+            self.assertIn('"event": "COMPLETED"', events)
 
     def test_atomic_write_retries_transient_replace_contention(self) -> None:
         target = self.root / "atomic-retry.json"
@@ -299,9 +401,7 @@ class QlibTrafficObserverTests(unittest.TestCase):
                 "process_exit_code": 0,
             },
         )
-        result = observer.poll_observation(
-            artifact_root=self.root, observation_id=observation_id
-        )
+        result = self._poll_legacy_fixture(observation_id)
         self.assertEqual(result["status"], "NOT_VERIFIED")
         self.assertIn("REQUESTED_DURATION_NOT_MET", result["validation_failures"])
 
@@ -329,9 +429,7 @@ class QlibTrafficObserverTests(unittest.TestCase):
                 "consecutive_detection_count": 1,
             },
         )
-        result = observer.poll_observation(
-            artifact_root=self.root, observation_id=observation_id
-        )
+        result = self._poll_legacy_fixture(observation_id)
         self.assertEqual(result["status"], "INCOMPLETE")
         self.assertEqual(result["verification_status"], "NOT_VERIFIED")
         self.assertEqual(result["reason"], "CHILD_PROCESS_LOSS")
@@ -362,9 +460,7 @@ class QlibTrafficObserverTests(unittest.TestCase):
                 observer._atomic_write_json(
                     directory / "process.json", {"pid": os.getpid()}
                 )
-                result = observer.poll_observation(
-                    artifact_root=self.root, observation_id=observation_id
-                )
+                result = self._poll_legacy_fixture(observation_id)
                 self.assertEqual(result["status"], "INCOMPLETE")
                 self.assertEqual(result["reason"], expected_reason)
                 self.assertFalse((directory / "final.json").exists())
@@ -372,7 +468,12 @@ class QlibTrafficObserverTests(unittest.TestCase):
     def test_duplicate_observation_id_is_rejected(self) -> None:
         observation_id = self._new_id("duplicate")
         (self.root / observation_id).mkdir()
-        with self.assertRaises(observer.DuplicateObservationError):
+        expected_error = (
+            observer._linux_supervisor_api().LinuxSupervisorError
+            if observer._uses_linux_native_supervisor()
+            else observer.DuplicateObservationError
+        )
+        with self.assertRaises(expected_error) as caught:
             observer.start_observation(
                 artifact_root=self.root,
                 observation_id=observation_id,
@@ -382,6 +483,8 @@ class QlibTrafficObserverTests(unittest.TestCase):
                 stale_after_seconds=1.0,
                 mode="local-test",
             )
+        if observer._uses_linux_native_supervisor():
+            self.assertEqual(str(caught.exception), "DUPLICATE_OBSERVATION_ID")
 
     def test_repeated_detached_launches_do_not_race_process_metadata(self) -> None:
         observation_ids: list[str] = []
@@ -393,6 +496,8 @@ class QlibTrafficObserverTests(unittest.TestCase):
             self.assertEqual(result["status"], "PASS")
             directory = self.root / observation_id
             self.assertFalse(list(directory.glob(".*.tmp")))
+            if observer._uses_linux_native_supervisor():
+                self._assert_linux_terminal_pair(directory, result)
 
     def test_task_owned_early_stop_preserves_unrelated_sibling(self) -> None:
         sibling = self.root / "unrelated-sentinel"
@@ -403,7 +508,11 @@ class QlibTrafficObserverTests(unittest.TestCase):
 
         launch = self._start_short("failure-injection", duration=30.0)
         observation_id = str(launch["observation_id"])
-        pid = int(launch["pid"])
+        launched_pid = launch.get("pid")
+        if observer._uses_linux_native_supervisor():
+            self.assertIsNone(launched_pid)
+        else:
+            self.assertIsInstance(launched_pid, int)
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
             current = observer.poll_observation(
@@ -419,16 +528,202 @@ class QlibTrafficObserverTests(unittest.TestCase):
             wait_seconds=5.0,
         )
 
-        self.assertEqual(result["status"], "INCOMPLETE")
-        self.assertEqual(result["verification_status"], "NOT_VERIFIED")
-        self.assertEqual(result["reason"], "FAILURE_INJECTION")
-        self.assertFalse((self.root / observation_id / "final.json").exists())
+        directory = self.root / observation_id
+        if observer._uses_linux_native_supervisor():
+            self.assertEqual(launch["status"], "READY")
+            self.assertEqual(result["status"], "HOLD")
+            self.assertEqual(result["verification_status"], "NOT_VERIFIED")
+            self.assertEqual(result["reason"], "FAILURE_INJECTION")
+            self.assertFalse(result["completion_marker"])
+            cleanup = result["cleanup_summary"]
+            for counter in (
+                "task_owned_live_count",
+                "descendant_count",
+                "orphan_count",
+                "zombie_count",
+                "unresolved_wait_count",
+                "registry_residual_count",
+                "unrelated_termination_count",
+                "raw_persistence_count",
+                "timeout_leak_count",
+            ):
+                self.assertEqual(cleanup[counter], 0)
+            self._assert_linux_terminal_pair(directory, result)
+        else:
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertEqual(result["verification_status"], "NOT_VERIFIED")
+            self.assertEqual(result["reason"], "FAILURE_INJECTION")
+            self.assertFalse((directory / "final.json").exists())
         self.assertEqual(sentinel.read_bytes(), before)
         self.assertTrue(observer._pid_exists(os.getpid()))
-        exit_deadline = time.monotonic() + 3.0
-        while observer._pid_exists(pid) and time.monotonic() < exit_deadline:
-            time.sleep(0.05)
-        self.assertFalse(observer._pid_exists(pid))
+        if isinstance(launched_pid, int):
+            exit_deadline = time.monotonic() + 3.0
+            while (
+                observer._pid_exists(launched_pid)
+                and time.monotonic() < exit_deadline
+            ):
+                time.sleep(0.05)
+            self.assertFalse(observer._pid_exists(launched_pid))
+
+    def test_d42_linux_native_public_surface_delegates_without_raw_identity(
+        self,
+    ) -> None:
+        api = mock.Mock()
+        api.start_linux_observation.return_value = {
+            "observation_id": "linux-delegation",
+            "mode": "local-test",
+            "status": "READY",
+            "verification_status": "NOT_VERIFIED",
+            "launcher_backend": "LINUX_NATIVE_SUPERVISOR",
+        }
+        api.poll_linux_observation.return_value = {
+            "observation_id": "linux-delegation",
+            "status": "RUNNING",
+            "verification_status": "NOT_VERIFIED",
+        }
+        api.stop_linux_observation.return_value = {
+            "observation_id": "linux-delegation",
+            "status": "HOLD",
+            "verification_status": "NOT_VERIFIED",
+            "reason": "OWNER_STOP",
+        }
+        with mock.patch.object(
+            observer, "_uses_linux_native_supervisor", return_value=True
+        ), mock.patch.object(observer, "_linux_supervisor_api", return_value=api):
+            launched = observer.start_observation(
+                artifact_root=self.root,
+                observation_id="linux-delegation",
+                duration_seconds=1.0,
+                sample_interval_seconds=0.2,
+                max_gap_seconds=1.0,
+                stale_after_seconds=2.0,
+                mode="local-test",
+            )
+            polled = observer.poll_observation(
+                artifact_root=self.root, observation_id="linux-delegation"
+            )
+            stopped = observer.stop_observation(
+                artifact_root=self.root,
+                observation_id="linux-delegation",
+                reason="OWNER_STOP",
+                wait_seconds=1.5,
+            )
+
+        api.start_linux_observation.assert_called_once_with(
+            artifact_root=self.root,
+            observation_id="linux-delegation",
+            duration_seconds=1.0,
+            sample_interval_seconds=0.2,
+            max_gap_seconds=1.0,
+            stale_after_seconds=2.0,
+            mode="local-test",
+            required_target_contract=None,
+            sampler_argv=None,
+        )
+        api.poll_linux_observation.assert_called_once_with(
+            artifact_root=self.root, observation_id="linux-delegation"
+        )
+        api.stop_linux_observation.assert_called_once_with(
+            artifact_root=self.root,
+            observation_id="linux-delegation",
+            reason="OWNER_STOP",
+            wait_seconds=1.5,
+        )
+        self.assertEqual(launched["status"], "READY")
+        self.assertEqual(stopped["status"], "HOLD")
+        for result in (launched, polled, stopped):
+            raw_keys = {"pid", "command", "argv", "environment", "path"}
+            self.assertFalse(raw_keys & set(result))
+
+    def test_d42c_native_windows_public_surface_fails_closed_before_mutation(
+        self,
+    ) -> None:
+        observation_id = "native-windows-not-approved"
+        directory = self.root / observation_id
+        linux_api = mock.Mock()
+        with mock.patch.object(
+            observer, "_current_platform_name", return_value="nt"
+        ), mock.patch.object(
+            observer, "_linux_supervisor_api", return_value=linux_api
+        ) as load_linux, mock.patch.object(
+            observer.subprocess, "Popen"
+        ) as popen:
+            operations = (
+                lambda: observer.start_observation(
+                    artifact_root=self.root,
+                    observation_id=observation_id,
+                    duration_seconds=1.0,
+                    sample_interval_seconds=0.2,
+                    max_gap_seconds=1.0,
+                    stale_after_seconds=2.0,
+                    mode="local-test",
+                ),
+                lambda: observer.poll_observation(
+                    artifact_root=self.root,
+                    observation_id=observation_id,
+                ),
+                lambda: observer.stop_observation(
+                    artifact_root=self.root,
+                    observation_id=observation_id,
+                    reason="OWNER_STOP",
+                ),
+            )
+            for operation in operations:
+                with self.subTest(operation=operation):
+                    with self.assertRaises(observer.ObserverError) as caught:
+                        operation()
+                    self.assertEqual(
+                        str(caught.exception),
+                        observer.WINDOWS_NATIVE_OBSERVER_NOT_APPROVED,
+                    )
+
+            cli_cases = (
+                [
+                    "start",
+                    "--artifact-root",
+                    str(self.root),
+                    "--observation-id",
+                    observation_id,
+                    "--duration-seconds",
+                    "1",
+                    "--mode",
+                    "local-test",
+                ],
+                [
+                    "poll",
+                    "--artifact-root",
+                    str(self.root),
+                    "--observation-id",
+                    observation_id,
+                ],
+                [
+                    "stop",
+                    "--artifact-root",
+                    str(self.root),
+                    "--observation-id",
+                    observation_id,
+                    "--reason",
+                    "OWNER_STOP",
+                ],
+                ["_run", "--artifact-dir", str(directory)],
+            )
+            expected_payload = {
+                "status": "NOT_VERIFIED",
+                "verification_status": "NOT_VERIFIED",
+                "reason": observer.WINDOWS_NATIVE_OBSERVER_NOT_APPROVED,
+            }
+            with mock.patch.object(observer, "_print_json") as print_json:
+                for arguments in cli_cases:
+                    with self.subTest(command=arguments[0]):
+                        self.assertEqual(observer.main(arguments), 2)
+
+        self.assertEqual(print_json.call_count, len(cli_cases))
+        for call in print_json.call_args_list:
+            self.assertEqual(call.args, (expected_payload,))
+        self.assertFalse(directory.exists())
+        load_linux.assert_not_called()
+        linux_api.assert_not_called()
+        popen.assert_not_called()
 
     def test_artifacts_are_redacted_and_local_mode_ignores_production_sampler(self) -> None:
         marker = self.root / "unexpected-sampler-execution.txt"
@@ -933,6 +1228,308 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
             self._cleanup_patch_active = False
 
     @staticmethod
+    def _capture_linux_timeout_fixture_identity(state: dict[str, Any]) -> None:
+        if state.get("identity") is not None or state.get("binding_error") is not None:
+            return
+        marker = state["marker"]
+        if not marker.is_file():
+            return
+        try:
+            nonce, process_text, start_text = marker.read_text(
+                encoding="utf-8"
+            ).split(":", 2)
+            process_id = int(process_text)
+            start_ticks = int(start_text)
+        except (OSError, ValueError):
+            state["binding_error"] = "MARKER_SCHEMA_REJECTED"
+            return
+        if (
+            nonce != state["nonce"]
+            or process_id <= 1
+            or start_ticks <= 0
+        ):
+            state["binding_error"] = "MARKER_BINDING_REJECTED"
+            return
+        linux_api = state["linux_api"]
+        try:
+            identity = linux_api._read_proc_identity(process_id, open_pidfd=True)
+        except linux_api.LinuxSupervisorError:
+            if observer._pid_exists(process_id):
+                state["binding_error"] = "MARKER_IDENTITY_UNAVAILABLE"
+            else:
+                state["marker_process_absent"] = True
+            return
+        if identity.start_ticks != start_ticks:
+            identity.close()
+            state["binding_error"] = "MARKER_IDENTITY_MISMATCH"
+            return
+        state["identity"] = identity
+
+    def _cleanup_linux_timeout_fixture(self, state: dict[str, Any]) -> None:
+        errors: list[str] = []
+        directory = state["directory"]
+        identity = state.get("identity")
+        linux_api = state["linux_api"]
+        try:
+            self._capture_linux_timeout_fixture_identity(state)
+            if state.get("binding_error") is not None:
+                errors.append(str(state["binding_error"]))
+
+            if directory.is_dir():
+                try:
+                    current = observer.poll_observation(
+                        artifact_root=state["root"],
+                        observation_id=state["observation_id"],
+                    )
+                    nonterminal = current.get("status") not in {
+                        "PASS",
+                        "HOLD",
+                        "FAIL",
+                    }
+                except Exception:
+                    nonterminal = True
+                    errors.append("CLEANUP_POLL_FAILED")
+                if nonterminal:
+                    state["stop_count"] += 1
+                    try:
+                        observer.stop_observation(
+                            artifact_root=state["root"],
+                            observation_id=state["observation_id"],
+                            reason="TASK_CLEANUP",
+                            wait_seconds=5.0,
+                        )
+                    except Exception:
+                        errors.append("CLEANUP_STOP_FAILED")
+
+            try:
+                state["emergency_stop"].touch(exist_ok=True)
+            except OSError:
+                errors.append("EMERGENCY_STOP_PUBLICATION_FAILED")
+
+            deadline = time.monotonic() + float(
+                state.get("fallback_grace_seconds", 0.5)
+            )
+            while time.monotonic() < deadline:
+                self._capture_linux_timeout_fixture_identity(state)
+                identity = state.get("identity")
+                if identity is None:
+                    if state.get("marker_process_absent") is True:
+                        break
+                    time.sleep(0.01)
+                    continue
+                status = linux_api._identity_status(identity)
+                if status in {
+                    linux_api.IdentityStatus.ABSENT,
+                    linux_api.IdentityStatus.PID_REUSED,
+                }:
+                    break
+                time.sleep(0.01)
+
+            identity = state.get("identity")
+            if identity is not None:
+                status = linux_api._identity_status(identity)
+                if status in {
+                    linux_api.IdentityStatus.MATCH,
+                    linux_api.IdentityStatus.SCOPE_CHANGED,
+                }:
+                    state["exact_signal_count"] += 1
+                    signal_result = linux_api._safe_signal_owned_process(
+                        identity,
+                        linux_api.signal.SIGKILL,
+                        supervisor_process_id=os.getpid(),
+                    )
+                    if signal_result != "EXACT_PROCESS_SIGNALLED_PIDFD":
+                        errors.append("EXACT_FALLBACK_SIGNAL_REJECTED")
+                elif status not in {
+                    linux_api.IdentityStatus.ABSENT,
+                    linux_api.IdentityStatus.PID_REUSED,
+                }:
+                    errors.append("EXACT_IDENTITY_UNCERTAIN")
+
+                deadline = time.monotonic() + float(
+                    state.get("identity_absence_seconds", 2.0)
+                )
+                while time.monotonic() < deadline:
+                    status = linux_api._identity_status(identity)
+                    if status in {
+                        linux_api.IdentityStatus.ABSENT,
+                        linux_api.IdentityStatus.PID_REUSED,
+                    }:
+                        break
+                    time.sleep(0.01)
+                if status not in {
+                    linux_api.IdentityStatus.ABSENT,
+                    linux_api.IdentityStatus.PID_REUSED,
+                }:
+                    errors.append("EXACT_CHILD_REMAINS")
+            elif state["marker"].is_file() and not state.get(
+                "marker_process_absent"
+            ):
+                errors.append("MARKER_WITHOUT_EXACT_IDENTITY")
+
+            state["reap_count"] += 1
+            if not linux_api._bounded_reap_supervisor_handle(
+                directory, float(state.get("supervisor_reap_seconds", 5.0))
+            ):
+                errors.append("SUPERVISOR_HANDLE_REAP_FAILED")
+        finally:
+            identity = state.get("identity")
+            if identity is not None:
+                identity.close()
+                state["identity"] = None
+            state["cleanup_errors"] = tuple(sorted(set(errors)))
+        if errors:
+            raise AssertionError(
+                "LINUX_TIMEOUT_FIXTURE_CLEANUP_FAILED:"
+                + ",".join(sorted(set(errors)))
+            )
+
+    def test_linux_timeout_fixture_cleanup_is_fail_closed(self) -> None:
+        class IdentityStatus:
+            MATCH = "MATCH"
+            ABSENT = "ABSENT"
+            PID_REUSED = "PID_REUSED"
+            SCOPE_CHANGED = "SCOPE_CHANGED"
+
+        def fixture_state(
+            root: Path,
+            linux_api: mock.Mock,
+            *,
+            identity: mock.Mock | None = None,
+            marker_text: str | None = None,
+        ) -> dict[str, Any]:
+            observation_id = "cleanup-contract"
+            directory = root / observation_id
+            directory.mkdir()
+            marker = root / "grandchild.txt"
+            if marker_text is not None:
+                marker.write_text(marker_text, encoding="utf-8")
+            return {
+                "root": root,
+                "directory": directory,
+                "observation_id": observation_id,
+                "marker": marker,
+                "emergency_stop": root / "emergency-stop",
+                "nonce": "case-nonce",
+                "linux_api": linux_api,
+                "identity": identity,
+                "binding_error": None,
+                "marker_process_absent": False,
+                "stop_count": 0,
+                "exact_signal_count": 0,
+                "reap_count": 0,
+                "cleanup_errors": (),
+                "fallback_grace_seconds": 0.0,
+                "identity_absence_seconds": 0.1,
+                "supervisor_reap_seconds": 0.1,
+            }
+
+        def linux_api() -> mock.Mock:
+            api = mock.Mock()
+            api.IdentityStatus = IdentityStatus
+            api.LinuxSupervisorError = RuntimeError
+            api.signal.SIGKILL = 9
+            api._bounded_reap_supervisor_handle.return_value = True
+            api._safe_signal_owned_process.return_value = (
+                "EXACT_PROCESS_SIGNALLED_PIDFD"
+            )
+            return api
+
+        with self.subTest(case="terminal-no-stop"):
+            with tempfile.TemporaryDirectory() as temporary:
+                api = linux_api()
+                state = fixture_state(Path(temporary), api)
+                with mock.patch.object(
+                    observer,
+                    "poll_observation",
+                    return_value={"status": "HOLD"},
+                ), mock.patch.object(observer, "stop_observation") as stop:
+                    self._cleanup_linux_timeout_fixture(state)
+                stop.assert_not_called()
+                api._safe_signal_owned_process.assert_not_called()
+                api._bounded_reap_supervisor_handle.assert_called_once()
+                self.assertEqual(state["reap_count"], 1)
+
+        with self.subTest(case="running-single-stop"):
+            with tempfile.TemporaryDirectory() as temporary:
+                api = linux_api()
+                state = fixture_state(Path(temporary), api)
+                with mock.patch.object(
+                    observer,
+                    "poll_observation",
+                    return_value={"status": "RUNNING"},
+                ), mock.patch.object(
+                    observer,
+                    "stop_observation",
+                    return_value={"status": "HOLD"},
+                ) as stop:
+                    self._cleanup_linux_timeout_fixture(state)
+                stop.assert_called_once()
+                self.assertEqual(state["stop_count"], 1)
+                api._safe_signal_owned_process.assert_not_called()
+
+        with self.subTest(case="terminal-exact-pidfd-fallback"):
+            with tempfile.TemporaryDirectory() as temporary:
+                api = linux_api()
+                identity = mock.Mock(start_ticks=100)
+                api._identity_status.side_effect = [
+                    IdentityStatus.MATCH,
+                    IdentityStatus.ABSENT,
+                ]
+                state = fixture_state(
+                    Path(temporary), api, identity=identity
+                )
+                with mock.patch.object(
+                    observer,
+                    "poll_observation",
+                    return_value={"status": "HOLD"},
+                ), mock.patch.object(observer, "stop_observation") as stop:
+                    self._cleanup_linux_timeout_fixture(state)
+                stop.assert_not_called()
+                api._safe_signal_owned_process.assert_called_once_with(
+                    identity,
+                    api.signal.SIGKILL,
+                    supervisor_process_id=os.getpid(),
+                )
+                self.assertEqual(state["exact_signal_count"], 1)
+                identity.close.assert_called_once()
+
+        with self.subTest(case="nonce-mismatch-no-signal"):
+            with tempfile.TemporaryDirectory() as temporary:
+                api = linux_api()
+                state = fixture_state(
+                    Path(temporary),
+                    api,
+                    marker_text="wrong-nonce:42:100",
+                )
+                with mock.patch.object(
+                    observer,
+                    "poll_observation",
+                    return_value={"status": "HOLD"},
+                ), mock.patch.object(observer, "stop_observation"):
+                    with self.assertRaisesRegex(
+                        AssertionError, "MARKER_BINDING_REJECTED"
+                    ):
+                        self._cleanup_linux_timeout_fixture(state)
+                api._safe_signal_owned_process.assert_not_called()
+
+        with self.subTest(case="reap-failure-is-error"):
+            with tempfile.TemporaryDirectory() as temporary:
+                api = linux_api()
+                api._bounded_reap_supervisor_handle.return_value = False
+                state = fixture_state(Path(temporary), api)
+                with mock.patch.object(
+                    observer,
+                    "poll_observation",
+                    return_value={"status": "HOLD"},
+                ), mock.patch.object(observer, "stop_observation"):
+                    with self.assertRaisesRegex(
+                        AssertionError, "SUPERVISOR_HANDLE_REAP_FAILED"
+                    ):
+                        self._cleanup_linux_timeout_fixture(state)
+                api._safe_signal_owned_process.assert_not_called()
+
+    @staticmethod
     def _completed(payload: dict[str, object], returncode: int = 42) -> mock.Mock:
         return mock.Mock(
             returncode=returncode,
@@ -1121,6 +1718,52 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
             self.assertNotRegex(serialized, r"[A-Za-z][A-Za-z0-9+.-]*://")
 
     def test_detached_stage_failure_fixture_writes_http_category(self) -> None:
+        if not observer._uses_linux_native_supervisor():
+            failure = observer.SamplerFailure(
+                "HTTP_404",
+                phase="SAMPLER_FUNCTIONAL_RESULT",
+                dependency_class="SAMPLER_CONTRACT",
+                exit_category="SAMPLER_EXIT_NONZERO",
+                source_line=123,
+            )
+            with tempfile.TemporaryDirectory(
+                prefix="r483-stage-fixture-"
+            ) as temporary:
+                directory = Path(temporary) / "stage-005-fixture"
+                directory.mkdir()
+                observer._atomic_write_json(
+                    directory / "start.json",
+                    {
+                        "observation_id": "stage-005-fixture",
+                        "mode": "production",
+                        "requested_duration_seconds": 1,
+                        "sample_interval_seconds": 1,
+                        "maximum_allowed_gap_seconds": 2,
+                        "stale_after_seconds": 3,
+                        "required_target_contract": None,
+                    },
+                )
+                (directory / "events.ndjson").write_text("", encoding="utf-8")
+                with mock.patch.object(
+                    observer, "_uses_linux_native_supervisor", return_value=False
+                ), mock.patch.object(
+                    observer, "_load_production_sampler", return_value=["sampler"]
+                ), mock.patch.object(
+                    observer, "_production_sample", side_effect=failure
+                ):
+                    exit_code = observer._run_worker(directory)
+                result = json.loads(
+                    (directory / "incomplete.json").read_text(encoding="utf-8")
+                )
+            self.assertEqual(exit_code, 42)
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertEqual(result["reason"], "SAMPLER_HTTP_404")
+            self.assertEqual(
+                result["first_failure"]["failure_category"], "HTTP_404"
+            )
+            self.assertFalse(result["completion_marker"])
+            return
+
         payload = json.dumps(
             {"sample_status": "FAIL", "failure_category": "HTTP_404"}
         )
@@ -1149,7 +1792,13 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
                         artifact_root=temporary,
                         observation_id=str(launch["observation_id"]),
                     )
-                    if result.get("status") != "RUNNING":
+                    status = result.get("status")
+                    is_terminal = (
+                        status in {"PASS", "HOLD", "FAIL"}
+                        if observer._uses_linux_native_supervisor()
+                        else status != "RUNNING"
+                    )
+                    if is_terminal:
                         break
                     time.sleep(0.05)
             finally:
@@ -1157,10 +1806,16 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
                     os.environ.pop(observer.PRODUCTION_SAMPLER_ENV, None)
                 else:
                     os.environ[observer.PRODUCTION_SAMPLER_ENV] = previous
-            self.assertEqual(result["status"], "INCOMPLETE")
-            self.assertEqual(result["reason"], "SAMPLER_HTTP_404")
-            self.assertEqual(result["first_failure"]["failure_category"], "HTTP_404")
+            self.assertEqual(launch["status"], "READY")
+            self.assertEqual(result["status"], "HOLD")
+            self.assertEqual(result["reason"], "WORKER_REPORTED_FAILURE")
+            self.assertEqual(result["verification_status"], "NOT_VERIFIED")
             self.assertFalse(result["completion_marker"])
+            _assert_linux_terminal_pair(
+                self,
+                Path(temporary) / str(launch["observation_id"]),
+                result,
+            )
 
     def test_service_and_revision_targets_are_separate_and_readiness_fails_closed(self) -> None:
         revision = self._readiness_sample("REVISION_FUNCTIONAL")
@@ -1198,7 +1853,9 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
             try:
                 with mock.patch.object(
                     observer.subprocess, "Popen", return_value=fake_child
-                ) as popen:
+                ) as popen, mock.patch.object(
+                    observer, "_uses_linux_native_supervisor", return_value=False
+                ):
                     result = observer.start_observation(
                         artifact_root=temporary,
                         observation_id="r483-launch",
@@ -1245,6 +1902,67 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
         self.assertEqual(observer.MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES, 1)
         self.assertLessEqual(observer.MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS, 10)
 
+    def test_d42_linux_production_path_disables_automatic_retry(self) -> None:
+        transient = observer.SamplerFailure(
+            "VERIFIED_EXTERNAL_TRANSIENT",
+            phase="SAMPLER_FUNCTIONAL_RESULT",
+            dependency_class="SAMPLER_CONTRACT",
+            exit_category="SAMPLER_EXIT_NONZERO",
+            retryable=True,
+        )
+        with mock.patch.object(
+            observer, "_production_sample_once", side_effect=transient
+        ) as run_once:
+            with self.assertRaises(observer.SamplerFailure):
+                observer._production_sample(
+                    ["sampler"], 10, allow_automatic_retry=False
+                )
+        self.assertEqual(run_once.call_count, 1)
+
+    def test_d42_direct_module_context_loads_linux_supervisor(self) -> None:
+        source = (
+            "import sys; sys.path.insert(0, '.'); "
+            "import qlib_traffic_observer as observer; "
+            "print(observer._linux_supervisor_api().__name__)"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", source],
+            cwd=Path(observer.__file__).resolve().parent,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout.strip(), "qlib_linux_process_supervisor")
+        self.assertEqual(completed.stderr, "")
+
+    def test_d42_posix_nested_sampler_never_claims_group_closure(self) -> None:
+        process = mock.Mock(returncode=0)
+        process.poll.return_value = 0
+        result = observer._terminate_posix_sampler_process(process)
+        self.assertEqual(result["child_exit_state"], "EXITED")
+        self.assertEqual(result["child_cancellation_state"], "NOT_REQUIRED")
+        self.assertEqual(result["orphan_child_count"], 1)
+        self.assertEqual(result["orphan_verification_status"], "NOT_VERIFIED")
+        self.assertEqual(
+            result["process_tree_snapshot_status"], "INCOMPLETE_SNAPSHOT"
+        )
+        self.assertEqual(result["cleanup_failure_api"], "PopenHandle")
+        self.assertEqual(result["cleanup_failure_phase"], "FINAL_VERIFICATION")
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+
+        running = mock.Mock(returncode=None)
+        running.poll.return_value = None
+        unresolved = observer._terminate_posix_sampler_process(running)
+        self.assertEqual(unresolved["child_exit_state"], "RUNNING")
+        self.assertEqual(unresolved["child_cancellation_state"], "FAILED")
+        self.assertEqual(unresolved["orphan_child_count"], 1)
+        self.assertEqual(unresolved["orphan_verification_status"], "NOT_VERIFIED")
+        running.terminate.assert_not_called()
+        running.kill.assert_not_called()
+
     def test_retry_uses_one_monotonic_total_deadline(self) -> None:
         transient = observer.SamplerFailure(
             "VERIFIED_EXTERNAL_TRANSIENT",
@@ -1268,7 +1986,184 @@ class R483SamplerAndRollbackReliabilityTests(unittest.TestCase):
         self.assertEqual(result["sample_status"], "PASS")
         self.assertEqual(observed_budgets, [30.0, 25.0])
 
+    def _assert_linux_supervised_timeout_contract(self) -> None:
+        self._stop_cleanup_patch()
+        progress = {
+            "current_phase": "HTTP_REQUEST",
+            "last_completed_phase": "REQUEST_PREPARATION",
+            "phase_timings": [
+                {
+                    "phase": "AUTHENTICATION",
+                    "elapsed_ms": 1.0,
+                    "status": "PASS",
+                }
+            ],
+            "timeout_reason": "NONE",
+            "read_only_command_count": 2,
+            "mutation_command_count": 0,
+            "valid_sample_count": 0,
+            "child_exit_state": "RUNNING",
+            "child_cancellation_state": "NOT_REQUIRED",
+            "orphan_child_count": 0,
+        }
+        fake_process = mock.Mock(returncode=None)
+        fake_process.poll.return_value = None
+        fake_process.communicate.side_effect = [
+            subprocess.TimeoutExpired("sampler", 0.25),
+            ("", ""),
+        ]
+
+        def fake_popen(_argv, **options):
+            progress_path = Path(
+                options["env"][observer.SAMPLER_PROGRESS_FILE_ENV]
+            )
+            progress_path.write_text(json.dumps(progress), encoding="utf-8")
+            return fake_process
+
+        with mock.patch.object(
+            observer.subprocess, "Popen", side_effect=fake_popen
+        ):
+            with self.assertRaises(observer.SamplerFailure) as caught:
+                observer._production_sample_once(
+                    [sys.executable, "-c", "raise SystemExit(0)"],
+                    timeout_seconds=0.25,
+                )
+        metadata = caught.exception.metadata
+        self.assertEqual(caught.exception.category, "TIMEOUT")
+        self.assertEqual(metadata["current_phase"], "HTTP_REQUEST")
+        self.assertEqual(
+            metadata["last_completed_phase"], "REQUEST_PREPARATION"
+        )
+        self.assertEqual(metadata["read_only_command_count"], 2)
+        self.assertEqual(metadata["mutation_command_count"], 0)
+        self.assertEqual(metadata["valid_sample_count"], 0)
+        self.assertEqual(metadata["child_cancellation_state"], "FAILED")
+        self.assertEqual(metadata["orphan_child_count"], 1)
+        self.assertEqual(metadata["orphan_verification_status"], "NOT_VERIFIED")
+
+        temporary = tempfile.TemporaryDirectory(prefix="r487a-linux-supervised-")
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        marker = root / "grandchild.txt"
+        emergency_stop = root / "emergency-stop"
+        nonce = uuid.uuid4().hex
+        grandchild_script = "\n".join(
+            (
+                "import os, pathlib, time",
+                "raw = pathlib.Path('/proc/self/stat').read_text(encoding='utf-8')",
+                "start_ticks = int(raw[raw.rfind(')') + 2:].split()[19])",
+                "marker = pathlib.Path(os.environ['QLIB_TEST_GRANDCHILD_PID_FILE'])",
+                "marker.write_text(os.environ['QLIB_TEST_CASE_NONCE'] + ':' + str(os.getpid()) + ':' + str(start_ticks), encoding='utf-8')",
+                "stop = pathlib.Path(os.environ['QLIB_TEST_EMERGENCY_STOP_FILE'])",
+                "deadline = time.monotonic() + 60.0",
+                "while not stop.exists() and time.monotonic() < deadline:",
+                "    time.sleep(0.02)",
+            )
+        )
+        script = "\n".join(
+            (
+                "import json, os, pathlib, subprocess, sys, time",
+                f"grandchild = subprocess.Popen([sys.executable, '-c', {grandchild_script!r}])",
+                "progress = {'current_phase':'HTTP_REQUEST','last_completed_phase':'REQUEST_PREPARATION','phase_timings':[{'phase':'AUTHENTICATION','elapsed_ms':1.0,'status':'PASS'}],'timeout_reason':'NONE','read_only_command_count':2,'mutation_command_count':0,'valid_sample_count':0,'child_exit_state':'RUNNING','child_cancellation_state':'NOT_REQUIRED','orphan_child_count':0}",
+                "pathlib.Path(os.environ['QLIB_SAMPLER_PROGRESS_FILE']).write_text(json.dumps(progress), encoding='utf-8')",
+                "print('{\"sample_status\":', flush=True)",
+                "stop = pathlib.Path(os.environ['QLIB_TEST_EMERGENCY_STOP_FILE'])",
+                "deadline = time.monotonic() + 60.0",
+                "while not stop.exists() and time.monotonic() < deadline:",
+                "    time.sleep(0.02)",
+            )
+        )
+        observation_id = "r487a-linux-supervised-timeout"
+        sampler_argv = [sys.executable, "-c", script]
+        state: dict[str, Any] = {
+            "root": root,
+            "directory": root / observation_id,
+            "observation_id": observation_id,
+            "marker": marker,
+            "emergency_stop": emergency_stop,
+            "nonce": nonce,
+            "linux_api": observer._linux_supervisor_api(),
+            "identity": None,
+            "binding_error": None,
+            "marker_process_absent": False,
+            "stop_count": 0,
+            "exact_signal_count": 0,
+            "reap_count": 0,
+            "cleanup_errors": (),
+        }
+        self.addCleanup(self._cleanup_linux_timeout_fixture, state)
+        with mock.patch.dict(
+            os.environ,
+            {
+                observer.PRODUCTION_SAMPLER_ENV: json.dumps(sampler_argv),
+                "QLIB_TEST_GRANDCHILD_PID_FILE": str(marker),
+                "QLIB_TEST_EMERGENCY_STOP_FILE": str(emergency_stop),
+                "QLIB_TEST_CASE_NONCE": nonce,
+            },
+            clear=False,
+        ):
+            launch = observer.start_observation(
+                artifact_root=root,
+                observation_id=observation_id,
+                duration_seconds=1.0,
+                sample_interval_seconds=0.25,
+                max_gap_seconds=1.0,
+                stale_after_seconds=4.0,
+                mode="production",
+            )
+        self.assertEqual(launch["status"], "READY")
+        result = launch
+        deadline = time.monotonic() + 12.0
+        while time.monotonic() < deadline:
+            self._capture_linux_timeout_fixture_identity(state)
+            result = observer.poll_observation(
+                artifact_root=root,
+                observation_id=observation_id,
+            )
+            if result.get("status") in {"PASS", "HOLD", "FAIL"}:
+                break
+            time.sleep(0.05)
+
+        self._capture_linux_timeout_fixture_identity(state)
+        self.assertEqual(result["status"], "HOLD")
+        self.assertEqual(result["verification_status"], "NOT_VERIFIED")
+        self.assertEqual(result["reason"], "WORKER_REPORTED_FAILURE")
+        cleanup = result["cleanup_summary"]
+        for counter in (
+            "task_owned_live_count",
+            "descendant_count",
+            "orphan_count",
+            "zombie_count",
+            "unresolved_wait_count",
+            "registry_residual_count",
+            "unrelated_termination_count",
+            "raw_persistence_count",
+            "timeout_leak_count",
+        ):
+            self.assertEqual(cleanup[counter], 0)
+        self.assertTrue(marker.is_file())
+        self.assertIsNone(state["binding_error"])
+        identity = state.get("identity")
+        if identity is None:
+            self.assertTrue(state["marker_process_absent"])
+        else:
+            self.assertIn(
+                state["linux_api"]._identity_status(identity),
+                {
+                    state["linux_api"].IdentityStatus.ABSENT,
+                    state["linux_api"].IdentityStatus.PID_REUSED,
+                },
+            )
+        _assert_linux_terminal_pair(
+            self,
+            root / observation_id,
+            result,
+        )
+
     def test_timeout_preserves_phase_counter_and_cancels_process_tree(self) -> None:
+        if observer._uses_linux_native_supervisor():
+            self._assert_linux_supervised_timeout_contract()
+            return
         self._stop_cleanup_patch()
         with tempfile.TemporaryDirectory(prefix="r487a-cancel-") as temporary:
             marker = Path(temporary) / "grandchild.txt"
@@ -1923,6 +2818,14 @@ class R488C2Win32ProcessTreeFailClosedTests(unittest.TestCase):
             test_id
             for test_id in test_ids
             if ".R488C2Win32ProcessTreeFailClosedTests." not in test_id
+            and ".test_d42_" not in test_id
+            and ".test_d42c_" not in test_id
+        )
+        d42_ids = sorted(
+            test_id for test_id in test_ids if ".test_d42_" in test_id
+        )
+        d42c_ids = sorted(
+            test_id for test_id in test_ids if ".test_d42c_" in test_id
         )
         new_ids = [
             test_id
@@ -1935,6 +2838,23 @@ class R488C2Win32ProcessTreeFailClosedTests(unittest.TestCase):
             "cf17b582f731652e97f8a94493d56e764b3a6e60e0acf7f9f9cf47427c78fb2c",
         )
         self.assertEqual(len(new_ids), 19)
+        self.assertEqual(len(d42_ids), 4)
+        self.assertEqual(
+            {test_id.rsplit(".", 1)[-1] for test_id in d42_ids},
+            {
+                "test_d42_linux_native_public_surface_delegates_without_raw_identity",
+                "test_d42_direct_module_context_loads_linux_supervisor",
+                "test_d42_linux_production_path_disables_automatic_retry",
+                "test_d42_posix_nested_sampler_never_claims_group_closure",
+            },
+        )
+        self.assertEqual(len(d42c_ids), 1)
+        self.assertEqual(
+            {test_id.rsplit(".", 1)[-1] for test_id in d42c_ids},
+            {
+                "test_d42c_native_windows_public_surface_fails_closed_before_mutation",
+            },
+        )
 
 
 if __name__ == "__main__":

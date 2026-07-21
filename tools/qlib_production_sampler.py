@@ -166,9 +166,7 @@ class PhaseRecorder:
         if self.progress_path is None:
             return
         payload = self.snapshot(**overrides)
-        temporary = self.progress_path.with_name(
-            f".{self.progress_path.name}.{os.getpid()}.tmp"
-        )
+        temporary = _progress_temporary_path(self.progress_path)
         try:
             self.progress_path.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_text(
@@ -346,6 +344,33 @@ def _progress_path(environment: dict[str, str] | None = None) -> Path | None:
     return Path(raw) if raw else None
 
 
+def _progress_temporary_path(
+    progress_path: Path,
+    *,
+    platform_name: str | None = None,
+    process_id: int | None = None,
+    monotonic_nonce: int | None = None,
+) -> Path:
+    """Return a task-local temp path without exposing a POSIX process id."""
+
+    platform = os.name if platform_name is None else platform_name
+    if platform == "nt":
+        nonce = str(os.getpid() if process_id is None else process_id)
+    else:
+        raw_nonce = str(
+            time.monotonic_ns() if monotonic_nonce is None else monotonic_nonce
+        ).encode("ascii")
+        nonce = "linux-" + hashlib.sha256(raw_nonce).hexdigest()[:16]
+    return progress_path.with_name(f".{progress_path.name}.{nonce}.tmp")
+
+
+def _gcloud_executable(*, platform_name: str | None = None) -> str:
+    """Use the installed platform-native Google Cloud CLI launcher."""
+
+    platform = os.name if platform_name is None else platform_name
+    return "gcloud.cmd" if platform == "nt" else "gcloud"
+
+
 def _gcloud_text(
     arguments: list[str], deadline: Deadline, counters: CommandCounters
 ) -> str:
@@ -353,7 +378,7 @@ def _gcloud_text(
     timeout = max(0.05, deadline.remaining_seconds())
     try:
         completed = subprocess.run(
-            ["gcloud.cmd", *arguments],
+            [_gcloud_executable(), *arguments],
             cwd=REPOSITORY_ROOT,
             check=False,
             capture_output=True,

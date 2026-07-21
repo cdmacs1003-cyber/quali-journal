@@ -17,7 +17,6 @@ import json
 import math
 import os
 import re
-import signal
 import subprocess
 import sys
 import tempfile
@@ -92,6 +91,34 @@ _WIN32_WAIT_FAILED = 0xFFFFFFFF
 _WIN32_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 _WIN32_PROCESS_TREE_WAIT_MS = 5000
 _WIN32_PROCESS_TREE_MAX_PASSES = 3
+WINDOWS_NATIVE_OBSERVER_NOT_APPROVED = "WINDOWS_NATIVE_OBSERVER_NOT_APPROVED"
+
+
+def _current_platform_name() -> str:
+    """Return only the dispatch datum needed by the public platform guard."""
+
+    return os.name
+
+
+def _uses_linux_native_supervisor() -> bool:
+    """Select the Linux authority boundary without importing it on Windows."""
+
+    return _current_platform_name() != "nt"
+
+
+def _linux_supervisor_api() -> Any:
+    """Load the dependency-free Linux supervisor only for the POSIX path."""
+
+    try:
+        from tools import qlib_linux_process_supervisor
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"tools", "tools.qlib_linux_process_supervisor"}:
+            raise
+        # Direct execution (``python tools/qlib_traffic_observer.py``) places
+        # the tools directory, rather than the repository root, on sys.path.
+        import qlib_linux_process_supervisor  # type: ignore[no-redef]
+
+    return qlib_linux_process_supervisor
 
 
 class _Win32FileTime(ctypes.Structure):
@@ -786,6 +813,13 @@ class ObserverError(RuntimeError):
 
 class DuplicateObservationError(ObserverError):
     """Raised when an observation id already owns an artifact directory."""
+
+
+def _require_approved_public_observer_platform() -> None:
+    """Reject unsupported native Windows before any observable side effect."""
+
+    if _current_platform_name() == "nt":
+        raise ObserverError(WINDOWS_NATIVE_OBSERVER_NOT_APPROVED)
 
 
 class SamplerFailure(ObserverError):
@@ -2998,46 +3032,32 @@ def _terminate_windows_owned_tree(
 
 
 def _terminate_posix_sampler_process(process: subprocess.Popen[str]) -> dict[str, Any]:
-    cancellation_completed = False
-    if process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-            cancellation_completed = True
-        except (OSError, ProcessLookupError):
-            cancellation_completed = process.poll() is not None
-    try:
-        process.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait(timeout=2.0)
-            cancellation_completed = True
-        except (OSError, subprocess.SubprocessError):
-            cancellation_completed = False
     exited = process.poll() is not None
-    verified = exited and (cancellation_completed or process.returncode is not None)
+    direct_child_closed = exited and process.returncode is not None
     return {
-        "child_exit_state": "TERMINATED" if cancellation_completed else "EXITED",
+        "child_exit_state": "EXITED" if direct_child_closed else "RUNNING",
         "child_cancellation_state": (
-            "COMPLETED" if cancellation_completed else "NOT_REQUIRED" if verified else "FAILED"
+            "NOT_REQUIRED" if direct_child_closed else "FAILED"
         ),
-        "orphan_child_count": 0 if verified else 1,
-        "orphan_verification_status": "PASS" if verified else "NOT_VERIFIED",
+        # A nested sampler owns only its retained direct-child handle.  It may
+        # not safely signal a raw PID or claim descendant/orphan closure.  The
+        # outer Linux supervisor owns start-tick-guarded group signals, the
+        # registry, /proc corroboration, final drain, and seal.
+        "orphan_child_count": 1,
+        "orphan_verification_status": "NOT_VERIFIED",
         "process_tree_cleanup_status": (
-            "CLEANUP_COMPLETED"
-            if cancellation_completed
-            else "NOT_REQUIRED"
-            if verified
-            else "CLEANUP_FAILED"
+            "NOT_REQUIRED" if direct_child_closed else "CLEANUP_FAILED"
         ),
-        "process_tree_snapshot_status": "COMPLETE" if verified else "INCOMPLETE_SNAPSHOT",
+        "process_tree_snapshot_status": "INCOMPLETE_SNAPSHOT",
         "owned_process_count": 1,
-        "terminated_process_count": 1 if cancellation_completed else 0,
+        "terminated_process_count": 0,
         "identity_mismatch_count": 0,
-        "cleanup_failure_api": "NONE",
+        "cleanup_failure_api": "PopenHandle",
         "cleanup_failure_code": 0,
-        "cleanup_failure_phase": "NONE",
-        "cleanup_failure_reason": "NONE" if verified else "API_FAILURE",
+        "cleanup_failure_phase": "FINAL_VERIFICATION",
+        "cleanup_failure_reason": (
+            "INCOMPLETE_SNAPSHOT" if direct_child_closed else "API_FAILURE"
+        ),
     }
 
 
@@ -3096,8 +3116,9 @@ def _production_sample_once(argv: list[str], timeout_seconds: float) -> dict[str
                 getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
             )
-        else:
-            popen_options["start_new_session"] = True
+        # On Linux this sampler remains inside the already task-owned session
+        # and process group created by the native supervisor.  Starting another
+        # session here would escape the authoritative ownership boundary.
         ipc_started = time.monotonic()
         ownership_nonce = uuid.uuid4().hex
         try:
@@ -3309,6 +3330,7 @@ def _production_sample(
     timeout_seconds: float,
     *,
     required_target_contract: str | None = None,
+    allow_automatic_retry: bool = True,
 ) -> dict[str, Any]:
     started = time.monotonic()
     total_deadline_seconds = min(
@@ -3339,7 +3361,8 @@ def _production_sample(
         except SamplerFailure as exc:
             elapsed = time.monotonic() - started
             may_retry = (
-                exc.category == "VERIFIED_EXTERNAL_TRANSIENT"
+                allow_automatic_retry
+                and exc.category == "VERIFIED_EXTERNAL_TRANSIENT"
                 and retries < MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRIES
                 and elapsed < MAX_VERIFIED_EXTERNAL_TRANSIENT_RETRY_SECONDS
                 and elapsed < total_deadline_seconds
@@ -3451,6 +3474,7 @@ def start_observation(
     mode: str,
     required_target_contract: str | None = None,
 ) -> dict[str, Any]:
+    _require_approved_public_observer_platform()
     _validate_configuration(
         duration_seconds=duration_seconds,
         sample_interval_seconds=sample_interval_seconds,
@@ -3462,6 +3486,19 @@ def start_observation(
         if mode != "production" or required_target_contract not in PRODUCTION_TARGET_CONTRACTS:
             raise ObserverError("required target contract is invalid for this mode")
     production_sampler = _load_production_sampler() if mode == "production" else None
+
+    if _uses_linux_native_supervisor():
+        return _linux_supervisor_api().start_linux_observation(
+            artifact_root=artifact_root,
+            observation_id=observation_id,
+            duration_seconds=duration_seconds,
+            sample_interval_seconds=sample_interval_seconds,
+            max_gap_seconds=max_gap_seconds,
+            stale_after_seconds=stale_after_seconds,
+            mode=mode,
+            required_target_contract=required_target_contract,
+            sampler_argv=production_sampler,
+        )
 
     directory = _artifact_dir(artifact_root, observation_id)
     directory.parent.mkdir(parents=True, exist_ok=True)
@@ -3524,13 +3561,10 @@ def start_observation(
         "close_fds": True,
         "env": child_environment,
     }
-    if os.name == "nt":
-        popen_options["creationflags"] = (
-            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        )
-    else:
-        popen_options["start_new_session"] = True
+    popen_options["creationflags"] = (
+        getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    )
 
     try:
         child = subprocess.Popen(command, **popen_options)
@@ -3610,6 +3644,10 @@ def _run_worker(
     *,
     sampler_config_b64: str | None = None,
 ) -> int:
+    # Linux terminal/seal authority belongs exclusively to the native
+    # supervisor.  The legacy worker remains a Windows-only compatibility path.
+    if _uses_linux_native_supervisor():
+        return 70
     start = _read_json(directory / "start.json")
     if start is None:
         return 70
@@ -3907,6 +3945,12 @@ def _validate_final(start: dict[str, Any], final: dict[str, Any]) -> list[str]:
 def poll_observation(
     *, artifact_root: Path | str, observation_id: str
 ) -> dict[str, Any]:
+    _require_approved_public_observer_platform()
+    if _uses_linux_native_supervisor():
+        return _linux_supervisor_api().poll_linux_observation(
+            artifact_root=artifact_root,
+            observation_id=observation_id,
+        )
     directory = _artifact_dir(artifact_root, observation_id)
     start = _read_json(directory / "start.json")
     if start is None:
@@ -4095,8 +4139,16 @@ def stop_observation(
     reason: str,
     wait_seconds: float = 10.0,
 ) -> dict[str, Any]:
+    _require_approved_public_observer_platform()
     if reason not in STOP_REASONS:
         raise ObserverError("unsupported stop reason")
+    if _uses_linux_native_supervisor():
+        return _linux_supervisor_api().stop_linux_observation(
+            artifact_root=artifact_root,
+            observation_id=observation_id,
+            reason=reason,
+            wait_seconds=wait_seconds,
+        )
     directory = _artifact_dir(artifact_root, observation_id)
     current = poll_observation(artifact_root=artifact_root, observation_id=observation_id)
     if current.get("status") != "RUNNING":
@@ -4164,6 +4216,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
+        _require_approved_public_observer_platform()
         if args.command == "start":
             result = start_observation(
                 artifact_root=args.artifact_root,

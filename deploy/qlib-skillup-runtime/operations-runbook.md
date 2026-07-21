@@ -146,7 +146,7 @@ Remain at 0% until the immutable maxScale gate and every smoke check pass. Any f
 
 At each stage, preserve the exact candidate/stable split, execute the health/auth/Evidence/Trace checks, and record error, latency, instance, CPU, memory and cost signals.
 
-Every 10/15-minute window must use the canonical detached controller. The launcher must return promptly, and every later poll must run from a new shell using the same observation id. PowerShell background jobs and a foreground sleep/observe loop are forbidden because their lifetime is coupled to the launching shell. The task-owned production sampler is passed only through the process environment, obtains identity material in its own memory, and emits sanitized JSON; its argv, identity material, raw URL, request text and raw output must never be persisted by the controller.
+Every 10/15-minute window must use the canonical detached controller on an approved Linux host. On Windows, only the tracked PowerShell-to-existing-WSL2 entrypoint is supported; direct native-Windows invocation fails closed with `WINDOWS_NATIVE_OBSERVER_NOT_APPROVED` before creating an artifact or process. The launcher must return promptly, and every later poll must run from a new shell using the same observation id. PowerShell background jobs and a foreground sleep/observe loop are forbidden because their lifetime is coupled to the launching shell. The task-owned production sampler is passed only through the process environment, obtains identity material in its own memory, and emits sanitized JSON; its argv, identity material, raw URL, request text and raw output must never be persisted by the controller.
 
 Before any percentage traffic mutation, run a short production-mode readiness observation at 0% candidate traffic through the same detached controller, Python/module path, working directory inheritance, sampler argv encoding, sanitized child environment and auth handoff used by the stage. It must complete and emit at least one valid health sample plus `import_status`, `dependency_status`, `auth_handoff_status`, `target_construction_status`, `health_sample_status` and `readiness_status` equal to `PASS`. Raw-response and identity-material persistence flags must be false. A missing field or mismatch is incomplete/STOP.
 
@@ -157,6 +157,10 @@ The sampler target contract is explicit:
 - `SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL`: both paths are independently constructed and reported; aggregate probes use the service target while functional probes use the candidate revision target.
 
 Never issue candidate-only functional calls to the service-wide split target unless a separately validated compatibility matrix proves every traffic-bearing revision implements those surfaces. Production stages require `SPLIT_AGGREGATE_AND_REVISION_FUNCTIONAL`. Smoke requires `REVISION_FUNCTIONAL`.
+
+The following legacy deployment-controller example is not a D42 operator
+entrypoint. Its Python process must be the approved Linux runtime. A Windows
+operator uses the tracked WSL2 fallback instead of entering these commands.
 
 ```powershell
 $OBSERVER_ROOT = '<task-owned-proofpack-root>/observer'
@@ -279,3 +283,94 @@ The R482 helper coupled the mutation and all verification dependencies behind on
 ## 7. Completion evidence and cleanup
 
 The R474 ProofPack must contain redacted pre/post configuration, stable and candidate revisions, immutable image digest and labels, traffic commands/results, stage observation timestamps, health/auth/Evidence/Trace results, leak/write zero counts, cost/capacity observations, rollback evidence if used, final repository state, manifest, and SHA256 register. Remove only task-owned local containers, networks and temporary artifacts. Create the single R474 Completion Report. Deployment remains incomplete until the owner provides exact new-digest R474 execution authorization and the post-deploy evidence passes.
+
+## D42 Linux native observer operator surface
+
+The D42 operator surface validates the platform-native Linux observer. It does not deploy, change traffic, access Production data, grant IAM, install WSL, or authorize the R474/R484 operations above. The authoritative remote validation workflow is `.github/workflows/qlib-linux-observer-acceptance.yml`. Its automatic trigger is restricted to the exact branch `r9znw-488d42-linux-observer-validation` and it runs only on GitHub-hosted `ubuntu-latest`.
+
+The workflow exposes only these operator states: `READY`, `RUNNING`, `PASS`, `HOLD`, `FAIL`, and `ROLLED_BACK`. `ROLLED_BACK` means that a task-owned mutation was safely reversed; for the validation-only workflow its expected value is `ROLLED_BACK_NOT_REQUIRED_NO_MUTATION`. A job or step failure is never converted to `PASS`. There is no automatic rerun, sleep-only repair, deploy step, environment, OIDC permission, service credential, package installation, Docker operation, or external service call.
+
+The workflow runs the fixed acceptance contract before the exact Linux/shared
+observer regression tier:
+
+- deterministic contract fixtures: 30 cases times 3, exactly 90 executions;
+- actual Linux process campaign: 12 cases times 10, exactly 120 executions;
+- fixed-seed stress campaign: 100 seeds, exactly 100 executions;
+- required total: exactly 310 executions, with zero automatic retries.
+
+The tracked `tools/qlib_linux_acceptance_test_tiers.json` manifest fixes the
+native-Win32 diagnostic IDs, dual-path legacy-Windows expectation IDs, and
+Linux-only IDs. It also binds the required public-Windows fail-closed test by
+exact ID and seals the complete discovered-test count and ID digest. The
+stdlib-only `tools/qlib_linux_acceptance_test_tiers.py` runner loads exactly the
+four approved observer test modules, proves that every excluded ID still
+exists, proves that every preserved Windows-native excluded class and method
+has no skip or
+expected-failure decorator or runtime flag, and executes the remaining
+Linux/shared suite once. Any failure,
+error, executed skip, expected failure, unexpected success, missing ID, or
+manifest drift fails the workflow. Pattern-based filtering and result-driven
+reruns are forbidden.
+
+The fixed 310 campaign artifact contains only `acceptance-result.json` and
+`manifest.json`. The separate platform-tier artifact contains only
+`linux-shared-regression.json` and `windows-native-support.json`. The latter
+records `WINDOWS_NATIVE_OBSERVER_NOT_APPROVED`; it is not evidence that the
+native Windows observer passed. Both bundles are limited to counts, allowlisted
+enums, and digests. The supervisor's `verify-artifact` command must reject any
+extra file, raw field, missing count, digest mismatch, residual task-owned
+process, unresolved wait, zombie, unrelated signal, timeout leak, Wrong-PASS,
+or inconsistent terminal/seal. Raw PID, command line, environment, identity,
+URL, token, response body, and raw log are forbidden in persistent evidence.
+
+The workflow declares `workflow_dispatch`, but a workflow that exists only on the validation branch does not provide an active default-branch manual button. Until the exact workflow is adopted on the default branch, record:
+
+```text
+OPERATOR_MANUAL_DISPATCH_STATE=DECLARED_NOT_DEFAULT_BRANCH_ACTIVE
+```
+
+Do not claim manual operator readiness from the declaration alone. The validation-branch push run at the exact commit is the authoritative D42 remote execution evidence.
+
+### D42C platform gate classification
+
+The pre-repair boundary is classified
+`MIXED_PLATFORM_BOUNDARY_GUARD_REQUIRED`. The native Win32 process-tree tests
+are legacy diagnostics, but the public observer API and CLI also fell through
+to the same unsupported launcher on Windows. The D42C guard now rejects native
+Windows at every public start, poll, stop, and CLI dispatch before artifact or
+process creation. POSIX dispatch continues only to the Linux supervisor.
+
+The native Win32 test bodies and their expectations remain unchanged and
+executable in a separately manifested diagnostic tier; they are not deleted,
+skipped, xfail-marked, or weakened. Dual-path tests whose Windows branch asserts
+the retired launcher remain required on Linux and are separated by exact ID
+only from the Windows portable tier. Their support verdict remains
+`WINDOWS_NATIVE_OBSERVER_NOT_APPROVED`. The platform artifact records both
+groups separately. Do not report this split as an all-platform PASS.
+
+The supported operator states are fixed as follows:
+
+| Operator route | Support state | Selection contract |
+|---|---|---|
+| GitHub-hosted `ubuntu-latest` | Required Linux primary | Exact validation branch and exact-SHA workflow only |
+| Windows PowerShell to existing WSL2 | Fallback; local result remains non-authoritative | Existing non-Docker WSL2 distribution only |
+| Windows PowerShell without WSL2 | `HOLD` | No installation; direct operator to the GitHub workflow |
+| Native Windows observer | `NOT_APPROVED` | Never selected automatically and never treated as Linux evidence |
+
+No operator entrypoint may fall through from WSL2 absence to native Win32
+execution. Native Win32 support requires a separate future approval and cannot
+be inferred from the portable shared regression.
+
+### Windows fallback without Linux commands
+
+A Windows operator may run the tracked `tools/qlib_linux_observer_operator.ps1` entrypoint; the operator does not enter Linux commands. The entrypoint checks only for an already installed non-Docker WSL2 distribution and explicitly excludes `docker-desktop` and `docker-desktop-data`. It never enables or installs WSL2, a distribution, Docker, a VM, a package, or a credential.
+
+If WSL2 or a distribution is absent, the entrypoint returns one sanitized line with `HOLD`, `NO_INSTALL_ATTEMPTED`, and the single next action `RUN_GITHUB_ACTIONS_OPERATOR_WORKFLOW`. If WSL2 is present, the entrypoint invokes the same fixed 90/120/100 supervisor acceptance and local-non-authoritative closed-artifact verifier while suppressing raw process output, then removes exactly that nonce-bound two-file temporary bundle only after semantic verification passes. A failed semantic verification preserves the sanitized bundle and returns `FAIL` without retry. A verified local WSL result remains `HOLD` with `LOCAL_WSL_ACCEPTANCE_VERIFIED_NOT_GITHUB` and evidence scope `LOCAL_WSL_FALLBACK_NOT_GITHUB`; it never substitutes for the exact-SHA GitHub-hosted acceptance result. Cleanup failure is `FAIL` and can never be promoted to local success.
+
+The deterministic absence-path smoke is:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/qlib_linux_observer_operator.ps1 -SmokeAbsencePath
+```
+
+Expected single-line state is `HOLD` with `cause=WSL2_NOT_AVAILABLE`, `safe_action=NO_INSTALL_ATTEMPTED`, `next_action=RUN_GITHUB_ACTIONS_OPERATOR_WORKFLOW`, and `evidence_scope=ABSENCE_PATH_SMOKE`. Exit zero in this explicit smoke mode means only that the safe absence behavior was verified; it is not Linux acceptance evidence.
