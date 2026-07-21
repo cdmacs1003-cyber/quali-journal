@@ -154,6 +154,33 @@ class QlibProductionSamplerTests(unittest.TestCase):
             <= set(self._fast_result()[0])
         )
 
+    def test_platform_native_gcloud_launcher_is_selected(self) -> None:
+        self.assertEqual(
+            sampler._gcloud_executable(platform_name="nt"), "gcloud.cmd"
+        )
+        self.assertEqual(
+            sampler._gcloud_executable(platform_name="posix"), "gcloud"
+        )
+
+    def test_posix_progress_temporary_name_does_not_contain_pid(self) -> None:
+        progress = Path("progress.json")
+        temporary = sampler._progress_temporary_path(
+            progress,
+            platform_name="posix",
+            process_id=424242,
+            monotonic_nonce=1,
+        )
+        self.assertTrue(temporary.name.startswith(".progress.json.linux-"))
+        self.assertTrue(temporary.name.endswith(".tmp"))
+        self.assertNotIn("424242", temporary.name)
+        windows_temporary = sampler._progress_temporary_path(
+            progress,
+            platform_name="nt",
+            process_id=424242,
+            monotonic_nonce=1,
+        )
+        self.assertIn("424242", windows_temporary.name)
+
     def _fast_result(self) -> tuple[dict[str, object], Path]:
         fixture = SamplerFixture()
         temporary = tempfile.TemporaryDirectory()

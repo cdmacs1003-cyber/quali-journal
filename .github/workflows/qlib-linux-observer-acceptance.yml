@@ -1,0 +1,208 @@
+name: QLIB Linux Observer Acceptance
+
+on:
+  push:
+    branches:
+      - r9znw-488d42-linux-observer-validation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qlib-linux-observer-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-observer-acceptance:
+    name: Linux observer acceptance (310 required executions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: READY - checkout exact validation revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: READY - fail-closed trigger and runner gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_ref="refs/heads/r9znw-488d42-linux-observer-validation"
+          if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
+            echo "operator_status=HOLD" >> "${GITHUB_STEP_SUMMARY}"
+            echo "cause=EXACT_VALIDATION_BRANCH_REQUIRED" >> "${GITHUB_STEP_SUMMARY}"
+            exit 2
+          fi
+          if [[ "$(uname -s)" != "Linux" ]]; then
+            echo "operator_status=HOLD" >> "${GITHUB_STEP_SUMMARY}"
+            echo "cause=LINUX_RUNNER_REQUIRED" >> "${GITHUB_STEP_SUMMARY}"
+            exit 2
+          fi
+          if [[ "${RUNNER_OS}" != "Linux" ]]; then
+            echo "operator_status=HOLD" >> "${GITHUB_STEP_SUMMARY}"
+            echo "cause=GITHUB_LINUX_RUNNER_IDENTITY_REQUIRED" >> "${GITHUB_STEP_SUMMARY}"
+            exit 2
+          fi
+          case "${ImageOS}" in
+            ubuntu22|ubuntu24) ;;
+            *)
+              echo "operator_status=HOLD" >> "${GITHUB_STEP_SUMMARY}"
+              echo "cause=ALLOWLISTED_RUNNER_IMAGE_OS_REQUIRED" >> "${GITHUB_STEP_SUMMARY}"
+              exit 2
+              ;;
+          esac
+          if [[ ! "${ImageVersion}" =~ ^[0-9]{8}\.[0-9]+\.[0-9]+$ ]]; then
+            echo "operator_status=HOLD" >> "${GITHUB_STEP_SUMMARY}"
+            echo "cause=ALLOWLISTED_RUNNER_IMAGE_VERSION_REQUIRED" >> "${GITHUB_STEP_SUMMARY}"
+            exit 2
+          fi
+          echo "operator_status=READY" >> "${GITHUB_STEP_SUMMARY}"
+          echo "operator_status_surface=READY,RUNNING,PASS,HOLD,FAIL,ROLLED_BACK" >> "${GITHUB_STEP_SUMMARY}"
+          echo "manual_dispatch_state=DECLARED_NOT_DEFAULT_BRANCH_ACTIVE" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: RUNNING - syntax and import gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            tools/qlib_linux_process_supervisor.py \
+            tools/qlib_linux_acceptance_test_tiers.py \
+            tools/qlib_traffic_observer.py \
+            tools/qlib_production_sampler.py \
+            tools/test_qlib_linux_process_supervisor.py \
+            tools/test_qlib_traffic_observer.py \
+            tools/test_qlib_observer_evidence_contract.py \
+            tools/test_qlib_production_sampler.py
+          python3 - <<'PY'
+          from tools import qlib_linux_process_supervisor
+          from tools import qlib_production_sampler
+          from tools import qlib_traffic_observer
+
+          assert qlib_linux_process_supervisor is not None
+          assert qlib_production_sampler is not None
+          assert qlib_traffic_observer is not None
+          PY
+          echo "operator_status=RUNNING" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: RUNNING - execute fixed 90 plus 120 plus 100 campaign
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_directory="${RUNNER_TEMP}/r9znw-488d42-linux-observer-evidence"
+          python3 tools/qlib_linux_process_supervisor.py acceptance \
+            --output "${evidence_directory}" \
+            --deterministic-repeats 3 \
+            --actual-repeats 10 \
+            --stress-seeds 100 \
+            --git-commit-sha "${GITHUB_SHA}" \
+            --runner-image-os "${ImageOS}" \
+            --runner-image-version "${ImageVersion}" \
+            --operator-manual-dispatch-state DECLARED_NOT_DEFAULT_BRANCH_ACTIVE
+
+      - name: RUNNING - verify closed sanitized evidence
+        id: acceptance_verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_directory="${RUNNER_TEMP}/r9znw-488d42-linux-observer-evidence"
+          test -f "${evidence_directory}/acceptance-result.json"
+          test -f "${evidence_directory}/manifest.json"
+          file_count="$(find "${evidence_directory}" -maxdepth 1 -type f -printf '.' | wc -c)"
+          entry_count="$(find "${evidence_directory}" -mindepth 1 -maxdepth 1 -printf '.' | wc -c)"
+          test "${file_count}" -eq 2
+          test "${entry_count}" -eq 2
+          python3 tools/qlib_linux_process_supervisor.py verify-artifact \
+            --input "${evidence_directory}"
+
+      - name: RUNNING - exact Linux shared regression tier
+        id: platform_tier
+        shell: bash
+        run: |
+          set -euo pipefail
+          platform_evidence_directory="${RUNNER_TEMP}/r9znw-488d42c-platform-tier-evidence"
+          python3 tools/qlib_linux_acceptance_test_tiers.py \
+            --manifest tools/qlib_linux_acceptance_test_tiers.json \
+            --output "${platform_evidence_directory}"
+          test -f "${platform_evidence_directory}/linux-shared-regression.json"
+          test -f "${platform_evidence_directory}/windows-native-support.json"
+          file_count="$(find "${platform_evidence_directory}" -maxdepth 1 -type f -printf '.' | wc -c)"
+          entry_count="$(find "${platform_evidence_directory}" -mindepth 1 -maxdepth 1 -printf '.' | wc -c)"
+          test "${file_count}" -eq 2
+          test "${entry_count}" -eq 2
+
+      - name: FAIL - verify closed platform diagnostic
+        id: platform_failure_verifier
+        if: ${{ always() && steps.platform_tier.outcome == 'failure' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          try:
+              from pathlib import Path
+              from tools import qlib_linux_acceptance_test_tiers as tiers
+              result = tiers.failure_evidence_verifier_main(
+                  Path(os.environ["RUNNER_TEMP"])
+                  / "r9znw-488d42c-platform-tier-evidence"
+              )
+          except BaseException:
+              print("failure_evidence_verdict=REJECTED")
+              raise SystemExit(2)
+          raise SystemExit(result)
+          PY
+
+      - name: EVIDENCE - publish closed sanitized acceptance
+        if: ${{ always() && steps.acceptance_verifier.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r9znw-488d42-linux-observer-acceptance
+          path: |
+            ${{ runner.temp }}/r9znw-488d42-linux-observer-evidence/acceptance-result.json
+            ${{ runner.temp }}/r9znw-488d42-linux-observer-evidence/manifest.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: PASS - publish platform-tier evidence
+        if: ${{ steps.platform_tier.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r9znw-488d42c-platform-tier-evidence
+          path: |
+            ${{ runner.temp }}/r9znw-488d42c-platform-tier-evidence/linux-shared-regression.json
+            ${{ runner.temp }}/r9znw-488d42c-platform-tier-evidence/windows-native-support.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: FAIL - publish closed platform diagnostic
+        if: ${{ always() && steps.platform_failure_verifier.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r9znw-488d42c-platform-tier-failure
+          path: ${{ runner.temp }}/r9znw-488d42c-platform-tier-evidence/platform-tier-failure.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: PASS - operator summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "operator_status=PASS" >> "${GITHUB_STEP_SUMMARY}"
+          echo "required_execution_total=310/310" >> "${GITHUB_STEP_SUMMARY}"
+          echo "linux_shared_regression=PASS" >> "${GITHUB_STEP_SUMMARY}"
+          echo "windows_native_observer=NOT_APPROVED" >> "${GITHUB_STEP_SUMMARY}"
+          echo "automatic_retry_count=0" >> "${GITHUB_STEP_SUMMARY}"
+          echo "unrelated_workflow_or_deploy_count=0" >> "${GITHUB_STEP_SUMMARY}"
+          echo "rollback_state=ROLLED_BACK_NOT_REQUIRED_NO_MUTATION" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: FAIL - sanitized operator summary
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          echo "operator_status=FAIL" >> "${GITHUB_STEP_SUMMARY}"
+          echo "safe_action=NO_RETRY_NO_DEPLOY_NO_EXTERNAL_MUTATION" >> "${GITHUB_STEP_SUMMARY}"
+          echo "next_action=INSPECT_SANITIZED_ACCEPTANCE_CASE_ENUM" >> "${GITHUB_STEP_SUMMARY}"

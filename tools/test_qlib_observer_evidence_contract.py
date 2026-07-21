@@ -1638,6 +1638,45 @@ class R488D33CanonicalObserverEvidenceContractTests(unittest.TestCase):
         self.assertEqual(result["ambiguity_count"], 0)
         self.assertTrue(result["strict_gate"])
 
+    def test_linux_poller_and_stop_cannot_author_terminal_artifacts(self) -> None:
+        api = mock.Mock()
+        api.poll_linux_observation.return_value = {
+            "observation_id": "linux-authority-fixture",
+            "status": "RUNNING",
+            "verification_status": "NOT_VERIFIED",
+        }
+        api.stop_linux_observation.return_value = {
+            "observation_id": "linux-authority-fixture",
+            "status": "HOLD",
+            "verification_status": "NOT_VERIFIED",
+            "reason": "TASK_CLEANUP",
+        }
+        with mock.patch.object(
+            observer, "_uses_linux_native_supervisor", return_value=True
+        ), mock.patch.object(
+            observer, "_linux_supervisor_api", return_value=api
+        ), mock.patch.object(
+            observer, "_write_incomplete"
+        ) as write_terminal, mock.patch.object(
+            observer, "_acquire_terminal_claim"
+        ) as acquire_terminal:
+            polled = observer.poll_observation(
+                artifact_root=Path("synthetic-root"),
+                observation_id="linux-authority-fixture",
+            )
+            stopped = observer.stop_observation(
+                artifact_root=Path("synthetic-root"),
+                observation_id="linux-authority-fixture",
+                reason="TASK_CLEANUP",
+                wait_seconds=0.0,
+            )
+
+        write_terminal.assert_not_called()
+        acquire_terminal.assert_not_called()
+        self.assertEqual(polled["status"], "RUNNING")
+        self.assertEqual(stopped["status"], "HOLD")
+        self.assertNotIn("pid", json.dumps([polled, stopped], sort_keys=True))
+
 
 if __name__ == "__main__":
     unittest.main()
