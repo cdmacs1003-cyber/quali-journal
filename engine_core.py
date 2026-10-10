@@ -27,6 +27,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from tools._d4_utils import has_korean, korean_completion
 
 # ====================== 안전 가드/기본값 ======================
 logger = logging.getLogger("quali")
@@ -35,6 +36,8 @@ if not logger.handlers:
 
 USER_AGENT = os.getenv("QUALI_UA", "Mozilla/5.0 (QualiNewsBot)")
 REQUEST_TO = int(os.getenv("QUALI_REQ_TO", "12"))
+RUN_MODE = os.getenv("JJIPPA_RUN_MODE", "collect").strip().lower()
+COLLECT_PHASE = RUN_MODE != "publish"
 
 # Configuration defaults are defined in a dedicated module to ensure
 # consistency across the various subsystems.  Import the unified
@@ -176,40 +179,43 @@ def _clean_for_translation(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-def _translate_en_to_ko(text: str) -> str | None:
-    # 발행 모드에서만 동작
-    collect_phase = bool(globals().get("COLLECT_PHASE", os.getenv("JJIPPA_RUN_MODE", "collect").lower() == "collect"))
-    if collect_phase or not text or not isinstance(text, str):
+def _openai_korean(messages: list, model: str | None = None) -> str | None:
+    """All engine AI paths share the publish-only and disable guards."""
+    if COLLECT_PHASE or os.getenv("QUALI_DISABLE_OPENAI", "0") == "1":
         return None
-    if os.getenv("QUALI_DISABLE_OPENAI", "0") == "1":
-        return None
-    if not _OPENAI_KEY:
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
         return None
     try:
         payload = {
-            "model": _OPENAI_MODEL,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a professional translator. Translate English news/article text into natural Korean. Preserve lists and simple markdown. Do not add commentary.",
-                },
-                {"role": "user", "content": text[:12000]},
-            ],
+            "model": model or os.getenv("OPENAI_TRANSLATE_MODEL") or "gpt-4o",
+            "messages": messages,
             "temperature": 0.2,
         }
         r = requests.post(
-            _OPENAI_URL,
-            headers={"Authorization": f"Bearer {_OPENAI_KEY}", "Content-Type": "application/json"},
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             data=json.dumps(payload),
             timeout=(8, 12),
         )
         if not r.ok:
+            logger.warning("OpenAI Korean generation failed (HTTP %s)", r.status_code)
             return None
-        data = r.json()
-        msg = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
-        return (msg or "").strip() or None
-    except Exception:
+        return korean_completion(r.json())
+    except (requests.RequestException, ValueError):
+        logger.warning("OpenAI Korean generation failed (transport/response)")
         return None
+
+
+def _translate_en_to_ko(text: str, model: str | None = None) -> str | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    if has_korean(text) and not _is_mostly_english(text):
+        return text
+    return _openai_korean([
+        {"role": "system", "content": "You are a professional translator. Translate English news/article text into natural Korean. Preserve lists and simple markdown. Do not add commentary."},
+        {"role": "user", "content": text[:12000]},
+    ], model=model)
 
 
 # ====================== QG / FC ======================
@@ -1182,42 +1188,20 @@ def fetch_articles(cfg: dict | None = None) -> List[Dict]:
 
                 eng_src_text, _, _, _ = _extract_main_text_from_html(raw_html or "")
                 eng_src = _clean_for_translation(eng_src_text or desc or title or "")
-                summary_ko_text = _best_ko_summary(eng_src)
+                summary_ko_text = _best_ko_summary(eng_src) if has_korean(eng_src) else ""
 
                 qg = quality_gate(art_url, raw_html, title, label, cfg)
                 three_en = (_sentences(desc) or _sentences(eng_src) or ["Pending editor review"])[:3]
                 while len(three_en) < 3:
                     three_en.append("Pending editor review")
 
-                # 발행 단계에서만 1문장 번역
-                if (not COLLECT_PHASE) and _OPENAI_KEY:
-                    three_ko = []
-                    for ln in three_en:
-                        payload = {
-                            "model": MODEL_HINT or _OPENAI_MODEL,
-                            "messages": [
-                                {"role": "system", "content": "Translate to concise Korean. ONE sentence only."},
-                                {"role": "user", "content": (ln or "")},
-                            ],
-                            "temperature": 0.2,
-                        }
-                        try:
-                            r = requests.post(
-                                _OPENAI_URL,
-                                headers={"Authorization": f"Bearer {_OPENAI_KEY}", "Content-Type": "application/json"},
-                                data=json.dumps(payload),
-                                timeout=(8, 12),
-                            )
-                            if r.ok:
-                                data = r.json()
-                                ko = ((data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip() or ln)
-                            else:
-                                ko = ln
-                        except Exception:
-                            ko = ln
-                        three_ko.append(ko)
-                else:
-                    three_ko = three_en
+                # Keep source English separate when translation is unavailable.
+                three_ko = [
+                    ln if has_korean(ln) else
+                    (_translate_en_to_ko(ln, model=MODEL_HINT) or "")
+                    if ln != "Pending editor review" else ""
+                    for ln in three_en
+                ]
 
                 fc = fact_check(art_url, raw_html, title, three_ko, cfg)
                 fc_status, fc_score = fc["status"], int(fc["score"])
@@ -1358,27 +1342,9 @@ def export_html(md_path: str, cfg: dict | None = None) -> None:
     def _ko_title(en: str, src: str) -> str:
         if not DUAL_TITLE or not en:
             return ""
-        try:
-            ko = ""
-            if _OPENAI_KEY:
-                payload = {
-                    "model": feats.get("translate_model") or _OPENAI_MODEL,
-                    "messages": [{"role": "system", "content": "Translate to concise Korean. ONE sentence only."}, {"role": "user", "content": en}],
-                    "temperature": 0.2,
-                }
-                r = requests.post(
-                    _OPENAI_URL,
-                    headers={"Authorization": f"Bearer {_OPENAI_KEY}", "Content-Type": "application/json"},
-                    data=json.dumps(payload),
-                    timeout=(8, 12),
-                )
-                if r.ok:
-                    data = r.json()
-                    ko = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
-                if ko:
-                    return ko
-        except Exception:
-            pass
+        ko = _translate_en_to_ko(en, model=feats.get("translate_model"))
+        if ko:
+            return ko
         return _kr_one_liner(en, src)
 
     def _attr(s: str) -> str:
@@ -1576,32 +1542,13 @@ h1 {{ text-align:center; font-size:24px; }}
 def _editor_note_from_text(title: str, text: str, ko_title: str = "", source: str = "") -> str:
     base_hint = (ko_title or title or "").strip()
     core = _clean_for_translation(text or "")
-    if _OPENAI_KEY and core:
-        try:
-            payload = {
-                "model": os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o"),
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a senior editor for SMT/PCB manufacturing. Write ONE Korean sentence (30~60 chars) that captures the practical takeaway for process/quality engineers. No fluff, no emojis.",
-                    },
-                    {"role": "user", "content": f"제목: {base_hint}\n본문요약: {core[:1500]}"},
-                ],
-                "temperature": 0.2,
-            }
-            r = requests.post(
-                _OPENAI_URL,
-                headers={"Authorization": f"Bearer {_OPENAI_KEY}", "Content-Type": "application/json"},
-                data=json.dumps(payload),
-                timeout=(8, 12),
-            )
-            if r.ok:
-                data = r.json()
-                note = ((data.get("choices") or [{}])[0].get("message", {}).get("content", "")).strip()
-                if note:
-                    return " ".join(note.split())
-        except Exception:
-            pass
+    if core:
+        note = _openai_korean([
+            {"role": "system", "content": "You are a senior editor for SMT/PCB manufacturing. Write ONE Korean sentence (30~60 chars) that captures the practical takeaway for process/quality engineers. No fluff, no emojis."},
+            {"role": "user", "content": f"제목: {base_hint}\n본문요약: {core[:1500]}"},
+        ])
+        if note:
+            return " ".join(note.split())
     if base_hint:
         return f"{base_hint} — 공정·품질 관점 핵심만 요약"
     return "핵심만 요약해 전달합니다."
@@ -1612,7 +1559,8 @@ def postprocess_selected_for_publish(cfg: dict) -> None:
     sel_path = _selection_path(cfg)
     if not os.path.exists(sel_path):
         return
-    data = json.load(open(sel_path, "r", encoding="utf-8"))
+    with open(sel_path, "r", encoding="utf-8") as source:
+        data = json.load(source)
     changed = False
     new_articles = []
     for a in data.get("articles", []):
@@ -1686,6 +1634,8 @@ def load_config(path: str = "config.json") -> dict:
 
 
 def job_collect() -> None:
+    global RUN_MODE, COLLECT_PHASE
+    RUN_MODE, COLLECT_PHASE = "collect", True
     cfg = load_config("config.json")
     setup_rotating_logger(cfg["paths"]["log"])
     arts = fetch_articles(cfg)

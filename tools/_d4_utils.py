@@ -1,14 +1,13 @@
-﻿from qj_paths import rel as qj_rel
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import os, re, json, time, math, textwrap
+import os, re, json, math, logging
 from typing import List, Dict, Tuple, Optional
 import urllib.request, urllib.error
 
 # ------------------------------
 # Sentence split (very simple)
 # ------------------------------
-_SENT_SPLIT = re.compile(r'(?<=[.!??귨펯竊?)\s+')
+_SENT_SPLIT = re.compile(r'(?<=[.!?。！？])\s+')
 def split_sentences(txt: str) -> List[str]:
     txt = (txt or "").strip()
     if not txt:
@@ -75,8 +74,39 @@ def extractive_summary(text: str, title_hint: str = "", max_sent: int = 3) -> st
 # ------------------------------
 # Optional OpenAI call (translation / refine summary)
 # ------------------------------
+def has_korean(text: str) -> bool:
+    """Reject English-only values, including the old '요약: English' stub."""
+    if not isinstance(text, str):
+        return False
+    text = re.sub(r'^\s*요약\s*:\s*', '', text or '')
+    return bool(re.search(r'[가-힣]', text))
+
+
+def summary_text(value) -> str:
+    if isinstance(value, list):
+        value = ' '.join(x for x in value if isinstance(x, str))
+    return value.strip() if isinstance(value, str) else ''
+
+
+def korean_completion(obj: dict) -> Optional[str]:
+    """Only accept complete, non-refused Korean text from Chat Completions."""
+    try:
+        choice = obj['choices'][0]
+        message = choice['message']
+        content = message.get('content')
+        if choice.get('finish_reason') != 'stop' or message.get('refusal'):
+            return None
+        if isinstance(content, str) and has_korean(content):
+            return content.strip()
+    except (KeyError, IndexError, TypeError, AttributeError):
+        pass
+    return None
+
+
 def _openai_chat(messages, model: str = None, api_key: Optional[str] = None, timeout: int = 30) -> Optional[str]:
-    api_key = api_key or os.getenv("OPENAI_API_KEY") or ""
+    if os.getenv("QUALI_DISABLE_OPENAI", "0") == "1":
+        return None
+    api_key = (api_key or os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return None
     model = model or os.getenv("OPENAI_TRANSLATE_MODEL") or "gpt-4o-mini"
@@ -97,18 +127,26 @@ def _openai_chat(messages, model: str = None, api_key: Optional[str] = None, tim
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             payload = resp.read().decode("utf-8")
             obj = _json.loads(payload)
-            return obj["choices"][0]["message"]["content"].strip()
-    except Exception:
+            return korean_completion(obj)
+    except urllib.error.HTTPError as exc:
+        # Never log the key, request body, or provider response body.
+        logging.getLogger(__name__).warning("OpenAI translation failed (HTTP %s)", exc.code)
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        logging.getLogger(__name__).warning("OpenAI translation failed (transport/response)")
         return None
 
 def to_ko(text_en: str) -> str:
+    text_en = summary_text(text_en)
     if not text_en:
         return ""
+    if has_korean(text_en):
+        return text_en
     out = _openai_chat([
         {"role":"system","content":"You are a professional Korean technical editor. Translate concisely into natural Korean."},
         {"role":"user","content":f"Translate into Korean, keep it within 2-3 short sentences:\n\n{text_en}"}
     ])
-    return out or text_en  # fallback: return English if API not available
+    return out if out and has_korean(out) else ""
 
 # ------------------------------
 # Core enrich logic
@@ -123,8 +161,11 @@ def enrich_item(it: dict, max_sent: int = 3) -> dict:
     out = dict(it)
     if not out.get("summary_en"):
         out["summary_en"] = extractive_summary(desc, t, max_sent=max_sent) or (desc[:300] + ("..." if len(desc)>300 else ""))
-    if not out.get("summary_ko"):
+    if not has_korean(summary_text(out.get("summary_ko"))):
+        if out.get("summary_ko"):
+            out["summary_ko_previous"] = out["summary_ko"]
         out["summary_ko"] = to_ko(out["summary_en"])
+        out["summary_ko_status"] = "available" if out["summary_ko"] else "unavailable"
     return out
 
 def detect_article_list(j: dict) -> Tuple[str, list]:
