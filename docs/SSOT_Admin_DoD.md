@@ -392,3 +392,33 @@ Invoke-WebRequest "https://admin.standardai.co.kr/?v=$(Get-Random)" -Headers @{"
 ### SSOT — GitHub CLI(gh) 사용 시 토큰 규칙
 - GitHub Actions에서 `gh`를 사용하는 step은 반드시 `env: GH_TOKEN: ${{ github.token }}`(또는 `${{ secrets.GITHUB_TOKEN }}`)을 설정한다.
 <!-- SSOT-GH-CLI-GH_TOKEN END -->
+
+## 뉴스 번역 경로 — 소스 수정과 운영 반영의 구분
+
+검토 기준: main `f2b08bf0e0bab97b8a699faffc8be3e35467892a`에서 분기한
+`fix/openai-translation-integrity-20261010`. 이번 수정은 기존 뉴스 도구의
+import 오류, 영어를 한국어로 저장하는 경로, 엔진 API 설정 참조와 호출 가드를 다룹니다.
+
+- `tools/enrich_cards.py`는 기본 실행에서 API를 호출하지 않습니다.
+  `--translate`를 명시하면 기존 키와 모델 설정으로 누락된 번역만 시도합니다.
+  한국어 결과가 없으면 빈 값과 `summary_ko_status`를 남깁니다.
+  과거의 영어 대체 값은 `summary_ko_rejected`에 보존합니다.
+  `ok=true`는 JSON 저장 성공이며 전체 번역 성공을 뜻하지 않습니다.
+- 엔진의 모든 AI 호출은 발행 모드·키 존재·`QUALI_DISABLE_OPENAI`를 동일하게
+  확인합니다. 수집 작업은 이전 발행 작업의 모드가 남아 있어도 API를 호출하지 않습니다.
+- 실제 API 연결, 조직 등급, 요청 한도, 지출 한도와 현재 운영 이미지에 이 코드가
+  포함되는지는 이 변경의 오프라인 검증 범위에 포함되지 않습니다.
+
+| 저장소의 배포 경로 | 소스에서 확인되는 사실 | 운영 판단의 한계 |
+|---|---|---|
+| `docs/infra/cloudbuild.yaml` | 기본 `asia-northeast3 / quali-journal`, 루트 Dockerfile 빌드, OpenAI 키 연결 선언 | 현재 사용 중인 빌드 경로인지 미확인 |
+| `.github/workflows/ci-deploy-prod.yml` | main 변경 시 `asia-northeast1 / quali-admin-domap` 대상; `quali-journal-admin-dev`의 기존 이미지를 승격 | 체크아웃한 최신 소스를 새 이미지로 빌드하는 경로가 아님 |
+| 루트 `Dockerfile` | `admin/`, 설정·데이터 등 복사; `tools/`, `engine_core.py`, `config_schema.py`는 복사 목록에 없음 | 뉴스 번역 수정이 이 이미지에 포함된다고 볼 수 없음 |
+
+배포 정의·서비스·Secret 연결은 이번 수정에서 바꾸지 않습니다. 운영 반영 전에
+실제 실행 서비스, 진입점, 이미지 digest와 소스 버전을 먼저 대조해야 합니다.
+main 병합은 자동 배포를 유발할 수 있으므로 소스 검토 완료를 배포 승인으로 간주하지 않습니다.
+
+검증 명령: `python -m unittest discover -s tools/tests -p test_translation_integrity.py -v`.
+키 없음, 호출 중지, 수집 모드, HTTP 오류, 시간 초과, 불완전 응답, 기존 값 재사용,
+JSON 저장 및 HTML 제목 경로를 합성 데이터로 검사합니다. 실행 안내는 `README_D4.txt`를 참조합니다.
